@@ -9,7 +9,9 @@ import { ViewButtons } from "@/components/viewer/ViewButtons";
 import { DisplayModeBar } from "@/components/viewer/DisplayModeBar";
 import { VisibilityPanel } from "@/components/viewer/VisibilityPanel";
 import { MetricsPanel } from "@/components/viewer/MetricsPanel";
+import { ExportPanel } from "@/components/viewer/ExportPanel";
 import { GlowPanel } from "@/components/shared/GlowPanel";
+import { Separator } from "@/components/ui/separator";
 
 export function ViewerTab() {
   const { tiles, activeTileId } = useProject();
@@ -59,6 +61,9 @@ export function ViewerTab() {
             <GlowPanel className="flex-1" glow="magenta">
               <div className="p-4">
                 <MetricsPanel tile={activeTile} />
+                <Separator className="my-4" />
+                <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Export</div>
+                <ExportPanel tile={activeTile} visibility={visibility} />
               </div>
             </GlowPanel>
           </div>

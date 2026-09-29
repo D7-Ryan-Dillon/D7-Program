@@ -33,6 +33,7 @@ type ProjectState = {
   leaveProject: () => void;
   addTile: (tile: ParsedTile) => void;
   removeTile: (id: string) => void;
+  updateTile: (id: string, patch: Partial<ParsedTile>) => void;
   setActiveTile: (id: string | null) => void;
   lastUsedCode: string | null;
 };
@@ -73,6 +74,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setActiveTileId((current) => (current === id ? null : current));
   }, []);
 
+  const updateTile = useCallback((id: string, patch: Partial<ParsedTile>) => {
+    setTiles((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  }, []);
+
   const value = useMemo<ProjectState>(
     () => ({
       projectCode,
@@ -82,10 +87,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       leaveProject,
       addTile,
       removeTile,
+      updateTile,
       setActiveTile: setActiveTileId,
       lastUsedCode,
     }),
-    [projectCode, tiles, activeTileId, enterProject, leaveProject, addTile, removeTile, lastUsedCode],
+    [projectCode, tiles, activeTileId, enterProject, leaveProject, addTile, removeTile, updateTile, lastUsedCode],
   );
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;

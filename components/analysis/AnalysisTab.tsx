@@ -1,37 +1,41 @@
 "use client";
 
+import { useMemo } from "react";
 import { useProject } from "@/lib/project-store";
-import { GlowPanel } from "@/components/shared/GlowPanel";
-
-const DESCRIPTORS = [
-  "Carved", "Stepped", "Porous", "Continuous", "Resistant", "Threaded",
-  "Graduated", "Non-hierarchical Circulation", "Force-driven", "Light-filled",
-  "Monumental", "Spatial Density",
-];
+import { TileSwitcher } from "@/components/shared/TileSwitcher";
+import { UploadZone } from "@/components/viewer/UploadZone";
+import { DescriptorCard } from "@/components/analysis/DescriptorCard";
+import { scoreTile } from "@/lib/scoring/descriptors";
 
 export function AnalysisTab() {
   const { tiles, activeTileId } = useProject();
   const activeTile = tiles.find((t) => t.id === activeTileId) ?? tiles[0];
+  const results = useMemo(() => (activeTile ? scoreTile(activeTile) : []), [activeTile]);
+
+  if (!activeTile) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-8">
+        <div className="w-full max-w-xl">
+          <UploadZone />
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex h-full items-center justify-center p-8">
-      <GlowPanel className="w-full max-w-2xl" glow="orange">
-        <div className="p-8 text-center">
-          <div className="font-mono text-[11px] uppercase tracking-label text-orange">Coming next</div>
-          <h2 className="mt-2 text-lg font-medium">12-descriptor scoring</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-            {activeTile ? `${activeTile.name} is loaded and ready.` : "Load a tile in the Viewer tab first."} This tab
-            will score it -- qualitative and quantitative -- against all twelve studio descriptors.
-          </p>
-          <div className="mx-auto mt-6 grid max-w-lg grid-cols-2 gap-2 sm:grid-cols-3">
-            {DESCRIPTORS.map((d) => (
-              <div key={d} className="rounded-full border-hair px-3 py-1 font-mono text-[10px] uppercase tracking-label text-muted-foreground">
-                {d}
-              </div>
-            ))}
-          </div>
+    <div className="flex h-full flex-col gap-4">
+      <TileSwitcher />
+      <div>
+        <div className="text-base font-medium">{activeTile.name}</div>
+        <div className="font-mono text-[11px] text-muted-foreground">
+          scored against all twelve studio descriptors · id {activeTile.id}
         </div>
-      </GlowPanel>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {results.map((r) => (
+          <DescriptorCard key={r.key} result={r} />
+        ))}
+      </div>
     </div>
   );
 }
