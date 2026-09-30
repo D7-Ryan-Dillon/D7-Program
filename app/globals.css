@@ -146,6 +146,30 @@
       0 8px 30px -12px oklch(0 0 0 / 60%);
   }
 
+  /* Same frosted treatment, but with a denser, EVEN backing -- for the
+     sticky header, where page content keeps scrolling underneath it.
+     .glass-panel's own gradient starts nearly transparent at its top edge
+     (a highlight sheen that's fine on a card but, on a thin header bar,
+     left exactly the row the logo/title sits in noticeably less covered
+     than the rest -- the "some parts don't blur as much" gap). Every stop
+     here stays at least ~80% opaque so coverage reads the same everywhere
+     across the bar's own short height, while the gradient itself still
+     gives it a faint top-to-bottom sheen. */
+  .glass-panel-strong {
+    background: linear-gradient(
+      165deg,
+      oklch(0.14 0 0 / 80%),
+      oklch(0.12 0 0 / 88%) 40%,
+      oklch(0.06 0 0 / 94%)
+    );
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid var(--border);
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 8%),
+      0 8px 30px -12px oklch(0 0 0 / 60%);
+  }
+
   /* Brand gradient text, reserved for one or two hero labels max */
   .text-gradient-brand {
     background: linear-gradient(90deg, var(--magenta), var(--orange));

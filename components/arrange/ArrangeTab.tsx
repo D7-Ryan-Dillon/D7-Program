@@ -92,7 +92,7 @@ export function ArrangeTab() {
         const voidMesh = scene.getObjectByName("void");
         if (foam) foam.visible = visibility.foam;
         if (voidMesh) voidMesh.visible = visibility.void;
-        const m = instanceMatrix(tile.tileFt, inst.mirror, inst.rot, inst.pos);
+        const m = instanceMatrix(tile.tileFt, inst.mirror, inst.rotZ, inst.posFt, inst.scale, inst.tilt);
         const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
         m.decompose(p, q, s);
         scene.position.copy(p);
@@ -133,9 +133,9 @@ export function ArrangeTab() {
   };
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[280px_1fr_280px]">
-        <div className="flex flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(300px,1fr)_auto] gap-4 lg:grid-cols-[280px_1fr_280px] lg:grid-rows-[minmax(0,1fr)]">
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
           <GlowPanel glow="magenta">
             <div className="p-4">
               <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Bank</div>
@@ -150,7 +150,7 @@ export function ArrangeTab() {
           </GlowPanel>
         </div>
 
-        <div className="flex min-h-[420px] flex-col gap-3">
+        <div className="flex min-h-0 flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="font-mono text-xs text-muted-foreground">
               {assembly.instances.length} piece(s)
@@ -172,7 +172,7 @@ export function ArrangeTab() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
           <GlowPanel glow="magenta">
             <div className="p-4">
               <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>

@@ -23,7 +23,7 @@ export function ViewerTab() {
   const [colors, setColors] = useState<MeshColors>({ foam: "#e8a6c8", void: "#1c1c1f" });
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       <TileSwitcher />
 
       {!activeTile ? (
@@ -33,8 +33,8 @@ export function ViewerTab() {
           </div>
         </div>
       ) : (
-        <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[1fr_280px]">
-          <div className="flex min-h-[420px] flex-col gap-3">
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(300px,1fr)_auto] gap-4 lg:grid-cols-[1fr_280px] lg:grid-rows-[minmax(0,1fr)]">
+          <div className="flex min-h-0 flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <ViewButtons active={activeView} onChange={setActiveView} />
               <DisplayModeBar mode={displayMode} onChange={setDisplayMode} />
@@ -51,7 +51,7 @@ export function ViewerTab() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-4">
+          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
             <GlowPanel glow="orange">
               <div className="p-4">
                 <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>

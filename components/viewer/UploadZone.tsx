@@ -4,7 +4,7 @@ import { useRef, useState, type DragEvent } from "react";
 import { toast } from "sonner";
 import { UploadCloud, FolderOpen, FileArchive } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ingestFromDataTransferItems, ingestFromFileList, ingestFromZipFile } from "@/lib/ingest";
+import { ingestFromDataTransferItems, ingestFromFileList, ingestFromZipFiles, type IngestResult } from "@/lib/ingest";
 import { useProject } from "@/lib/project-store";
 
 type InputWithDirProps = React.InputHTMLAttributes<HTMLInputElement> & {
@@ -19,12 +19,14 @@ export function UploadZone() {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
 
-  const handleTileResult = async (task: Promise<Awaited<ReturnType<typeof ingestFromFileList>>>) => {
+  const handleIngestResult = async (task: Promise<IngestResult>) => {
     setBusy(true);
     try {
-      const tile = await task;
-      addTile(tile);
-      toast.success(`Loaded ${tile.name}`);
+      const { tiles, errors } = await task;
+      for (const tile of tiles) addTile(tile);
+      if (tiles.length === 1) toast.success(`Loaded ${tiles[0].name}`);
+      else if (tiles.length > 1) toast.success(`Loaded ${tiles.length} tiles`);
+      for (const message of errors) toast.error(message);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Couldn't read that as a tile _analysis folder.");
     } finally {
@@ -36,7 +38,7 @@ export function UploadZone() {
     e.preventDefault();
     setDragOver(false);
     if (!e.dataTransfer.items?.length) return;
-    await handleTileResult(ingestFromDataTransferItems(e.dataTransfer.items));
+    await handleIngestResult(ingestFromDataTransferItems(e.dataTransfer.items));
   };
 
   return (
@@ -53,8 +55,8 @@ export function UploadZone() {
     >
       <UploadCloud className="h-8 w-8 text-muted-foreground" />
       <div>
-        <p className="text-sm">Drag a tile&apos;s <span className="font-mono">_analysis</span> folder here</p>
-        <p className="mt-1 text-xs text-muted-foreground">or choose it below — a .zip works too</p>
+        <p className="text-sm">Drag one or more tiles&apos; <span className="font-mono">_analysis</span> folders here</p>
+        <p className="mt-1 text-xs text-muted-foreground">or choose below — a parent folder or multiple .zips work too</p>
       </div>
       <div className="flex gap-2">
         <Button variant="outline" size="sm" disabled={busy} onClick={() => folderInputRef.current?.click()}>
@@ -74,7 +76,7 @@ export function UploadZone() {
         {...({ webkitdirectory: "true", directory: "true" } as InputWithDirProps)}
         multiple
         onChange={(e) => {
-          if (e.target.files?.length) void handleTileResult(ingestFromFileList(e.target.files));
+          if (e.target.files?.length) void handleIngestResult(ingestFromFileList(e.target.files));
           e.target.value = "";
         }}
       />
@@ -82,10 +84,10 @@ export function UploadZone() {
         ref={zipInputRef}
         type="file"
         accept=".zip"
+        multiple
         className="hidden"
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) void handleTileResult(ingestFromZipFile(file));
+          if (e.target.files?.length) void handleIngestResult(ingestFromZipFiles(e.target.files));
           e.target.value = "";
         }}
       />

@@ -15,11 +15,14 @@ export function DescriptorCard({ result }: { result: DescriptorResult }) {
         )}
       </div>
 
-      <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-magenta to-orange transition-[width]"
-          style={{ width: `${Math.round(result.score)}%` }}
-        />
+      <div className="mb-3 flex items-center gap-2">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/5">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-magenta to-orange transition-[width]"
+            style={{ width: `${Math.round(result.score)}%` }}
+          />
+        </div>
+        <span className="font-mono text-xs tabular-nums text-foreground">{Math.round(result.score)}</span>
       </div>
 
       <div className="space-y-2 text-xs">

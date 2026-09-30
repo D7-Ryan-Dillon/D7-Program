@@ -6,6 +6,7 @@ import { OrbitControls, useGLTF, Environment } from "@react-three/drei";
 import * as THREE from "three";
 import type { ParsedTile } from "@/lib/types";
 import { ALL_VIEWS } from "@/lib/faceViews";
+import { useShiftToPan } from "@/lib/useShiftToPan";
 
 export type DisplayMode = "rendered" | "ghosted";
 export interface MeshVisibility {
@@ -125,6 +126,7 @@ export function ThreeViewport({
 }) {
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
   const [bounds, setBounds] = useState<Bounds>(DEFAULT_BOUNDS);
+  useShiftToPan(controlsRef);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-lg bg-black/40">

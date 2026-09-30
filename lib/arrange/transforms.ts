@@ -3,12 +3,15 @@ import type { FaceName } from "@/lib/types";
 export type Grid3 = [number, number, number];
 
 /**
- * Voxel transform conventions, exactly per HANDOFF.md section 5
- * (`transform_voxels`): mirror letters flip the void array about the tile
- * centre along that axis; rot is quarter turns about the vertical axis
- * through the tile centre, `np.rot90(void, rot, axes=(0,1))`. Mirror is
- * applied first, then rotation. Arrays are C-order, z fastest:
- * index = (x*ny + y)*nz + z.
+ * Voxel transform conventions: mirror letters flip the void array about the
+ * tile centre along that axis; rotZ is quarter turns about the vertical
+ * axis through the tile centre (HANDOFF section 5, `np.rot90(void, rot,
+ * axes=(0,1))`). tiltX/tiltY are an additional quarter-turn about the
+ * horizontal X or Y axis -- a placement-only extension for Arrange (never
+ * written back into a recipe, since recipes only ever define vertical-axis
+ * rotation); derived the same way as rotZ, just about a different fixed
+ * axis. Composition order is always mirror, then tilt, then rotZ. Arrays
+ * are C-order, z fastest: index = (x*ny + y)*nz + z.
  */
 export function mirrorAxis(src: Uint8Array, grid: Grid3, axis: 0 | 1 | 2): Uint8Array {
   const [nx, ny, nz] = grid;
@@ -40,14 +43,51 @@ export function rotate90Z(src: Uint8Array, grid: Grid3): Uint8Array {
   return out;
 }
 
-export function applyTransform(src: Uint8Array, grid: Grid3, mirror: string, rot: number): Uint8Array {
+/** One quarter turn about X: new[x,y,z] = old[x, z, ny-1-y]. Requires ny === nz. */
+export function rotate90X(src: Uint8Array, grid: Grid3): Uint8Array {
+  const [nx, ny, nz] = grid;
+  const out = new Uint8Array(src.length);
+  for (let x = 0; x < nx; x++) {
+    for (let y = 0; y < ny; y++) {
+      for (let z = 0; z < nz; z++) {
+        out[(x * ny + y) * nz + z] = src[(x * ny + z) * nz + (ny - 1 - y)];
+      }
+    }
+  }
+  return out;
+}
+
+/** One quarter turn about Y: new[x,y,z] = old[nz-1-z, y, x]. Requires nx === nz. */
+export function rotate90Y(src: Uint8Array, grid: Grid3): Uint8Array {
+  const [nx, ny, nz] = grid;
+  const out = new Uint8Array(src.length);
+  for (let x = 0; x < nx; x++) {
+    for (let y = 0; y < ny; y++) {
+      for (let z = 0; z < nz; z++) {
+        out[(x * ny + y) * nz + z] = src[((nz - 1 - z) * ny + y) * nz + x];
+      }
+    }
+  }
+  return out;
+}
+
+export interface Tilt {
+  axis: "x" | "y";
+  steps: 1 | 2 | 3;
+}
+
+export function applyTransform(src: Uint8Array, grid: Grid3, mirror: string, rotZ: number, tilt?: Tilt): Uint8Array {
   let g = src;
   for (const ch of mirror.toLowerCase()) {
     if (ch === "x") g = mirrorAxis(g, grid, 0);
     else if (ch === "y") g = mirrorAxis(g, grid, 1);
     else if (ch === "z") g = mirrorAxis(g, grid, 2);
   }
-  const k = ((Math.round(rot) % 4) + 4) % 4;
+  if (tilt) {
+    const rotateTilt = tilt.axis === "x" ? rotate90X : rotate90Y;
+    for (let i = 0; i < tilt.steps; i++) g = rotateTilt(g, grid);
+  }
+  const k = ((Math.round(rotZ) % 4) + 4) % 4;
   for (let i = 0; i < k; i++) g = rotate90Z(g, grid);
   return g;
 }

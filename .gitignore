@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# temp dev-testing sample data (not project code)
+/public/sample-tile-temp/
+/public/sample-tiles-temp/
+/erosion-workspace/

@@ -3,6 +3,7 @@
 import { LogOut } from "lucide-react";
 import { Logo } from "@/components/shared/Logo";
 import { TabNav, type WorkspaceTabKey } from "@/components/shared/TabNav";
+import { AddTilesButtons } from "@/components/shared/AddTilesButtons";
 import { Button } from "@/components/ui/button";
 import { useProject } from "@/lib/project-store";
 
@@ -10,7 +11,7 @@ export function Header({ activeTab, onTabChange }: { activeTab: WorkspaceTabKey;
   const { projectCode, leaveProject } = useProject();
 
   return (
-    <header className="glass-panel sticky top-4 z-20 mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 lg:mx-6">
+    <header className="glass-panel-strong sticky top-4 z-20 mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 lg:mx-6">
       <div className="flex items-center gap-4">
         <Logo />
         {projectCode && (
@@ -22,10 +23,13 @@ export function Header({ activeTab, onTabChange }: { activeTab: WorkspaceTabKey;
 
       <TabNav active={activeTab} onChange={onTabChange} />
 
-      <Button variant="ghost" size="sm" onClick={leaveProject} className="text-muted-foreground">
-        <LogOut className="mr-1.5 h-3.5 w-3.5" />
-        Switch project
-      </Button>
+      <div className="flex items-center gap-2">
+        <AddTilesButtons />
+        <Button variant="ghost" size="sm" onClick={leaveProject} className="text-muted-foreground">
+          <LogOut className="mr-1.5 h-3.5 w-3.5" />
+          Switch project
+        </Button>
+      </div>
     </header>
   );
 }

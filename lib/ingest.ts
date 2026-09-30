@@ -113,16 +113,55 @@ async function buildTile(files: VirtualFile[]): Promise<ParsedTile> {
   };
 }
 
-/** input type="file" webkitdirectory -- FileList entries already carry webkitRelativePath. */
-export async function ingestFromFileList(fileList: FileList): Promise<ParsedTile> {
+export interface IngestResult {
+  tiles: ParsedTile[];
+  errors: string[];
+}
+
+/** Splits a flat file list into one group per tile.json found, so a single
+ * folder pick (or drop) containing several tiles' _analysis folders yields
+ * one tile per subfolder instead of one merged (and likely broken) tile. */
+function splitByTileRoot(files: VirtualFile[]): VirtualFile[][] {
+  const roots = files
+    .filter((f) => f.path.toLowerCase().endsWith("tile.json"))
+    .map((f) => {
+      const idx = f.path.lastIndexOf("/");
+      return idx === -1 ? "" : f.path.slice(0, idx);
+    });
+  if (roots.length <= 1) return [files];
+
+  // Longest-prefix first, so a file lands under its nearest tile.json root.
+  const sortedRoots = [...new Set(roots)].sort((a, b) => b.length - a.length);
+  const groups = new Map<string, VirtualFile[]>(sortedRoots.map((r) => [r, []]));
+  for (const f of files) {
+    const root = sortedRoots.find((r) => r === "" || f.path === r || f.path.startsWith(r + "/"));
+    if (root !== undefined) groups.get(root)!.push(f);
+  }
+  return Array.from(groups.values()).filter((g) => g.length);
+}
+
+async function buildTilesFromGroups(groups: VirtualFile[][]): Promise<IngestResult> {
+  const settled = await Promise.allSettled(groups.map(buildTile));
+  const tiles: ParsedTile[] = [];
+  const errors: string[] = [];
+  for (const r of settled) {
+    if (r.status === "fulfilled") tiles.push(r.value);
+    else errors.push(r.reason instanceof Error ? r.reason.message : String(r.reason));
+  }
+  return { tiles, errors };
+}
+
+/** input type="file" webkitdirectory -- FileList entries already carry webkitRelativePath.
+ * Splits on tile.json so picking a parent folder full of tile folders loads all of them. */
+export async function ingestFromFileList(fileList: FileList): Promise<IngestResult> {
   const files: VirtualFile[] = Array.from(fileList).map((file) => ({
     path: (file.webkitRelativePath || file.name).replace(/\\/g, "/"),
     bytes: () => file.arrayBuffer(),
   }));
-  return buildTile(files);
+  return buildTilesFromGroups(splitByTileRoot(files));
 }
 
-/** A dropped .zip file (either "Choose .zip" or a drag-drop of the zip itself). */
+/** A single dropped .zip file (either "Choose .zip" or a drag-drop of the zip itself). */
 export async function ingestFromZipFile(zipFile: File): Promise<ParsedTile> {
   const zip = await JSZip.loadAsync(zipFile);
   const files: VirtualFile[] = [];
@@ -136,27 +175,40 @@ export async function ingestFromZipFile(zipFile: File): Promise<ParsedTile> {
   return buildTile(files);
 }
 
-/** DataTransferItemList from a drag-and-drop of a real folder on disk. */
-export async function ingestFromDataTransferItems(items: DataTransferItemList): Promise<ParsedTile> {
+/** "Choose .zip" with multiple files selected at once -- each zip is its own tile. */
+export async function ingestFromZipFiles(fileList: FileList | File[]): Promise<IngestResult> {
+  const settled = await Promise.allSettled(Array.from(fileList).map(ingestFromZipFile));
+  const tiles: ParsedTile[] = [];
+  const errors: string[] = [];
+  for (const r of settled) {
+    if (r.status === "fulfilled") tiles.push(r.value);
+    else errors.push(r.reason instanceof Error ? r.reason.message : String(r.reason));
+  }
+  return { tiles, errors };
+}
+
+/** DataTransferItemList from a drag-and-drop of one or more folders and/or .zip files at once. */
+export async function ingestFromDataTransferItems(items: DataTransferItemList): Promise<IngestResult> {
   const entries: FileSystemEntry[] = [];
   for (let i = 0; i < items.length; i++) {
     const entry = items[i].webkitGetAsEntry?.();
     if (entry) entries.push(entry);
   }
 
-  // A single dropped .zip file goes through the zip path instead.
-  if (entries.length === 1 && entries[0].isFile && entries[0].name.toLowerCase().endsWith(".zip")) {
-    const file = await new Promise<File>((resolve, reject) => (entries[0] as FileSystemFileEntry).file(resolve, reject));
-    return ingestFromZipFile(file);
-  }
+  const zipEntries = entries.filter((e) => e.isFile && e.name.toLowerCase().endsWith(".zip"));
+  const dirEntries = entries.filter((e) => !zipEntries.includes(e));
 
-  const files: VirtualFile[] = [];
+  const zipFiles = await Promise.all(
+    zipEntries.map((e) => new Promise<File>((resolve, reject) => (e as FileSystemFileEntry).file(resolve, reject))),
+  );
+
+  const dirFiles: VirtualFile[] = [];
 
   async function walk(entry: FileSystemEntry, prefix: string) {
     if (entry.isFile) {
       const fileEntry = entry as FileSystemFileEntry;
       const file = await new Promise<File>((resolve, reject) => fileEntry.file(resolve, reject));
-      files.push({ path: `${prefix}${entry.name}`, bytes: () => file.arrayBuffer() });
+      dirFiles.push({ path: `${prefix}${entry.name}`, bytes: () => file.arrayBuffer() });
     } else if (entry.isDirectory) {
       const dirEntry = entry as FileSystemDirectoryEntry;
       const reader = dirEntry.createReader();
@@ -180,9 +232,19 @@ export async function ingestFromDataTransferItems(items: DataTransferItemList): 
     }
   }
 
-  for (const entry of entries) {
+  for (const entry of dirEntries) {
     await walk(entry, "");
   }
 
-  return buildTile(files);
+  const [zipResult, dirResult] = await Promise.all([
+    ingestFromZipFiles(zipFiles),
+    dirFiles.length ? buildTilesFromGroups(splitByTileRoot(dirFiles)) : Promise.resolve<IngestResult>({ tiles: [], errors: [] }),
+  ]);
+
+  const tiles = [...zipResult.tiles, ...dirResult.tiles];
+  const errors = [...zipResult.errors, ...dirResult.errors];
+  if (!tiles.length && !errors.length) {
+    errors.push("Nothing recognizable was dropped -- drop a tile's _analysis folder, or a .zip of it.");
+  }
+  return { tiles, errors };
 }

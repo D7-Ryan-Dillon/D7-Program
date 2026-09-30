@@ -37,9 +37,41 @@ export function SettingsPanel({
         <Label className="font-mono text-[11px] uppercase tracking-label text-muted-foreground">Seed</Label>
         <Input type="number" className="mt-1 font-mono" {...field("seed")} />
       </div>
+      <div>
+        <Label className="font-mono text-[11px] uppercase tracking-label text-muted-foreground">Scale range</Label>
+        <div className="mt-1 flex items-center gap-2">
+          <Input
+            type="number"
+            step={0.1}
+            min={0.1}
+            className="font-mono"
+            value={settings.scaleMin}
+            onChange={(e) => {
+              const v = Math.max(0.1, Number(e.target.value) || 0.1);
+              onChange({ ...settings, scaleMin: v, scaleMax: Math.max(v, settings.scaleMax) });
+            }}
+          />
+          <span className="text-xs text-muted-foreground">to</span>
+          <Input
+            type="number"
+            step={0.1}
+            min={settings.scaleMin}
+            className="font-mono"
+            value={settings.scaleMax}
+            onChange={(e) => onChange({ ...settings, scaleMax: Math.max(settings.scaleMin, Number(e.target.value) || settings.scaleMin) })}
+          />
+        </div>
+      </div>
       <div className="flex items-center justify-between">
         <Label className="font-mono text-[11px] uppercase tracking-label text-muted-foreground">Spine-first growth</Label>
         <Switch checked={settings.spineFirst} onCheckedChange={(v) => onChange({ ...settings, spineFirst: v })} />
+      </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <Label className="font-mono text-[11px] uppercase tracking-label text-muted-foreground">Allow tilt rotation</Label>
+          <p className="mt-0.5 text-[10px] text-muted-foreground">Pieces may tip onto a side, not just spin flat</p>
+        </div>
+        <Switch checked={settings.allowTiltRotation} onCheckedChange={(v) => onChange({ ...settings, allowTiltRotation: v })} />
       </div>
       <Button className="w-full" disabled={disabled} onClick={onGenerate}>
         <Sparkles className="mr-1.5 h-3.5 w-3.5" />

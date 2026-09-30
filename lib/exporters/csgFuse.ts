@@ -30,7 +30,7 @@ export async function fuseAssembly(
     const tile = tileById.get(inst.tileId);
     if (!tile) continue;
     const gltf = await loader.loadAsync(tile.glbUrl);
-    const m = instanceMatrix(tile.tileFt, inst.mirror, inst.rot, inst.pos);
+    const m = instanceMatrix(tile.tileFt, inst.mirror, inst.rotZ, inst.posFt, inst.scale, inst.tilt);
     const p = new THREE.Vector3();
     const q = new THREE.Quaternion();
     const s = new THREE.Vector3();
