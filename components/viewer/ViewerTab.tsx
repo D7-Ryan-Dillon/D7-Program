@@ -11,6 +11,7 @@ import { VisibilityPanel } from "@/components/viewer/VisibilityPanel";
 import { MetricsPanel } from "@/components/viewer/MetricsPanel";
 import { ExportPanel } from "@/components/viewer/ExportPanel";
 import { GlowPanel } from "@/components/shared/GlowPanel";
+import { SquareFrame } from "@/components/shared/SquareFrame";
 import { Separator } from "@/components/ui/separator";
 
 export function ViewerTab() {
@@ -33,13 +34,26 @@ export function ViewerTab() {
           </div>
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(300px,1fr)_auto] gap-4 lg:grid-cols-[1fr_280px] lg:grid-rows-[minmax(0,1fr)]">
-          <div className="flex min-h-0 flex-col gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <ViewButtons active={activeView} onChange={setActiveView} />
-              <DisplayModeBar mode={displayMode} onChange={setDisplayMode} />
-            </div>
-            <div className="min-h-0 flex-1">
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(300px,1fr)_auto] gap-4 lg:grid-cols-[280px_1fr_280px] lg:grid-rows-[minmax(0,1fr)]">
+          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
+            <GlowPanel glow="orange">
+              <div className="p-4">
+                <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Camera</div>
+                <ViewButtons active={activeView} onChange={setActiveView} />
+                <Separator className="my-3" />
+                <DisplayModeBar mode={displayMode} onChange={setDisplayMode} />
+              </div>
+            </GlowPanel>
+            <GlowPanel glow="magenta">
+              <div className="p-4">
+                <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>
+                <VisibilityPanel visibility={visibility} onVisibility={setVisibility} colors={colors} onColors={setColors} />
+              </div>
+            </GlowPanel>
+          </div>
+
+          <div className="min-h-0 flex-1">
+            <SquareFrame className="relative">
               <ThreeViewport
                 key={activeTile.id}
                 tile={activeTile}
@@ -48,16 +62,10 @@ export function ViewerTab() {
                 colors={colors}
                 activeViewKey={activeView}
               />
-            </div>
+            </SquareFrame>
           </div>
 
           <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
-            <GlowPanel glow="orange">
-              <div className="p-4">
-                <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>
-                <VisibilityPanel visibility={visibility} onVisibility={setVisibility} colors={colors} onColors={setColors} />
-              </div>
-            </GlowPanel>
             <GlowPanel className="flex-1" glow="magenta">
               <div className="p-4">
                 <MetricsPanel tile={activeTile} />

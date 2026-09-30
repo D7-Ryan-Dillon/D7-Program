@@ -15,11 +15,15 @@ const RATING_COLOR: Record<ReturnType<typeof ratingFor>, string> = {
 
 export function JointsPanel({
   joints,
+  selectedJointId,
   onRate,
+  onSelect,
   onRegenerate,
 }: {
   joints: Joint[];
+  selectedJointId?: string | null;
   onRate: (jointId: string, rating: "good" | "bad" | null) => void;
+  onSelect: (jointId: string) => void;
   onRegenerate: () => void;
 }) {
   const badCount = joints.filter((j) => j.rating === "bad").length;
@@ -34,7 +38,17 @@ export function JointsPanel({
         {joints.map((j, i) => {
           const rating = ratingFor(j.score);
           return (
-            <div key={j.id} className="flex items-center justify-between gap-2 rounded-md border-hair px-2.5 py-1.5 text-xs">
+            <div
+              key={j.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelect(j.id)}
+              onKeyDown={(e) => e.key === "Enter" && onSelect(j.id)}
+              className={cn(
+                "flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border-hair px-2.5 py-1.5 text-left text-xs transition-colors",
+                selectedJointId === j.id ? "border-magenta/50 bg-magenta/10" : "hover:border-white/25",
+              )}
+            >
               <div>
                 <div>
                   Joint {i + 1} · {j.face}
@@ -43,7 +57,7 @@ export function JointsPanel({
                   {j.score === null ? "sealed" : `${j.score.toFixed(0)} · ${rating}`}
                 </div>
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                 <button
                   aria-label="Mark good"
                   onClick={() => onRate(j.id, j.rating === "good" ? null : "good")}

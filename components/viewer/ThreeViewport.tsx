@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, useGLTF, Environment } from "@react-three/drei";
+import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import * as THREE from "three";
 import type { ParsedTile } from "@/lib/types";
 import { ALL_VIEWS } from "@/lib/faceViews";
@@ -137,7 +138,9 @@ export function ThreeViewport({
         <directionalLight position={[-6, -4, -6]} intensity={0.25} />
         <Suspense fallback={null}>
           <Model tile={tile} displayMode={displayMode} visibility={visibility} colors={colors} onBounds={setBounds} />
-          <Environment preset="city" environmentIntensity={0.25} />
+          <ErrorBoundary>
+            <Environment preset="city" environmentIntensity={0.25} />
+          </ErrorBoundary>
         </Suspense>
         <CameraRig activeViewKey={activeViewKey} bounds={bounds} controlsRef={controlsRef} />
         <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} />

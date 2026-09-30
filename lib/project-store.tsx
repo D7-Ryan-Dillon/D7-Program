@@ -28,11 +28,18 @@ function getLastCodeServerSnapshot() {
  */
 export type SaveStatus = "idle" | "loading" | "saving" | "saved" | "error";
 
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object" && "message" in err) return String((err as { message: unknown }).message);
+  return String(err);
+}
+
 type ProjectState = {
   projectCode: string | null;
   tiles: ParsedTile[];
   activeTileId: string | null;
   saveStatus: SaveStatus;
+  saveError: string | null;
   enterProject: (code: string) => void;
   leaveProject: () => void;
   addTile: (tile: ParsedTile) => void;
@@ -50,6 +57,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [tiles, setTiles] = useState<ParsedTile[]>([]);
   const [activeTileId, setActiveTileId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const lastUsedCode = useSyncExternalStore(subscribeToLastCode, getLastCodeSnapshot, getLastCodeServerSnapshot);
 
   // Guards against re-saving the tiles we just loaded for a code, and against
@@ -70,8 +78,13 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       .then((loaded) => {
         if (loaded) setTiles(loaded);
         setSaveStatus("idle");
+        setSaveError(null);
       })
-      .catch(() => setSaveStatus("error"))
+      .catch((err) => {
+        console.error("[project-store] loadProject failed:", err);
+        setSaveStatus("error");
+        setSaveError(describeError(err));
+      })
       .finally(() => {
         readyForCode.current = code;
       });
@@ -90,8 +103,15 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setSaveStatus("saving");
     const timer = setTimeout(() => {
       saveProject(projectCode, tiles)
-        .then(() => setSaveStatus("saved"))
-        .catch(() => setSaveStatus("error"));
+        .then(() => {
+          setSaveStatus("saved");
+          setSaveError(null);
+        })
+        .catch((err) => {
+          console.error("[project-store] saveProject failed:", err);
+          setSaveStatus("error");
+          setSaveError(describeError(err));
+        });
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [tiles, projectCode]);
@@ -119,6 +139,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       tiles,
       activeTileId,
       saveStatus,
+      saveError,
       enterProject,
       leaveProject,
       addTile,
@@ -127,7 +148,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setActiveTile: setActiveTileId,
       lastUsedCode,
     }),
-    [projectCode, tiles, activeTileId, saveStatus, enterProject, leaveProject, addTile, removeTile, updateTile, lastUsedCode],
+    [projectCode, tiles, activeTileId, saveStatus, saveError, enterProject, leaveProject, addTile, removeTile, updateTile, lastUsedCode],
   );
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;

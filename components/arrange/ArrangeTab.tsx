@@ -10,12 +10,16 @@ import { Switch } from "@/components/ui/switch";
 import { BankPanel } from "@/components/arrange/BankPanel";
 import { SettingsPanel } from "@/components/arrange/SettingsPanel";
 import { JointsPanel } from "@/components/arrange/JointsPanel";
+import { InstanceEditor } from "@/components/arrange/InstanceEditor";
+import { InstanceList } from "@/components/arrange/InstanceList";
 import { ArrangeViewport, instanceMatrix } from "@/components/arrange/ArrangeViewport";
 import { VisibilityPanel } from "@/components/viewer/VisibilityPanel";
 import type { MeshColors, MeshVisibility } from "@/components/viewer/ThreeViewport";
 import { autoGenerate, regenerateMarked } from "@/lib/arrange/autoGenerate";
 import { aggregateScore } from "@/lib/arrange/joints";
-import { DEFAULT_SETTINGS, type Assembly } from "@/lib/arrange/types";
+import { snapToNearest } from "@/lib/arrange/snap";
+import { DEFAULT_SETTINGS, type Assembly, type PlacedInstance } from "@/lib/arrange/types";
+import type { ParsedTile } from "@/lib/types";
 import { buildManifestText } from "@/lib/exporters/recipeManifest";
 import { downloadTextFile, groupToObjText } from "@/lib/exporters/objExport";
 import { fuseAssembly } from "@/lib/exporters/csgFuse";
@@ -32,10 +36,14 @@ export function ArrangeTab() {
   const [fusedMesh, setFusedMesh] = useState<THREE.Mesh | null>(null);
   const [busy, setBusy] = useState(false);
   const [regenNonce, setRegenNonce] = useState(0);
+  const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(null);
+  const [selectedJointId, setSelectedJointId] = useState<string | null>(null);
+  const [highlightIds, setHighlightIds] = useState<string[] | null>(null);
 
   const tileById = useMemo(() => new Map(tiles.map((t) => [t.id, t])), [tiles]);
   const bankTiles = useMemo(() => tiles.filter((t) => selected.has(t.id)), [tiles, selected]);
   const overallScore = useMemo(() => aggregateScore(assembly.joints.map((j) => j.score)), [assembly]);
+  const selectedInstance = assembly.instances.find((inst) => inst.id === selectedInstanceId) ?? null;
 
   const toggleBank = (id: string) => {
     setSelected((prev) => {
@@ -46,6 +54,10 @@ export function ArrangeTab() {
     });
   };
 
+  const selectAllBank = (ids: string[]) => {
+    setSelected(new Set(ids));
+  };
+
   const generate = () => {
     if (!bankTiles.length) {
       toast.error("Check at least one tile in the bank first.");
@@ -53,11 +65,60 @@ export function ArrangeTab() {
     }
     setFused(false);
     setFusedMesh(null);
+    setSelectedInstanceId(null);
+    setSelectedJointId(null);
+    setHighlightIds(null);
     setAssembly(autoGenerate(bankTiles, settings));
   };
 
   const rateJoint = (jointId: string, rating: "good" | "bad" | null) => {
     setAssembly((prev) => ({ ...prev, joints: prev.joints.map((j) => (j.id === jointId ? { ...j, rating } : j)) }));
+  };
+
+  const selectJoint = (jointId: string) => {
+    const joint = assembly.joints.find((j) => j.id === jointId);
+    if (!joint) return;
+    setSelectedJointId(jointId);
+    setSelectedInstanceId(joint.bId);
+    setHighlightIds([joint.aId, joint.bId]);
+  };
+
+  // A plain instance selection (viewport click, or the placed-pieces list)
+  // isn't about a joint -- clears any leftover highlight from a previous
+  // joint-row click rather than leaving it stale on the new selection.
+  const selectInstance = (id: string | null) => {
+    setSelectedInstanceId(id);
+    setSelectedJointId(null);
+    setHighlightIds(null);
+  };
+
+  const updateInstance = (id: string, patch: Partial<PlacedInstance>) => {
+    setAssembly((prev) => ({ ...prev, instances: prev.instances.map((inst) => (inst.id === id ? { ...inst, ...patch } : inst)) }));
+    setFused(false);
+    setFusedMesh(null);
+  };
+
+  const removeInstance = (id: string) => {
+    setAssembly((prev) => ({
+      instances: prev.instances.filter((inst) => inst.id !== id),
+      joints: prev.joints.filter((j) => j.aId !== id && j.bId !== id),
+    }));
+    setFused(false);
+    setFusedMesh(null);
+    setSelectedInstanceId((prev) => (prev === id ? null : prev));
+    setHighlightIds(null);
+  };
+
+  const snapInstance = (id: string) => {
+    const target = assembly.instances.find((inst) => inst.id === id);
+    const targetTile = target && tileById.get(target.tileId);
+    if (!target || !targetTile) return;
+    const others = assembly.instances
+      .filter((inst) => inst.id !== id)
+      .map((inst) => ({ instance: inst, tile: tileById.get(inst.tileId) }))
+      .filter((o): o is { instance: PlacedInstance; tile: ParsedTile } => !!o.tile);
+    const posFt = snapToNearest(target, targetTile, others);
+    if (posFt) updateInstance(id, { posFt });
   };
 
   const regenerate = () => {
@@ -67,6 +128,9 @@ export function ArrangeTab() {
     setRegenNonce(nonce);
     setFused(false);
     setFusedMesh(null);
+    setSelectedInstanceId(null);
+    setSelectedJointId(null);
+    setHighlightIds(null);
     setAssembly(regenerateMarked(assembly, bankTiles, badIds, settings, nonce));
   };
 
@@ -139,7 +203,7 @@ export function ArrangeTab() {
           <GlowPanel glow="magenta">
             <div className="p-4">
               <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Bank</div>
-              <BankPanel selected={selected} onToggle={toggleBank} />
+              <BankPanel selected={selected} onToggle={toggleBank} onSelectAll={selectAllBank} />
             </div>
           </GlowPanel>
           <GlowPanel glow="orange">
@@ -163,7 +227,16 @@ export function ArrangeTab() {
           </div>
           <div className="min-h-0 flex-1">
             {assembly.instances.length ? (
-              <ArrangeViewport instances={assembly.instances} tileById={tileById} visibility={visibility} colors={colors} fusedMesh={fusedMesh} />
+              <ArrangeViewport
+                instances={assembly.instances}
+                tileById={tileById}
+                visibility={visibility}
+                colors={colors}
+                fusedMesh={fusedMesh}
+                selectedId={selectedInstanceId}
+                highlightIds={highlightIds}
+                onSelect={selectInstance}
+              />
             ) : (
               <div className="glass-panel flex h-full items-center justify-center rounded-lg p-8 text-center text-sm text-muted-foreground">
                 Check tiles in the Bank, set Amount, then Auto-generate.
@@ -182,7 +255,19 @@ export function ArrangeTab() {
           <GlowPanel glow="orange">
             <div className="p-4">
               <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Joints</div>
-              <JointsPanel joints={assembly.joints} onRate={rateJoint} onRegenerate={regenerate} />
+              <JointsPanel joints={assembly.joints} selectedJointId={selectedJointId} onRate={rateJoint} onSelect={selectJoint} onRegenerate={regenerate} />
+            </div>
+          </GlowPanel>
+          <GlowPanel glow="magenta">
+            <div className="p-4">
+              <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Selected piece</div>
+              <InstanceEditor instance={selectedInstance} tile={selectedInstance ? tileById.get(selectedInstance.tileId) : undefined} onUpdate={updateInstance} onRemove={removeInstance} onSnap={snapInstance} />
+            </div>
+          </GlowPanel>
+          <GlowPanel glow="orange">
+            <div className="p-4">
+              <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Placed pieces</div>
+              <InstanceList instances={assembly.instances} tileById={tileById} selectedId={selectedInstanceId} onSelect={selectInstance} />
             </div>
           </GlowPanel>
           <GlowPanel glow="magenta">

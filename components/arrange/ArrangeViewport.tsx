@@ -67,26 +67,34 @@ function InstanceMesh({
   instance,
   visibility,
   colors,
+  selected,
+  highlighted,
+  onSelect,
 }: {
   tile: ParsedTile;
   instance: PlacedInstance;
   visibility: MeshVisibility;
   colors: MeshColors;
+  selected: boolean;
+  highlighted: boolean;
+  onSelect: (id: string) => void;
 }) {
   const gltf = useGLTF(tile.glbUrl);
   const scene = useMemo(() => gltf.scene.clone(true), [gltf]);
   const groupRef = useRef<THREE.Group>(null);
 
   useEffect(() => {
+    const emissive = selected ? "#c43383" : highlighted ? "#db7228" : "#000000";
+    const emissiveIntensity = selected ? 0.55 : highlighted ? 0.4 : 0;
     const setup = (mesh: THREE.Object3D | null, color: string, visible: boolean) => {
       if (mesh instanceof THREE.Mesh) {
         mesh.visible = visible;
-        mesh.material = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05, side: THREE.DoubleSide });
+        mesh.material = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05, side: THREE.DoubleSide, emissive, emissiveIntensity });
       }
     };
     setup(scene.getObjectByName("foam") ?? null, colors.foam, visibility.foam);
     setup(scene.getObjectByName("void") ?? null, colors.void, visibility.void);
-  }, [scene, colors, visibility]);
+  }, [scene, colors, visibility, selected, highlighted]);
 
   useEffect(() => {
     const m = instanceMatrix(tile.tileFt, instance.mirror, instance.rotZ, instance.posFt, instance.scale, instance.tilt);
@@ -103,7 +111,13 @@ function InstanceMesh({
   }, [tile, instance]);
 
   return (
-    <group ref={groupRef}>
+    <group
+      ref={groupRef}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect(instance.id);
+      }}
+    >
       <primitive object={scene} />
     </group>
   );
@@ -119,12 +133,18 @@ export function ArrangeViewport({
   visibility,
   colors,
   fusedMesh,
+  selectedId,
+  highlightIds,
+  onSelect,
 }: {
   instances: PlacedInstance[];
   tileById: Map<string, ParsedTile>;
   visibility: MeshVisibility;
   colors: MeshColors;
   fusedMesh?: THREE.Mesh | null;
+  selectedId?: string | null;
+  highlightIds?: string[] | null;
+  onSelect?: (id: string) => void;
 }) {
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
   useShiftToPan(controlsRef);
@@ -144,7 +164,18 @@ export function ArrangeViewport({
               instances.map((inst) => {
                 const tile = tileById.get(inst.tileId);
                 if (!tile) return null;
-                return <InstanceMesh key={inst.id} tile={tile} instance={inst} visibility={visibility} colors={colors} />;
+                return (
+                  <InstanceMesh
+                    key={inst.id}
+                    tile={tile}
+                    instance={inst}
+                    visibility={visibility}
+                    colors={colors}
+                    selected={selectedId === inst.id}
+                    highlighted={selectedId !== inst.id && (highlightIds?.includes(inst.id) ?? false)}
+                    onSelect={onSelect ?? (() => {})}
+                  />
+                );
               })
             )}
           </Bounds>
