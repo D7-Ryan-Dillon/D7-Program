@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ParsedTile } from "@/lib/types";
+import { loadProject, saveProject } from "@/lib/persistence";
 
 const LAST_CODE_KEY = "erosion-workspace:last-project-code";
 
@@ -20,15 +21,18 @@ function getLastCodeServerSnapshot() {
 }
 
 /**
- * NOTE: this is an in-memory store for the current tab only. Tile data
- * (voxels, GLBs) is not yet synced anywhere -- real cross-device persistence
- * needs a database + file storage provisioned first (see project plan).
- * Only the project code itself is remembered locally, as a convenience.
+ * The tile bank (Viewer tab) auto-saves to Supabase under the project code,
+ * so it's the same on every device that enters that code. The Arrange tab's
+ * generated composition is NOT synced yet -- it's cheap to regenerate from
+ * the tiles and its engine is still being iterated on (see HANDOFF_CLOUD.md).
  */
+export type SaveStatus = "idle" | "loading" | "saving" | "saved" | "error";
+
 type ProjectState = {
   projectCode: string | null;
   tiles: ParsedTile[];
   activeTileId: string | null;
+  saveStatus: SaveStatus;
   enterProject: (code: string) => void;
   leaveProject: () => void;
   addTile: (tile: ParsedTile) => void;
@@ -39,27 +43,58 @@ type ProjectState = {
 };
 
 const ProjectContext = createContext<ProjectState | null>(null);
+const AUTOSAVE_DELAY_MS = 1200;
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const [projectCode, setProjectCode] = useState<string | null>(null);
   const [tiles, setTiles] = useState<ParsedTile[]>([]);
   const [activeTileId, setActiveTileId] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const lastUsedCode = useSyncExternalStore(subscribeToLastCode, getLastCodeSnapshot, getLastCodeServerSnapshot);
+
+  // Guards against re-saving the tiles we just loaded for a code, and against
+  // a slow load for an old code clobbering a newer one the user has since entered.
+  const readyForCode = useRef<string | null>(null);
 
   const enterProject = useCallback((rawCode: string) => {
     const code = rawCode.trim().toLowerCase();
     if (!code) return;
+    readyForCode.current = null;
     setProjectCode(code);
     setTiles([]);
     setActiveTileId(null);
+    setSaveStatus("loading");
     window.localStorage.setItem(LAST_CODE_KEY, code);
+
+    loadProject(code)
+      .then((loaded) => {
+        if (loaded) setTiles(loaded);
+        setSaveStatus("idle");
+      })
+      .catch(() => setSaveStatus("error"))
+      .finally(() => {
+        readyForCode.current = code;
+      });
   }, []);
 
   const leaveProject = useCallback(() => {
+    readyForCode.current = null;
     setProjectCode(null);
     setTiles([]);
     setActiveTileId(null);
+    setSaveStatus("idle");
   }, []);
+
+  useEffect(() => {
+    if (!projectCode || readyForCode.current !== projectCode) return;
+    setSaveStatus("saving");
+    const timer = setTimeout(() => {
+      saveProject(projectCode, tiles)
+        .then(() => setSaveStatus("saved"))
+        .catch(() => setSaveStatus("error"));
+    }, AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [tiles, projectCode]);
 
   const addTile = useCallback((tile: ParsedTile) => {
     setTiles((prev) => {
@@ -83,6 +118,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       projectCode,
       tiles,
       activeTileId,
+      saveStatus,
       enterProject,
       leaveProject,
       addTile,
@@ -91,7 +127,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       setActiveTile: setActiveTileId,
       lastUsedCode,
     }),
-    [projectCode, tiles, activeTileId, enterProject, leaveProject, addTile, removeTile, updateTile, lastUsedCode],
+    [projectCode, tiles, activeTileId, saveStatus, enterProject, leaveProject, addTile, removeTile, updateTile, lastUsedCode],
   );
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;

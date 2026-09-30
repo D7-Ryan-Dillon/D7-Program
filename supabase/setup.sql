@@ -26,3 +26,9 @@ create policy "anyone can read tile assets" on storage.objects for select
   using (bucket_id = 'tile-assets');
 create policy "anyone can upload tile assets" on storage.objects for insert
   with check (bucket_id = 'tile-assets');
+-- re-saving a project re-uploads its assets with upsert, which Storage does
+-- as an update on an existing object -- needs its own policy, separate from insert.
+create policy "anyone can overwrite tile assets" on storage.objects for update
+  using (bucket_id = 'tile-assets');
+create policy "anyone can delete tile assets" on storage.objects for delete
+  using (bucket_id = 'tile-assets');
