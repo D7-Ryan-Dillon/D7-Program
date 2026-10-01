@@ -28,6 +28,13 @@ export const DIVIDER_X = 0.6864;
  * as a fraction of the square's side length. */
 export const TAG_HEIGHT_FRACTION = 0.0716;
 
+/** How far down the square's main top edge sits, as a fraction of the
+ * square's side length -- the top-left tab pokes up above this level, so
+ * anything drawn flush with the square's top (like the descriptor-page
+ * divider) needs to start here, not at y=0, or it overshoots past the
+ * frame outline. */
+export const TOP_EDGE_FRACTION = 0.0279;
+
 /** The full module outline (square + top-left tab + bottom-right name
  * tag), in natural clockwise drawing order starting at the square's own
  * bottom-left corner, as fractions of the square's side length. */

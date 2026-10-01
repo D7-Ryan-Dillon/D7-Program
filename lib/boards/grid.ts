@@ -23,20 +23,20 @@ export function clampSlotCount(count: number): number {
   return Math.max(MIN_TILES, Math.min(MAX_TILES, count));
 }
 
-export function squareGridLayout(count: number, availableWidth: number, availableHeight: number, gap: number): SquareGridLayout {
+export function squareGridLayout(count: number, availableWidth: number, availableHeight: number, gapX: number, gapY: number): SquareGridLayout {
   const n = Math.max(1, count);
   let best: SquareGridLayout | null = null;
 
   for (let columns = 1; columns <= n; columns++) {
     const rows = Math.ceil(n / columns);
-    const sizeFromWidth = (availableWidth - gap * (columns - 1)) / columns;
-    const sizeFromHeight = (availableHeight - gap * (rows - 1)) / (rows * (1 + TAG_HEIGHT_FRACTION));
+    const sizeFromWidth = (availableWidth - gapX * (columns - 1)) / columns;
+    const sizeFromHeight = (availableHeight - gapY * (rows - 1)) / (rows * (1 + TAG_HEIGHT_FRACTION));
     const squareSize = Math.min(sizeFromWidth, sizeFromHeight);
     if (squareSize <= 0) continue;
     if (!best || squareSize > best.squareSize) {
       const cellHeight = squareSize * (1 + TAG_HEIGHT_FRACTION);
-      const gridWidth = columns * squareSize + gap * (columns - 1);
-      const gridHeight = rows * cellHeight + gap * (rows - 1);
+      const gridWidth = columns * squareSize + gapX * (columns - 1);
+      const gridHeight = rows * cellHeight + gapY * (rows - 1);
       best = {
         columns,
         rows,
@@ -66,13 +66,13 @@ export interface GridCell {
   size: number;
 }
 
-export function squareGridCells(layout: SquareGridLayout, gap: number): GridCell[] {
+export function squareGridCells(layout: SquareGridLayout, gapX: number, gapY: number): GridCell[] {
   const cells: GridCell[] = [];
   for (let r = 0; r < layout.rows; r++) {
     for (let c = 0; c < layout.columns; c++) {
       cells.push({
-        x: layout.offsetX + c * (layout.squareSize + gap),
-        y: layout.offsetY + r * (layout.cellHeight + gap),
+        x: layout.offsetX + c * (layout.squareSize + gapX),
+        y: layout.offsetY + r * (layout.cellHeight + gapY),
         size: layout.squareSize,
       });
     }

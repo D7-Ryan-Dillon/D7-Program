@@ -126,7 +126,8 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
       <div className="space-y-2 border-t border-border pt-3">
         <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Layout</div>
         <NumberSlider label="Outline weight" value={config.outlineWidthPt} min={0.5} max={8} step={0.25} decimals={2} suffix="pt" onChange={(outlineWidthPt) => onChange({ outlineWidthPt })} />
-        <NumberSlider label="Gap between tiles" value={config.gapIn} min={0} max={1} step={0.05} decimals={2} suffix="in" onChange={(gapIn) => onChange({ gapIn })} />
+        <NumberSlider label="Gap X (columns)" value={config.gapXIn} min={0} max={1} step={0.05} decimals={2} suffix="in" onChange={(gapXIn) => onChange({ gapXIn })} />
+        <NumberSlider label="Gap Y (rows)" value={config.gapYIn} min={0} max={1} step={0.05} decimals={2} suffix="in" onChange={(gapYIn) => onChange({ gapYIn })} />
       </div>
 
       <div className="space-y-2 border-t border-border pt-3">

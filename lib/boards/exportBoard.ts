@@ -11,10 +11,10 @@
 import { scoreTile, type DescriptorResult } from "@/lib/scoring/descriptors";
 import type { ParsedTile } from "@/lib/types";
 import { renderTileToDataUrl } from "./renderTile";
-import { traceModuleOutline, traceSquareOnly, DIVIDER_X, TAG_HEIGHT_FRACTION } from "./frameShape";
+import { traceModuleOutline, traceSquareOnly, DIVIDER_X, TAG_HEIGHT_FRACTION, TOP_EDGE_FRACTION } from "./frameShape";
 import { squareGridLayout, squareGridCells, type GridCell } from "./grid";
 import { fitText, wrapToWidth } from "./textFit";
-import { DPI, displayName, type BoardConfig, type BoardSlot } from "./types";
+import { DPI, shortTileLabel, type BoardConfig, type BoardSlot } from "./types";
 
 export function ptToPx(pt: number, dpi: number = DPI): number {
   return (pt / 72) * dpi;
@@ -35,7 +35,8 @@ export interface PageGeometry {
   margin: number;
   titleFontSizePx: number;
   titleBottom: number;
-  gap: number;
+  gapX: number;
+  gapY: number;
   cells: GridCell[];
   /** Index into `cells` the caption occupies, or null if disabled. */
   captionCellIndex: number | null;
@@ -50,13 +51,14 @@ export function computeGeometry(config: BoardConfig, dpi: number = DPI): PageGeo
   const margin = dpi * 0.4;
   const titleFontSizePx = config.titleFontSizePt ? ptToPx(config.titleFontSizePt, dpi) : heightPx * 0.032;
   const titleBottom = margin + titleFontSizePx * 1.8;
-  const gap = config.gapIn * dpi;
+  const gapX = config.gapXIn * dpi;
+  const gapY = config.gapYIn * dpi;
 
   const totalCells = config.slots.length + (config.textBox.enabled ? 1 : 0);
   const availableWidth = widthPx - margin * 2;
   const availableHeight = heightPx - titleBottom - margin;
-  const layout = squareGridLayout(totalCells || 1, availableWidth, availableHeight, gap);
-  const cells = squareGridCells(layout, gap).map((cell) => ({ x: cell.x + margin, y: cell.y + titleBottom, size: cell.size }));
+  const layout = squareGridLayout(totalCells || 1, availableWidth, availableHeight, gapX, gapY);
+  const cells = squareGridCells(layout, gapX, gapY).map((cell) => ({ x: cell.x + margin, y: cell.y + titleBottom, size: cell.size }));
 
   return {
     widthPx,
@@ -64,7 +66,8 @@ export function computeGeometry(config: BoardConfig, dpi: number = DPI): PageGeo
     margin,
     titleFontSizePx,
     titleBottom,
-    gap,
+    gapX,
+    gapY,
     cells,
     captionCellIndex: config.textBox.enabled ? 0 : null,
   };
@@ -109,7 +112,7 @@ function drawNameTag(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardS
   const tagLeft = cell.x + cell.size * DIVIDER_X;
   const tagWidth = cell.x + cell.size - tagLeft;
   const padding = cell.size * 0.015;
-  const text = displayName(name).toUpperCase();
+  const text = shortTileLabel(name).toUpperCase();
 
   let fontSize: number;
   if (slot.nameFontSizePt) {
@@ -201,7 +204,7 @@ async function drawDescriptorModule(ctx: CanvasRenderingContext2D, cell: GridCel
   traceModuleOutline(ctx, cell.x, cell.y, cell.size);
   ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(descX, cell.y);
+  ctx.moveTo(descX, cell.y + cell.size * TOP_EDGE_FRACTION);
   ctx.lineTo(descX, cell.y + cell.size);
   ctx.stroke();
   ctx.restore();

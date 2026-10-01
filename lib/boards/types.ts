@@ -37,8 +37,11 @@ export interface BoardConfig {
   /** Frame stroke weight, in points (1pt = 1/72in, same convention as
    * print/vector tools -- independent of the board's own DPI). */
   outlineWidthPt: number;
-  /** Gap between tiles (and the caption cell), in inches. */
-  gapIn: number;
+  /** Gap between tiles (and the caption cell), in inches -- horizontal and
+   * vertical set independently so a wide board can be packed tighter in one
+   * direction than the other. */
+  gapXIn: number;
+  gapYIn: number;
   /** Manual size overrides, in points; unset (or null) means auto-fit. */
   titleFontSizePt: number | null;
   captionFontSizePt: number | null;
@@ -58,22 +61,32 @@ export function displayName(name: string): string {
   return name.replace(/_/g, " ");
 }
 
+/** The name tag's own text: a tile's full stored name ("gathering_4_
+ * contained_room_within_volume_V2") is far too long to read at the tag's
+ * size, so only the leading category + number survives ("gathering 4").
+ * Falls back to the full display name if a tile isn't named that way. */
+export function shortTileLabel(name: string): string {
+  const match = name.match(/^([a-zA-Z]+)_(\d+)/);
+  return match ? `${match[1]} ${match[2]}` : displayName(name);
+}
+
 export function defaultBoardConfig(): BoardConfig {
   return {
-    name: "Untitled board",
-    widthIn: 24,
-    heightIn: 18,
-    backgroundColor: "#0a0a0b",
-    fontFamily: "Arial",
-    titleColor: "#e8a6c8",
+    name: "Example Spaces",
+    widthIn: 13.33,
+    heightIn: 7.5,
+    backgroundColor: "#000000",
+    fontFamily: "Arkitech",
+    titleColor: "#c43383",
     descriptorColor: "#9aa0a6",
     highlightColor: "#db7228",
     foamColor: "#ffffff",
-    voidColor: "#db7228",
+    voidColor: "#c43383",
     foamOpacity: 0.1,
     voidOpacity: 1,
     outlineWidthPt: 1.5,
-    gapIn: 0.2,
+    gapXIn: 0.5,
+    gapYIn: 0.5,
     titleFontSizePt: null,
     captionFontSizePt: null,
     slots: [],
