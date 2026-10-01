@@ -10,6 +10,7 @@ import { ViewerTab } from "@/components/viewer/ViewerTab";
 import { AnalysisTab } from "@/components/analysis/AnalysisTab";
 import { ArrangeTab } from "@/components/arrange/ArrangeTab";
 import { SectionsTab } from "@/components/sections/SectionsTab";
+import { BoardsTab } from "@/components/boards/BoardsTab";
 
 function Workspace() {
   const { projectCode } = useProject();
@@ -25,6 +26,7 @@ function Workspace() {
         {tab === "analysis" && <AnalysisTab />}
         {tab === "arrange" && <ArrangeTab />}
         {tab === "sections" && <SectionsTab />}
+        {tab === "boards" && <BoardsTab />}
       </div>
     </div>
   );

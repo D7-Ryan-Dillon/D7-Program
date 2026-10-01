@@ -37,3 +37,14 @@ export const VIEW_PRESETS: ViewPreset[] = [
 export const PERSPECTIVE_VIEW: ViewPreset = view("perspective", "Perspective", [1.1, -1.4, 0.9], [0, 0, 1]);
 
 export const ALL_VIEWS: ViewPreset[] = [...VIEW_PRESETS, PERSPECTIVE_VIEW];
+
+// True isometric corner views -- a separate set from ALL_VIEWS (Viewer tab's
+// own camera buttons) so adding these doesn't change that panel; used by the
+// Boards tab's per-tile axo preset picker instead.
+export const AXO_VIEWS: ViewPreset[] = [
+  view("iso-ne", "Isometric NE", [1, -1, 1], [0, 0, 1]),
+  view("iso-nw", "Isometric NW", [-1, -1, 1], [0, 0, 1]),
+  view("iso-se", "Isometric SE", [1, 1, 1], [0, 0, 1]),
+  view("iso-sw", "Isometric SW", [-1, 1, 1], [0, 0, 1]),
+  PERSPECTIVE_VIEW,
+];
