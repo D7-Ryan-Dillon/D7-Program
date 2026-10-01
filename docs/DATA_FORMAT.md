@@ -1,4 +1,13 @@
-# HANDOFF: what the evaluation and assembly program needs from the Grasshopper tool chain
+# Data format: what the app reads from the Grasshopper tool chain
+
+> **Scope note (added later):** this document describes only the
+> **Grasshopper `_analysis` folder** pipeline -- the data the **Viewer**,
+> **Analysis**, and **Arrange** tabs consume (dropped/zipped folders, read by
+> `lib/ingest.ts` into the `ParsedTile` shape in `lib/types.ts`). The
+> **Sections** tab is a separate, later-added pipeline with its own tiles
+> built from six uploaded face photos rather than a Grasshopper export --
+> see [`HANDOFF.md`](../HANDOFF.md) section on the Sections tab for that one.
+> Nothing below applies to it.
 
 Written at the end of the Grasshopper chat (2026-09-26) for a fresh chat that starts the app. It covers only what the app receives from Grasshopper and what it must know to read it. What the app should do is for the user to say. Reference files are saved next to this doc in the Project under `claude/reference/`.
 

@@ -61,7 +61,7 @@ async function hydrateTile(stored: StoredTile): Promise<ParsedTile> {
 /** Uploads every tile's assets and upserts the project row for `code`. Only
  * the Viewer's tile bank is persisted for now -- Arrange's generated
  * composition is cheap to regrow from the tiles and is still being reworked,
- * so it isn't synced yet (see HANDOFF_CLOUD.md). */
+ * so it isn't synced yet (see HANDOFF.md). */
 export async function saveProject(code: string, tiles: ParsedTile[]): Promise<void> {
   const storedTiles = await Promise.all(tiles.map((tile) => storeTile(code, tile)));
   const { error } = await supabase

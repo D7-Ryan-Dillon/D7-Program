@@ -24,7 +24,7 @@ function getLastCodeServerSnapshot() {
  * The tile bank (Viewer tab) auto-saves to Supabase under the project code,
  * so it's the same on every device that enters that code. The Arrange tab's
  * generated composition is NOT synced yet -- it's cheap to regenerate from
- * the tiles and its engine is still being iterated on (see HANDOFF_CLOUD.md).
+ * the tiles and its engine is still being iterated on (see HANDOFF.md).
  */
 export type SaveStatus = "idle" | "loading" | "saving" | "saved" | "error";
 
