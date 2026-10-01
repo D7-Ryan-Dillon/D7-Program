@@ -9,6 +9,7 @@ import type { WorkspaceTabKey } from "@/components/shared/TabNav";
 import { ViewerTab } from "@/components/viewer/ViewerTab";
 import { AnalysisTab } from "@/components/analysis/AnalysisTab";
 import { ArrangeTab } from "@/components/arrange/ArrangeTab";
+import { SectionsTab } from "@/components/sections/SectionsTab";
 
 function Workspace() {
   const { projectCode } = useProject();
@@ -23,6 +24,7 @@ function Workspace() {
         {tab === "viewer" && <ViewerTab />}
         {tab === "analysis" && <AnalysisTab />}
         {tab === "arrange" && <ArrangeTab />}
+        {tab === "sections" && <SectionsTab />}
       </div>
     </div>
   );

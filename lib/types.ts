@@ -6,8 +6,44 @@
  * remapping them, so parsing is a plain JSON.parse with no translation step.
  */
 
-export type FaceName = "-X" | "+X" | "-Y" | "+Y" | "-Z" | "+Z";
+/** The 6 Grasshopper box faces are still the common case and the only
+ * names any exported faces.json has ever used, but a tile's actual face
+ * list is no longer assumed to be exactly these 6 -- a hex-prism tile
+ * (lib/sections) has 8 (side1..side6, top, bottom), and a future
+ * Grasshopper exporter starting from arbitrary geometry could have any
+ * number. FaceName is kept as a loose string (not that 6-value union) so
+ * every `Record<FaceName, ...>` in this file accepts either without a
+ * second parallel type; FACE_NAMES remains the box-tile default used
+ * wherever a tile doesn't carry its own `faceNames` (see ParsedTile). */
+export type FaceName = string;
 export const FACE_NAMES: FaceName[] = ["-X", "+X", "-Y", "+Y", "-Z", "+Z"];
+
+/** How a tile's outer boundary is shaped -- drives which face names it has
+ * and how two tiles of that shape sit adjacent to each other. "box" is the
+ * only shape every existing Grasshopper export has used; absent on a
+ * ParsedTile, "box" is always the right assumption (see shapeOf()). */
+export type TileShape =
+  | { kind: "box" }
+  | { kind: "hex-prism"; apothemFt: number; heightFt: number };
+
+/** The default box-tile shape, for tiles exported before `shape` existed. */
+export const DEFAULT_TILE_SHAPE: TileShape = { kind: "box" };
+
+/** A tile's own face names, defaulting to the 6 box names for anything
+ * that doesn't declare its own (every existing Grasshopper export). */
+export function faceNamesOf(tile: { faceNames?: FaceName[] }): FaceName[] {
+  return tile.faceNames ?? FACE_NAMES;
+}
+
+/** The face that reads as "up" for a tile's own shape -- box tiles call it
+ * "+Z" (the literal axis name used throughout every exported faces.json),
+ * hex-prism tiles call it "top" (lib/sections' own naming, matching
+ * Section-Field's). Scoring code that cares specifically about the top
+ * face (e.g. a tile's own daylighting opening) should go through this
+ * rather than assuming "+Z" is always the key. */
+export function topFaceName(tile: { shape?: TileShape }): FaceName {
+  return tile.shape?.kind === "hex-prism" ? "top" : "+Z";
+}
 
 export interface FaceMetric {
   open_cells?: number;
@@ -196,6 +232,14 @@ export interface ParsedTile {
   guessed: GuessedIdentity;
   /** Present only if a matching _reference/recipe.json was dropped in alongside the _analysis folder. */
   recipeText?: string;
+  /** Absent (box) for every tile exported by the Grasshopper engine so far.
+   * See TileShape -- a lib/sections hex-prism tile sets this explicitly. */
+  shape?: TileShape;
+  /** This tile's own face names, in the sense faceNamesOf() resolves --
+   * absent means "the 6 box names" (see FACE_NAMES), which is correct for
+   * every Grasshopper export. A lib/sections hex-prism tile sets this to
+   * its 8 face names (side1..side6, top, bottom). */
+  faceNames?: FaceName[];
 }
 
 export const GLB_TO_FEET_ROW_MAJOR: number[][] = [

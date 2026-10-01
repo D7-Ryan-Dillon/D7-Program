@@ -6,7 +6,7 @@
 // (the "8 ft2 counts as a real opening" threshold, the face-open-area
 // convention, etc.), not guessed.
 
-import { FACE_NAMES, type FaceName, type ParsedTile } from "@/lib/types";
+import { faceNamesOf, topFaceName, type FaceName, type ParsedTile } from "@/lib/types";
 import { computeFaceBranches } from "./faceBranches";
 import { clamp, clusterLevels } from "./utils";
 
@@ -123,20 +123,21 @@ export function computePrimitives(tile: ParsedTile): ScoringPrimitives {
   const voidFractionPct = metrics.void_fraction * 100;
   const retainedFractionPct = 100 - voidFractionPct;
 
+  const tileFaceNames = faceNamesOf(tile);
   const faceOpenAreaFt2 = {} as Record<FaceName, number>;
   const facesReached: FaceName[] = [];
-  for (const f of FACE_NAMES) {
+  for (const f of tileFaceNames) {
     const area = metrics.faces?.[f]?.open_area_ft2 ?? 0;
     faceOpenAreaFt2[f] = area;
     if (area >= OPENING_THRESHOLD_FT2) facesReached.push(f);
   }
-  const totalOpenAreaFt2 = metrics.open_area_on_faces_ft2 ?? FACE_NAMES.reduce((sum, f) => sum + faceOpenAreaFt2[f], 0);
-  const topOpenAreaFt2 = faceOpenAreaFt2["+Z"];
+  const totalOpenAreaFt2 = metrics.open_area_on_faces_ft2 ?? tileFaceNames.reduce((sum, f) => sum + faceOpenAreaFt2[f], 0);
+  const topOpenAreaFt2 = faceOpenAreaFt2[topFaceName(tile)];
   const porosityPct = metrics.void_mesh_area_ft2 && metrics.void_mesh_area_ft2 > 0 ? (totalOpenAreaFt2 / metrics.void_mesh_area_ft2) * 100 : 0;
 
   let totalBranches = 0;
   const branchAreasFt2: number[] = [];
-  for (const f of FACE_NAMES) {
+  for (const f of tileFaceNames) {
     for (const branch of computeFaceBranches(tile, f)) {
       totalBranches++;
       branchAreasFt2.push(branch.areaFt2);

@@ -1,7 +1,7 @@
 "use client";
 
 import type { FaceName, ParsedTile } from "@/lib/types";
-import { FACE_NAMES } from "@/lib/types";
+import { faceNamesOf } from "@/lib/types";
 import { Separator } from "@/components/ui/separator";
 
 function Stat({ label, value }: { label: string; value: string | number }) {
@@ -23,7 +23,8 @@ function ft2(n: number | undefined) {
 
 export function MetricsPanel({ tile }: { tile: ParsedTile }) {
   const { metrics, config } = tile;
-  const openFaces = FACE_NAMES.filter((f) => (metrics.faces?.[f]?.open_area_ft2 ?? 0) > 8);
+  const tileFaceNames = faceNamesOf(tile);
+  const openFaces = tileFaceNames.filter((f) => (metrics.faces?.[f]?.open_area_ft2 ?? 0) > 8);
 
   return (
     <div className="space-y-4 text-sm">
@@ -53,10 +54,10 @@ export function MetricsPanel({ tile }: { tile: ParsedTile }) {
 
       <div>
         <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">
-          Faces reached ({openFaces.length}/6)
+          Faces reached ({openFaces.length}/{tileFaceNames.length})
         </div>
         <div className="grid grid-cols-2 gap-x-3">
-          {FACE_NAMES.map((f: FaceName) => (
+          {tileFaceNames.map((f: FaceName) => (
             <Stat key={f} label={f} value={ft2(metrics.faces?.[f]?.open_area_ft2)} />
           ))}
         </div>
