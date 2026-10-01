@@ -6,9 +6,9 @@ export type WorkspaceTabKey = "viewer" | "analysis" | "arrange" | "sections";
 
 const TABS: { key: WorkspaceTabKey; label: string }[] = [
   { key: "viewer", label: "01 Viewer" },
-  { key: "analysis", label: "02 Analysis" },
-  { key: "arrange", label: "03 Arrange" },
-  { key: "sections", label: "04 Sections" },
+  { key: "sections", label: "02 Sections" },
+  { key: "analysis", label: "03 Analysis" },
+  { key: "arrange", label: "04 Arrange" },
 ];
 
 export function TabNav({ active, onChange }: { active: WorkspaceTabKey; onChange: (key: WorkspaceTabKey) => void }) {

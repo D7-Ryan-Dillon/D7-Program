@@ -68,6 +68,7 @@ export function ArrangeTab() {
     setSelectedInstanceId(null);
     setSelectedJointId(null);
     setHighlightIds(null);
+    setRegenNonce((n) => n + 1);
     setAssembly(autoGenerate(bankTiles, settings));
   };
 
@@ -228,6 +229,7 @@ export function ArrangeTab() {
           <div className="min-h-0 min-w-0 flex-1">
             {assembly.instances.length ? (
               <ArrangeViewport
+                fitKey={regenNonce}
                 instances={assembly.instances}
                 tileById={tileById}
                 visibility={visibility}

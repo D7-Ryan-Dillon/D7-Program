@@ -69,11 +69,14 @@ export function marchChannel(channel: Uint8Array, grid: [number, number, number]
 export function buildTileScene(material: Uint8Array, voidSmooth: Uint8Array, grid: [number, number, number] = SECTION_GRID, tileFt: [number, number, number] = SECTION_TILE_FT): THREE.Group {
   const group = new THREE.Group();
 
-  const foam = new THREE.Mesh(marchChannel(material, grid, tileFt), new THREE.MeshStandardMaterial({ color: "#e8a6c8" }));
+  // Double-sided: a lofted/blended field (unlike a Grasshopper erosion
+  // export) can fold into thin, branching sheets rather than chunky solids,
+  // and a single-sided material shows through to nothing on their backfaces.
+  const foam = new THREE.Mesh(marchChannel(material, grid, tileFt), new THREE.MeshStandardMaterial({ color: "#e8a6c8", side: THREE.DoubleSide }));
   foam.name = "foam";
   group.add(foam);
 
-  const voidMesh = new THREE.Mesh(marchChannel(voidSmooth, grid, tileFt), new THREE.MeshStandardMaterial({ color: "#1c1c1f" }));
+  const voidMesh = new THREE.Mesh(marchChannel(voidSmooth, grid, tileFt), new THREE.MeshStandardMaterial({ color: "#1c1c1f", side: THREE.DoubleSide }));
   voidMesh.name = "void";
   group.add(voidMesh);
 

@@ -43,7 +43,12 @@ function applyMaterial(mesh: THREE.Mesh, color: string, visible: boolean, ghoste
     transparent: ghosted,
     opacity: ghosted ? 0.22 : 1,
     depthWrite: !ghosted,
-    side: ghosted ? THREE.DoubleSide : THREE.FrontSide,
+    // Always double-sided: a lofted/branching mesh (Section-Field tiles)
+    // isn't guaranteed as chunky-solid as a Grasshopper erosion export, so a
+    // single-sided material can show through to empty backfaces. Matches
+    // ArrangeViewport's own InstanceMesh, which never conditions this on
+    // display mode either.
+    side: THREE.DoubleSide,
   });
 }
 

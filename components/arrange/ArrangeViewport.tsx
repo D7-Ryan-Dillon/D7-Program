@@ -136,6 +136,7 @@ export function ArrangeViewport({
   selectedId,
   highlightIds,
   onSelect,
+  fitKey,
 }: {
   instances: PlacedInstance[];
   tileById: Map<string, ParsedTile>;
@@ -145,6 +146,12 @@ export function ArrangeViewport({
   selectedId?: string | null;
   highlightIds?: string[] | null;
   onSelect?: (id: string) => void;
+  /** Changing this forces <Bounds> to re-measure and recenter -- needed
+   * because a fresh auto-generate can replace every instance without
+   * changing the viewport's own mounted tree enough for Bounds' own
+   * `observe` to reliably notice (same pattern as CubeHexBuilder's
+   * preview, keyed on the generated group's uuid instead). */
+  fitKey?: number | string;
 }) {
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
   useShiftToPan(controlsRef);
@@ -157,7 +164,7 @@ export function ArrangeViewport({
         <directionalLight position={[10, 16, 8]} intensity={1.1} />
         <directionalLight position={[-8, -6, -8]} intensity={0.25} />
         <Suspense fallback={null}>
-          <Bounds fit clip observe margin={1.3}>
+          <Bounds key={fitKey} fit clip observe margin={1.3}>
             {fusedMesh ? (
               <FusedMesh mesh={fusedMesh} />
             ) : (

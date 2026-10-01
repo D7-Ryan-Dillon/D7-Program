@@ -7,9 +7,11 @@ import * as THREE from "three";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { GlowPanel } from "@/components/shared/GlowPanel";
 import { SquareFrame } from "@/components/shared/SquareFrame";
+import { DisplayModeBar } from "@/components/viewer/DisplayModeBar";
+import { VisibilityPanel } from "@/components/viewer/VisibilityPanel";
+import type { DisplayMode, MeshColors, MeshVisibility } from "@/components/viewer/ThreeViewport";
 import { useProject } from "@/lib/project-store";
 import type { BankTile } from "@/lib/sections/tileLibrary";
 import { cubeFaces, facesForShape, prismFaces, type VolumeAssignments, type VolumeFaceName, type VolumeShape } from "@/lib/sections/volumeField";
@@ -21,13 +23,30 @@ import type { ParsedTile } from "@/lib/types";
 
 const CATEGORY_OPTIONS = ["gathering", "office", "lobby"] as const;
 
-function PreviewScene({ group, foamVisible, voidVisible }: { group: THREE.Group; foamVisible: boolean; voidVisible: boolean }) {
+// Same material convention as ThreeViewport's applyMaterial: always
+// double-sided (a lofted/blended field can fold into thin branching sheets,
+// not just chunky solids, and a single-sided material shows through to
+// nothing on their backfaces), transparent+dim when ghosted.
+function applyPreviewMaterial(mesh: THREE.Object3D | null | undefined, color: string, visible: boolean, ghosted: boolean) {
+  if (!(mesh instanceof THREE.Mesh)) return;
+  mesh.visible = visible;
+  mesh.material = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.85,
+    metalness: 0.05,
+    transparent: ghosted,
+    opacity: ghosted ? 0.22 : 1,
+    depthWrite: !ghosted,
+    side: THREE.DoubleSide,
+  });
+}
+
+function PreviewScene({ group, displayMode, visibility, colors }: { group: THREE.Group; displayMode: DisplayMode; visibility: MeshVisibility; colors: MeshColors }) {
   useEffect(() => {
-    const foam = group.getObjectByName("foam");
-    const voidMesh = group.getObjectByName("void");
-    if (foam) foam.visible = foamVisible;
-    if (voidMesh) voidMesh.visible = voidVisible;
-  }, [group, foamVisible, voidVisible]);
+    const ghosted = displayMode === "ghosted";
+    applyPreviewMaterial(group.getObjectByName("foam"), colors.foam, visibility.foam, ghosted);
+    applyPreviewMaterial(group.getObjectByName("void"), colors.void, visibility.void, ghosted);
+  }, [group, displayMode, visibility, colors]);
   return <primitive object={group} />;
 }
 
@@ -42,8 +61,9 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
   const [typology, setTypology] = useState("");
   const [previewGroup, setPreviewGroup] = useState<THREE.Group | null>(null);
   const [faceFit, setFaceFit] = useState<number | null>(null);
-  const [foamVisible, setFoamVisible] = useState(true);
-  const [voidVisible, setVoidVisible] = useState(true);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("rendered");
+  const [visibility, setVisibility] = useState<MeshVisibility>({ foam: true, void: true });
+  const [colors, setColors] = useState<MeshColors>({ foam: "#e8a6c8", void: "#1c1c1f" });
   const [busy, setBusy] = useState(false);
 
   const faceNames = facesForShape(shape);
@@ -142,6 +162,12 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
             </p>
           </div>
         </GlowPanel>
+        <GlowPanel glow="orange">
+          <div className="p-4">
+            <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Display</div>
+            <DisplayModeBar mode={displayMode} onChange={setDisplayMode} />
+          </div>
+        </GlowPanel>
         <GlowPanel glow="magenta">
           <div className="space-y-3 p-4">
             <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Loft settings</div>
@@ -171,7 +197,7 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
                 <directionalLight position={[10, 16, 8]} intensity={1.1} />
                 <directionalLight position={[-8, -6, -8]} intensity={0.25} />
                 <Bounds key={previewGroup.uuid} fit clip observe margin={1.3}>
-                  <PreviewScene group={previewGroup} foamVisible={foamVisible} voidVisible={voidVisible} />
+                  <PreviewScene group={previewGroup} displayMode={displayMode} visibility={visibility} colors={colors} />
                 </Bounds>
                 <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
               </Canvas>
@@ -186,16 +212,9 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
 
       <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
         <GlowPanel glow="orange">
-          <div className="space-y-3 p-4">
-            <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>
-            <div className="flex items-center justify-between text-xs">
-              <span>Foam</span>
-              <Switch checked={foamVisible} onCheckedChange={setFoamVisible} />
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span>Void</span>
-              <Switch checked={voidVisible} onCheckedChange={setVoidVisible} />
-            </div>
+          <div className="p-4">
+            <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>
+            <VisibilityPanel visibility={visibility} onVisibility={setVisibility} colors={colors} onColors={setColors} />
           </div>
         </GlowPanel>
         <GlowPanel glow="magenta">

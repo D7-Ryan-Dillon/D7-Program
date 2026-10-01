@@ -17,7 +17,7 @@ function TileThumb({ tile, selected, onClick }: { tile: BankTile; selected: bool
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- a user-supplied/local photo, not an optimizable remote asset */}
       <img src={tile.src} alt={tile.name} className="absolute inset-0 h-full w-full object-cover" />
-      <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full opacity-70 mix-blend-screen">
+      <svg viewBox={`0 0 ${tile.proposal.width} ${tile.proposal.height}`} preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full opacity-70 mix-blend-screen">
         {tile.proposal.shapes.map((s, i) => (
           <path key={i} d={s.d} fill="white" fillRule="evenodd" />
         ))}
