@@ -7,6 +7,7 @@ import { GlowPanel } from "@/components/shared/GlowPanel";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { TilePicker } from "./TilePicker";
+import { SlotOrderList } from "./SlotOrderList";
 import { BoardSettingsPanel } from "./BoardSettingsPanel";
 import { BoardPreviewCanvas } from "./BoardPreviewCanvas";
 import { downloadBlob, exportBoardPage1, exportBoardPage2 } from "@/lib/boards/exportBoard";
@@ -75,6 +76,17 @@ export function BoardsTab() {
     setConfig((prev) => ({ ...prev, slots: prev.slots.map((s) => (s.id === slotId ? { ...s, nameFontSizePt } : s)) }));
   };
 
+  const moveSlot = (slotId: string, direction: "up" | "down") => {
+    setConfig((prev) => {
+      const index = prev.slots.findIndex((s) => s.id === slotId);
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (index < 0 || targetIndex < 0 || targetIndex >= prev.slots.length) return prev;
+      const slots = [...prev.slots];
+      [slots[index], slots[targetIndex]] = [slots[targetIndex], slots[index]];
+      return { ...prev, slots };
+    });
+  };
+
   const exportPngs = async () => {
     setExporting(true);
     try {
@@ -95,6 +107,9 @@ export function BoardsTab() {
       <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
         <GlowPanel glow="magenta">
           <div className="p-4">
+            <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Board order</div>
+            <SlotOrderList slots={config.slots} tileById={tileById} onMove={moveSlot} onRemove={removeSlot} />
+            <Separator className="my-4" />
             <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Tiles</div>
             <TilePicker slots={config.slots} onToggle={toggleTile} />
           </div>

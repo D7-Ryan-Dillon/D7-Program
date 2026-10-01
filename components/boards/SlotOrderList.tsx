@@ -1,0 +1,64 @@
+"use client";
+
+import { ChevronUp, ChevronDown, X } from "lucide-react";
+import { displayName, type BoardSlot } from "@/lib/boards/types";
+import type { ParsedTile } from "@/lib/types";
+
+/** The order tiles appear on the board follows `config.slots` -- this lets
+ * that order be rearranged directly, rather than only by removing and
+ * re-adding tiles in the desired sequence. */
+export function SlotOrderList({
+  slots,
+  tileById,
+  onMove,
+  onRemove,
+}: {
+  slots: BoardSlot[];
+  tileById: Map<string, ParsedTile>;
+  onMove: (slotId: string, direction: "up" | "down") => void;
+  onRemove: (slotId: string) => void;
+}) {
+  if (!slots.length) {
+    return <p className="text-xs text-muted-foreground">Check tiles below to add them to the board.</p>;
+  }
+
+  return (
+    <ol className="space-y-1">
+      {slots.map((slot, i) => {
+        const tile = slot.tileId ? tileById.get(slot.tileId) : undefined;
+        return (
+          <li key={slot.id} className="flex items-center gap-1 rounded-md border-hair bg-white/[0.02] px-2 py-1.5 text-xs">
+            <span className="w-4 shrink-0 text-center font-mono text-[10px] text-muted-foreground">{i + 1}</span>
+            <span className="min-w-0 flex-1 truncate">{tile ? displayName(tile.name) : "—"}</span>
+            <button
+              type="button"
+              className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+              disabled={i === 0}
+              onClick={() => onMove(slot.id, "up")}
+              aria-label={`Move ${tile?.name ?? "tile"} earlier`}
+            >
+              <ChevronUp className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-25"
+              disabled={i === slots.length - 1}
+              onClick={() => onMove(slot.id, "down")}
+              aria-label={`Move ${tile?.name ?? "tile"} later`}
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              className="rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive"
+              onClick={() => onRemove(slot.id)}
+              aria-label={`Remove ${tile?.name ?? "tile"} from board`}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
