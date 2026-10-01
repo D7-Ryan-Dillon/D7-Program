@@ -198,8 +198,8 @@ export function ArrangeTab() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(300px,1fr)_auto] gap-4 lg:grid-cols-[280px_1fr_280px] lg:grid-rows-[minmax(0,1fr)]">
-        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
+      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)_280px] grid-rows-[minmax(0,1fr)] gap-4">
+        <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
           <GlowPanel glow="magenta">
             <div className="p-4">
               <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Bank</div>
@@ -214,7 +214,7 @@ export function ArrangeTab() {
           </GlowPanel>
         </div>
 
-        <div className="flex min-h-0 flex-col gap-3">
+        <div className="flex min-h-0 min-w-0 flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="font-mono text-xs text-muted-foreground">
               {assembly.instances.length} piece(s)
@@ -225,7 +225,7 @@ export function ArrangeTab() {
               <Switch checked={fused} disabled={busy || !assembly.instances.length} onCheckedChange={() => void toggleFuse()} />
             </div>
           </div>
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1">
             {assembly.instances.length ? (
               <ArrangeViewport
                 instances={assembly.instances}
@@ -245,7 +245,7 @@ export function ArrangeTab() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
+        <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
           <GlowPanel glow="magenta">
             <div className="p-4">
               <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>
