@@ -168,12 +168,12 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
         </GlowPanel>
         <GlowPanel glow="magenta">
           <div className="space-y-3 p-4">
-            <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Merge settings</div>
+            <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Erosion settings</div>
             <label className="block text-xs">
-              Merge smoothness ({fitTolerance})
+              Erosion smoothness ({fitTolerance})
               <input type="range" min={0} max={100} value={fitTolerance} onChange={(e) => setFitTolerance(Number(e.target.value))} className="mt-1 w-full" />
             </label>
-            <p className="text-[11px] text-muted-foreground">How rounded the seam is where each face&rsquo;s mass merges into the others -- 0 is a sharp union, 100 is very rounded.</p>
+            <p className="text-[11px] text-muted-foreground">How rounded the carved voids are where two faces&rsquo; erosion meets -- 0 is a sharp cut, 100 is very rounded.</p>
             <Button className="w-full" onClick={generatePreview}>
               Generate preview
             </Button>

@@ -133,25 +133,28 @@ export interface VolumeField {
   faceFit: number;
 }
 
-/** A smooth/organic version of Math.max(a, b): identical to Math.max at
- * k = 0 (a sharp boolean union), rounding the seam where a and b cross as
- * k grows. Used to merge each active face's own mass into one continuous
- * surface instead of a hard-edged union. */
-function smoothMax(a: number, b: number, k: number): number {
-  if (k <= 0) return Math.max(a, b);
-  return (a + b + Math.sqrt((a - b) * (a - b) + k * k)) / 2;
+/** A smooth/organic version of Math.min(a, b): identical to Math.min at
+ * k = 0 (a sharp boolean intersection), rounding the seam where a and b
+ * cross as k grows. Used to carve every active face's void into the
+ * starting solid block without a hard crease where two faces' carvings
+ * meet. */
+function smoothMin(a: number, b: number, k: number): number {
+  if (k <= 0) return Math.min(a, b);
+  return (a + b - Math.sqrt((a - b) * (a - b) + k * k)) / 2;
 }
 
-/** Builds the merged 3D scalar field for a set of face assignments: each
- * active face's drawn mask is a *mass* on that side of the cube/hex, not a
- * decal, so it's extruded through the full depth (its signed value at a
- * point depends only on that point's lateral position on the face's own
- * plane, never on how far the point is from the face) -- then every
- * active face's extrusion is merged into one field with a smooth/organic
- * union (see smoothMax), so the result reads as all the drawn masses
- * fused into a single solid, not a blurry average of them. The "foam"
- * tile is this merged solid; "void" is simply its geometric complement
- * (see voxelize.ts) -- there's no separate void computation. */
+/** Builds the eroded 3D scalar field for a set of face assignments, the
+ * same way the real foam blocks were actually made: the whole cube/hex
+ * starts as one solid block (every active face agrees "material" unless
+ * told otherwise), and each active face's drawn mask carves void inward
+ * from that face wherever it's black -- extruded through the full depth,
+ * so a face's own verdict doesn't fade with distance from it. A point
+ * survives as foam only if *every* active face's mask calls it material
+ * there (smoothMin is the organic version of that AND); a face left
+ * unassigned casts no vote, so it never carves anything. The "foam" tile
+ * is what's left of the block after every active face's carving; "void"
+ * is simply its complement (see voxelize.ts) -- there's no separate void
+ * computation. */
 export function buildVolumeField(assignments: VolumeAssignments, shape: VolumeShape, fitTolerance: number, resolution = 46): VolumeField {
   const active = facesForShape(shape).flatMap((name) => {
     const trace = assignments[name];
@@ -199,7 +202,7 @@ export function buildVolumeField(assignments: VolumeAssignments, shape: VolumeSh
           const mx = Math.max(0, Math.min(MASK_SIZE - 1, Math.round(u * (MASK_SIZE - 1))));
           const my = Math.max(0, Math.min(MASK_SIZE - 1, Math.round(v * (MASK_SIZE - 1))));
           const signed = Math.max(-1, Math.min(1, face.distance[my * MASK_SIZE + mx] / 2.4));
-          value = first ? signed : smoothMax(value, signed, mergeK);
+          value = first ? signed : smoothMin(value, signed, mergeK);
           first = false;
           if (depth < (shape === "hex-prism" && face.name.startsWith("side") ? 0.035 : 0.0001)) owned.push(signed);
         }
