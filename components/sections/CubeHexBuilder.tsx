@@ -54,6 +54,7 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
   const { addTile } = useProject();
   const [shape, setShape] = useState<VolumeShape>("cube");
   const [assignments, setAssignments] = useState<Partial<Record<VolumeFaceName, string>>>({});
+  const [seed, setSeed] = useState(1);
   const [fitTolerance, setFitTolerance] = useState(50);
   const [name, setName] = useState("");
   const [category, setCategory] = useState<(typeof CATEGORY_OPTIONS)[number] | "">("");
@@ -84,7 +85,7 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
       toast.error("Assign at least one tile to a face first.");
       return;
     }
-    const volume = buildVolumeField(volAssignments, shape, fitTolerance, 46);
+    const volume = buildVolumeField(volAssignments, shape, seed, fitTolerance, 46);
     const voxels = voxelizeVolumeField(volume);
     if (!voxels.material || !voxels.voidSmooth) return;
     setFaceFit(volume.faceFit);
@@ -107,6 +108,7 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
         name: name.trim(),
         shape,
         assignments: volAssignments,
+        seed,
         fitTolerance,
         guessed: category ? { category, typology: typology.trim() || undefined } : {},
       });
@@ -168,16 +170,19 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
         </GlowPanel>
         <GlowPanel glow="magenta">
           <div className="space-y-3 p-4">
-            <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Erosion settings</div>
+            <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Loft settings</div>
             <label className="block text-xs">
-              Erosion smoothness ({fitTolerance})
+              Seed
+              <Input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value) || 0)} className="mt-1 h-8" />
+            </label>
+            <label className="block text-xs">
+              Seam fit tolerance ({fitTolerance})
               <input type="range" min={0} max={100} value={fitTolerance} onChange={(e) => setFitTolerance(Number(e.target.value))} className="mt-1 w-full" />
             </label>
-            <p className="text-[11px] text-muted-foreground">How rounded the carved voids are where two faces&rsquo; erosion meets -- 0 is a sharp cut, 100 is very rounded.</p>
             <Button className="w-full" onClick={generatePreview}>
               Generate preview
             </Button>
-            {faceFit !== null && <p className="text-[11px] text-muted-foreground">Face fit: {faceFit}% (how much of each drawn mass survived the merge unchanged)</p>}
+            {faceFit !== null && <p className="text-[11px] text-muted-foreground">Face fit: {faceFit}% (how much of each drawn trace survived the loft unchanged)</p>}
           </div>
         </GlowPanel>
       </div>
