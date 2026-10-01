@@ -34,8 +34,8 @@ export function ViewerTab() {
           </div>
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(300px,1fr)_auto] gap-4 lg:grid-cols-[280px_1fr_280px] lg:grid-rows-[minmax(0,1fr)]">
-          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
+        <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)_280px] grid-rows-[minmax(0,1fr)] gap-4">
+          <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
             <GlowPanel glow="orange">
               <div className="p-4">
                 <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Camera</div>
@@ -52,7 +52,7 @@ export function ViewerTab() {
             </GlowPanel>
           </div>
 
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 min-w-0">
             <SquareFrame className="relative">
               <ThreeViewport
                 key={activeTile.id}
@@ -65,7 +65,7 @@ export function ViewerTab() {
             </SquareFrame>
           </div>
 
-          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto">
+          <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
             <GlowPanel className="flex-1" glow="magenta">
               <div className="p-4">
                 <MetricsPanel tile={activeTile} />

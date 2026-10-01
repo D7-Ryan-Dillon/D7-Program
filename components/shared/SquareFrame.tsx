@@ -10,7 +10,12 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
  */
 export function SquareFrame({ children, className }: { children: ReactNode; className?: string }) {
   const outerRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState(0);
+  // null means "not measured yet" -- distinct from a real 0, which happens
+  // when the parent genuinely has no space to give (e.g. an extremely
+  // narrow window). Conflating the two (e.g. via `size || "100%"`) made a
+  // legitimately-empty parent fall back to 100%, ballooning the viewport to
+  // fill whatever ancestor actually had space -- up to the whole page.
+  const [size, setSize] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     const el = outerRef.current;
@@ -25,7 +30,7 @@ export function SquareFrame({ children, className }: { children: ReactNode; clas
 
   return (
     <div ref={outerRef} className="flex h-full w-full min-h-0 min-w-0 items-center justify-center">
-      <div className={className} style={{ width: size || "100%", height: size || "100%" }}>
+      <div className={className} style={{ width: size ?? "100%", height: size ?? "100%" }}>
         {children}
       </div>
     </div>
