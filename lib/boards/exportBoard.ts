@@ -1,26 +1,23 @@
 // Composes a Board (lib/boards/types.ts) onto a full print-resolution 2D
 // canvas and rasterizes it to a PNG -- page 1 is the tile renders (image +
-// name tag only), page 2 is the same frame with the image shrunk into the
-// right portion and each tile's scored descriptors (lib/scoring/
-// descriptors.ts) listed on the left, top 3 highlighted. Both pages share
-// the exact same grid geometry so they line up if viewed side by side.
+// name tag only), page 2 keeps the identical module shape but splits it:
+// image on the left, that tile's scored descriptors (lib/scoring/
+// descriptors.ts) listed on the right, top 3 highlighted. Both pages share
+// the exact same module geometry (lib/boards/frameShape.ts, lib/boards/
+// grid.ts) so they line up if viewed side by side -- and the live preview
+// (components/boards/BoardPreviewCanvas.tsx) calls these same functions,
+// so what you see really is what you get.
 
 import { scoreTile, type DescriptorResult } from "@/lib/scoring/descriptors";
 import type { ParsedTile } from "@/lib/types";
 import { renderTileToDataUrl } from "./renderTile";
-import { traceFrame, frameMetricsFor, frameContentHeight } from "./cutCorner";
-import { gridLayoutFor } from "./grid";
-import { DPI, type BoardConfig } from "./types";
+import { traceModuleOutline, traceSquareOnly, DIVIDER_X, TAG_HEIGHT_FRACTION } from "./frameShape";
+import { squareGridLayout, squareGridCells, type GridCell } from "./grid";
+import { fitText, wrapToWidth } from "./textFit";
+import { DPI, displayName, type BoardConfig, type BoardSlot } from "./types";
 
-interface Cell {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-function ptToPx(pt: number): number {
-  return (pt / 72) * DPI;
+export function ptToPx(pt: number, dpi: number = DPI): number {
+  return (pt / 72) * dpi;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -32,106 +29,114 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-interface BoardLayout {
+export interface PageGeometry {
   widthPx: number;
   heightPx: number;
   margin: number;
-  titleSize: number;
+  titleFontSizePx: number;
   titleBottom: number;
   gap: number;
-  columns: number;
-  rows: number;
-  cells: Cell[];
+  cells: GridCell[];
+  /** Index into `cells` the caption occupies, or null if disabled. */
+  captionCellIndex: number | null;
 }
 
-function computeLayout(config: BoardConfig): BoardLayout {
-  const widthPx = Math.round(config.widthIn * DPI);
-  const heightPx = Math.round(config.heightIn * DPI);
-  const margin = DPI * 0.4;
-  const titleSize = heightPx * 0.032;
-  const titleBottom = margin + titleSize * 1.8;
-  const gap = config.gapIn * DPI;
+/** Everything about where things go, independent of what's actually drawn
+ * in each cell -- shared by both pages and by the live preview, so a
+ * setting change moves things identically everywhere. */
+export function computeGeometry(config: BoardConfig, dpi: number = DPI): PageGeometry {
+  const widthPx = Math.round(config.widthIn * dpi);
+  const heightPx = Math.round(config.heightIn * dpi);
+  const margin = dpi * 0.4;
+  const titleFontSizePx = config.titleFontSizePt ? ptToPx(config.titleFontSizePt, dpi) : heightPx * 0.032;
+  const titleBottom = margin + titleFontSizePx * 1.8;
+  const gap = config.gapIn * dpi;
 
   const totalCells = config.slots.length + (config.textBox.enabled ? 1 : 0);
-  const { columns, rows } = gridLayoutFor(totalCells || 1);
-  const gridWidth = widthPx - margin * 2;
-  const gridHeight = heightPx - titleBottom - margin;
-  const cellWidth = (gridWidth - gap * (columns - 1)) / columns;
-  const cellHeight = (gridHeight - gap * (rows - 1)) / rows;
+  const availableWidth = widthPx - margin * 2;
+  const availableHeight = heightPx - titleBottom - margin;
+  const layout = squareGridLayout(totalCells || 1, availableWidth, availableHeight, gap);
+  const cells = squareGridCells(layout, gap).map((cell) => ({ x: cell.x + margin, y: cell.y + titleBottom, size: cell.size }));
 
-  const cells: Cell[] = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < columns; c++) {
-      cells.push({ x: margin + c * (cellWidth + gap), y: titleBottom + r * (cellHeight + gap), width: cellWidth, height: cellHeight });
-    }
-  }
-  return { widthPx, heightPx, margin, titleSize, titleBottom, gap, columns, rows, cells };
+  return {
+    widthPx,
+    heightPx,
+    margin,
+    titleFontSizePx,
+    titleBottom,
+    gap,
+    cells,
+    captionCellIndex: config.textBox.enabled ? 0 : null,
+  };
 }
 
-function drawBackgroundAndTitle(ctx: CanvasRenderingContext2D, config: BoardConfig, layout: BoardLayout) {
+function drawBackgroundAndTitle(ctx: CanvasRenderingContext2D, config: BoardConfig, geo: PageGeometry) {
   ctx.fillStyle = config.backgroundColor;
-  ctx.fillRect(0, 0, layout.widthPx, layout.heightPx);
+  ctx.fillRect(0, 0, geo.widthPx, geo.heightPx);
   ctx.fillStyle = config.titleColor;
-  ctx.font = `600 ${layout.titleSize}px "${config.fontFamily}"`;
+  ctx.font = `600 ${geo.titleFontSizePx}px "${config.fontFamily}"`;
   ctx.textBaseline = "top";
-  ctx.fillText(config.name.toUpperCase(), layout.margin, layout.margin);
+  ctx.fillText(config.name.toUpperCase(), geo.margin, geo.margin);
 }
 
-function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const next = line ? `${line} ${word}` : word;
-    if (ctx.measureText(next).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = next;
-    }
-  }
-  if (line) lines.push(line);
-  return lines;
-}
-
-/** No frame, no border -- just the caption text, per spec. */
-function drawTextBoxCell(ctx: CanvasRenderingContext2D, cell: Cell, config: BoardConfig) {
+function drawCaptionCell(ctx: CanvasRenderingContext2D, cell: GridCell, config: BoardConfig, dpi: number) {
   ctx.save();
   ctx.fillStyle = config.textBox.color;
-  const fontSize = Math.max(12, cell.height * 0.07);
+  const padding = cell.size * 0.04;
+  const maxWidth = cell.size - padding * 2;
+  const maxHeight = cell.size - padding * 2;
+  const text = config.textBox.text || "";
+  let fontSize: number;
+  let lines: string[];
+  if (config.captionFontSizePt) {
+    fontSize = ptToPx(config.captionFontSizePt, dpi);
+    ctx.font = `${fontSize}px "${config.fontFamily}"`;
+    lines = wrapToWidth(ctx, text, maxWidth);
+  } else {
+    const fit = fitText(ctx, text, maxWidth, maxHeight, { maxFontSize: cell.size * 0.08, minFontSize: 8, maxLines: 20, fontFamily: config.fontFamily });
+    fontSize = fit.fontSize;
+    lines = fit.lines;
+  }
   ctx.font = `${fontSize}px "${config.fontFamily}"`;
   ctx.textBaseline = "top";
-  const padding = cell.width * 0.04;
-  const lines = wrapText(ctx, config.textBox.text || "", cell.width - padding * 2);
   lines.forEach((line, i) => ctx.fillText(line, cell.x + padding, cell.y + padding + i * fontSize * 1.3));
   ctx.restore();
 }
 
-function drawNameTag(ctx: CanvasRenderingContext2D, cell: Cell, mainHeight: number, name: string, config: BoardConfig) {
-  const tagTop = cell.y + mainHeight;
-  const tagHeight = cell.height - mainHeight;
-  const fontSize = Math.max(10, tagHeight * 0.4);
+function drawNameTag(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardSlot, name: string, config: BoardConfig, dpi: number) {
+  const tagTop = cell.y + cell.size;
+  const tagHeight = cell.size * TAG_HEIGHT_FRACTION;
+  const tagLeft = cell.x + cell.size * DIVIDER_X;
+  const tagWidth = cell.x + cell.size - tagLeft;
+  const padding = cell.size * 0.015;
+  const text = displayName(name).toUpperCase();
+
+  let fontSize: number;
+  if (slot.nameFontSizePt) {
+    fontSize = ptToPx(slot.nameFontSizePt, dpi);
+  } else {
+    fontSize = fitText(ctx, text, tagWidth - padding * 2, tagHeight * 0.8, { maxFontSize: tagHeight * 0.55, minFontSize: 6, maxLines: 1, fontFamily: config.fontFamily }).fontSize;
+  }
+  ctx.save();
   ctx.fillStyle = config.highlightColor;
   ctx.font = `${fontSize}px "${config.fontFamily}"`;
   ctx.textBaseline = "middle";
   ctx.textAlign = "right";
-  ctx.fillText(name.toUpperCase(), cell.x + cell.width - cell.width * 0.03, tagTop + tagHeight / 2);
-  ctx.textAlign = "left";
+  ctx.fillText(text, cell.x + cell.size - padding, tagTop + tagHeight / 2);
+  ctx.restore();
 }
 
-/** Page 1: the tile render fills the whole frame above the name tag, at
+/** Page 1: the tile render fills the whole square (above the name tag), at
  * its own exact aspect ratio (renderTileToDataUrl fits the camera to
  * whichever axis is tighter), so nothing is cropped. */
-async function drawImageCell(ctx: CanvasRenderingContext2D, cell: Cell, tile: ParsedTile, viewKey: BoardConfig["slots"][number]["view"], config: BoardConfig) {
-  const metrics = frameMetricsFor(cell.width, cell.height);
-  const mainHeight = frameContentHeight(cell.height, metrics);
-  const lineWidth = ptToPx(config.outlineWidthPt);
+async function drawImageModule(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardSlot, tile: ParsedTile, config: BoardConfig, dpi: number) {
+  const lineWidth = ptToPx(config.outlineWidthPt, dpi);
 
   const dataUrl = await renderTileToDataUrl({
     glbUrl: tile.glbUrl,
-    view: viewKey,
-    width: Math.round(cell.width),
-    height: Math.round(mainHeight),
+    view: slot.view,
+    width: Math.round(cell.size),
+    height: Math.round(cell.size),
     backgroundColor: config.backgroundColor,
     foamColor: config.foamColor,
     voidColor: config.voidColor,
@@ -143,37 +148,35 @@ async function drawImageCell(ctx: CanvasRenderingContext2D, cell: Cell, tile: Pa
   const img = await loadImage(dataUrl);
 
   ctx.save();
-  traceFrame(ctx, cell.x, cell.y, cell.width, cell.height, metrics);
+  traceSquareOnly(ctx, cell.x, cell.y, cell.size);
   ctx.clip();
-  ctx.drawImage(img, cell.x, cell.y, cell.width, mainHeight);
+  ctx.drawImage(img, cell.x, cell.y, cell.size, cell.size);
   ctx.restore();
 
   ctx.save();
   ctx.strokeStyle = config.descriptorColor;
   ctx.lineWidth = lineWidth;
-  traceFrame(ctx, cell.x, cell.y, cell.width, cell.height, metrics);
+  traceModuleOutline(ctx, cell.x, cell.y, cell.size);
   ctx.stroke();
   ctx.restore();
 
-  drawNameTag(ctx, cell, mainHeight, tile.name, config);
+  drawNameTag(ctx, cell, slot, tile.name, config, dpi);
 }
 
-/** Page 2: descriptors fill the left portion, the tile render is shrunk
- * into the right portion -- same outer frame and name tag as page 1. */
-async function drawDescriptorCell(ctx: CanvasRenderingContext2D, cell: Cell, tile: ParsedTile, viewKey: BoardConfig["slots"][number]["view"], config: BoardConfig) {
-  const metrics = frameMetricsFor(cell.width, cell.height);
-  const mainHeight = frameContentHeight(cell.height, metrics);
-  const lineWidth = ptToPx(config.outlineWidthPt);
-
-  const imageWidth = cell.width * 0.34;
-  const imageX = cell.x + cell.width - imageWidth;
-  const descWidth = cell.width - imageWidth;
+/** Page 2: the tile render is shrunk into the left portion, its scored
+ * descriptors listed in the right column -- same outer shape, same name
+ * tag, as page 1. */
+async function drawDescriptorModule(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardSlot, tile: ParsedTile, config: BoardConfig, dpi: number) {
+  const lineWidth = ptToPx(config.outlineWidthPt, dpi);
+  const imageWidth = cell.size * DIVIDER_X;
+  const descX = cell.x + imageWidth;
+  const descWidth = cell.size - imageWidth;
 
   const dataUrl = await renderTileToDataUrl({
     glbUrl: tile.glbUrl,
-    view: viewKey,
+    view: slot.view,
     width: Math.round(imageWidth),
-    height: Math.round(mainHeight),
+    height: Math.round(cell.size),
     backgroundColor: config.backgroundColor,
     foamColor: config.foamColor,
     voidColor: config.voidColor,
@@ -185,21 +188,21 @@ async function drawDescriptorCell(ctx: CanvasRenderingContext2D, cell: Cell, til
   const img = await loadImage(dataUrl);
 
   ctx.save();
-  traceFrame(ctx, cell.x, cell.y, cell.width, cell.height, metrics);
+  traceSquareOnly(ctx, cell.x, cell.y, cell.size);
   ctx.clip();
   ctx.fillStyle = config.backgroundColor;
-  ctx.fillRect(cell.x, cell.y, cell.width, cell.height);
-  ctx.drawImage(img, imageX, cell.y, imageWidth, mainHeight);
+  ctx.fillRect(cell.x, cell.y, cell.size, cell.size);
+  ctx.drawImage(img, cell.x, cell.y, imageWidth, cell.size);
   ctx.restore();
 
   ctx.save();
   ctx.strokeStyle = config.descriptorColor;
   ctx.lineWidth = lineWidth;
-  traceFrame(ctx, cell.x, cell.y, cell.width, cell.height, metrics);
+  traceModuleOutline(ctx, cell.x, cell.y, cell.size);
   ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(imageX, cell.y);
-  ctx.lineTo(imageX, cell.y + mainHeight);
+  ctx.moveTo(descX, cell.y);
+  ctx.lineTo(descX, cell.y + cell.size);
   ctx.stroke();
   ctx.restore();
 
@@ -211,36 +214,44 @@ async function drawDescriptorCell(ctx: CanvasRenderingContext2D, cell: Cell, til
       .map((r) => r.key),
   );
 
-  const padding = descWidth * 0.06;
-  const listTop = cell.y + Math.max(padding, metrics.chamfer + padding * 0.4);
-  const listHeight = cell.y + mainHeight - listTop - padding * 0.5;
+  const padding = descWidth * 0.08;
+  const chamferInset = cell.size * 0.03;
+  const listTop = cell.y + Math.max(padding, chamferInset);
+  const listHeight = cell.y + cell.size - padding - listTop;
   const rowHeight = listHeight / results.length;
-  const labelSize = Math.max(9, rowHeight * 0.3);
-  const barWidth = descWidth - padding * 2 - labelSize * 2.6;
-  const barHeight = Math.max(2, rowHeight * 0.12);
+  const labelMaxWidth = descWidth - padding * 2;
+  const barHeight = Math.max(2, rowHeight * 0.1);
 
   results.forEach((r, i) => {
     const rowTop = listTop + i * rowHeight;
     const highlighted = topKeys.has(r.key);
     const color = highlighted ? config.highlightColor : config.descriptorColor;
+    const fit = fitText(ctx, r.label.toUpperCase(), labelMaxWidth, rowHeight * 0.55, {
+      maxFontSize: rowHeight * 0.3,
+      minFontSize: 6,
+      maxLines: 2,
+      fontWeight: highlighted ? "600" : "",
+      fontFamily: config.fontFamily,
+    });
 
     ctx.fillStyle = color;
-    ctx.font = `${highlighted ? "600 " : ""}${labelSize}px "${config.fontFamily}"`;
+    ctx.font = `${highlighted ? "600 " : ""}${fit.fontSize}px "${config.fontFamily}"`;
     ctx.textBaseline = "top";
-    ctx.fillText(r.label.toUpperCase(), cell.x + padding, rowTop);
+    fit.lines.forEach((line, li) => ctx.fillText(line, descX + padding, rowTop + li * fit.fontSize * 1.15));
 
-    const barY = rowTop + labelSize * 1.5;
+    const barY = rowTop + fit.lines.length * fit.fontSize * 1.15 + barHeight * 0.6;
+    const barWidth = labelMaxWidth - fit.fontSize * 2;
     ctx.fillStyle = `${color}33`;
-    ctx.fillRect(cell.x + padding, barY, barWidth, barHeight);
+    ctx.fillRect(descX + padding, barY, barWidth, barHeight);
     ctx.fillStyle = color;
-    ctx.fillRect(cell.x + padding, barY, (barWidth * r.score) / 100, barHeight);
+    ctx.fillRect(descX + padding, barY, (barWidth * r.score) / 100, barHeight);
 
-    ctx.font = `${labelSize}px "${config.fontFamily}"`;
+    ctx.font = `${fit.fontSize}px "${config.fontFamily}"`;
     ctx.textBaseline = "middle";
-    ctx.fillText(String(r.score), cell.x + padding + barWidth + labelSize * 0.5, barY + barHeight / 2);
+    ctx.fillText(String(r.score), descX + padding + barWidth + fit.fontSize * 0.4, barY + barHeight / 2);
   });
 
-  drawNameTag(ctx, cell, mainHeight, tile.name, config);
+  drawNameTag(ctx, cell, slot, tile.name, config, dpi);
 }
 
 function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -252,49 +263,69 @@ function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-function newCanvas(layout: BoardLayout): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+/** Draws one full page (1 or 2) onto an already-sized canvas context --
+ * shared by the real export (full print resolution) and the live preview
+ * (a smaller canvas), so they can never drift apart. */
+export async function drawBoardPage(
+  ctx: CanvasRenderingContext2D,
+  config: BoardConfig,
+  tileById: Map<string, ParsedTile>,
+  page: 1 | 2,
+  dpi: number = DPI,
+): Promise<PageGeometry> {
+  const geo = computeGeometry(config, dpi);
+  drawBackgroundAndTitle(ctx, config, geo);
+
+  for (let i = 0; i < geo.cells.length; i++) {
+    const cell = geo.cells[i];
+    if (geo.captionCellIndex === i) {
+      if (page === 1) drawCaptionCell(ctx, cell, config, dpi);
+      continue;
+    }
+    const slotIndex = geo.captionCellIndex !== null ? i - 1 : i;
+    const slot = config.slots[slotIndex];
+    const tile = slot?.tileId ? tileById.get(slot.tileId) : undefined;
+    if (!slot || !tile) continue;
+    if (page === 1) await drawImageModule(ctx, cell, slot, tile, config, dpi);
+    else await drawDescriptorModule(ctx, cell, slot, tile, config, dpi);
+  }
+  return geo;
+}
+
+function newCanvas(widthPx: number, heightPx: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
-  canvas.width = layout.widthPx;
-  canvas.height = layout.heightPx;
+  canvas.width = widthPx;
+  canvas.height = heightPx;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D context unavailable");
   return { canvas, ctx };
 }
 
 export async function exportBoardPage1(config: BoardConfig, tileById: Map<string, ParsedTile>): Promise<Blob> {
-  const layout = computeLayout(config);
-  const { canvas, ctx } = newCanvas(layout);
-  drawBackgroundAndTitle(ctx, config, layout);
-
-  let cellIndex = 0;
-  if (config.textBox.enabled) {
-    drawTextBoxCell(ctx, layout.cells[cellIndex], config);
-    cellIndex++;
-  }
-  for (const slot of config.slots) {
-    const tile = slot.tileId ? tileById.get(slot.tileId) : undefined;
-    const cell = layout.cells[cellIndex];
-    cellIndex++;
-    if (!tile || !cell) continue;
-    await drawImageCell(ctx, cell, tile, slot.view, config);
-  }
+  const { canvas, ctx } = newCanvas(Math.round(config.widthIn * DPI), Math.round(config.heightIn * DPI));
+  await drawBoardPage(ctx, config, tileById, 1);
   return canvasToPngBlob(canvas);
 }
 
 export async function exportBoardPage2(config: BoardConfig, tileById: Map<string, ParsedTile>): Promise<Blob> {
-  const layout = computeLayout(config);
-  const { canvas, ctx } = newCanvas(layout);
-  drawBackgroundAndTitle(ctx, config, layout);
-
-  let cellIndex = config.textBox.enabled ? 1 : 0;
-  for (const slot of config.slots) {
-    const tile = slot.tileId ? tileById.get(slot.tileId) : undefined;
-    const cell = layout.cells[cellIndex];
-    cellIndex++;
-    if (!tile || !cell) continue;
-    await drawDescriptorCell(ctx, cell, tile, slot.view, config);
-  }
+  const { canvas, ctx } = newCanvas(Math.round(config.widthIn * DPI), Math.round(config.heightIn * DPI));
+  await drawBoardPage(ctx, config, tileById, 2);
   return canvasToPngBlob(canvas);
+}
+
+/** Renders a page directly onto an existing on-screen <canvas>, sized to
+ * `targetWidthPx` wide (height follows the board's own aspect ratio) --
+ * the live preview's only path, so it is pixel-for-pixel the same drawing
+ * code as the real export, just at a smaller effective DPI. */
+export async function renderBoardPreview(canvas: HTMLCanvasElement, config: BoardConfig, tileById: Map<string, ParsedTile>, page: 1 | 2, targetWidthPx: number): Promise<void> {
+  const dpi = targetWidthPx / config.widthIn;
+  const widthPx = Math.round(targetWidthPx);
+  const heightPx = Math.round(config.heightIn * dpi);
+  canvas.width = widthPx;
+  canvas.height = heightPx;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  await drawBoardPage(ctx, config, tileById, page, dpi);
 }
 
 export function downloadBlob(filename: string, blob: Blob) {

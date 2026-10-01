@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useProject } from "@/lib/project-store";
 import { GlowPanel } from "@/components/shared/GlowPanel";
@@ -8,9 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { TilePicker } from "./TilePicker";
 import { BoardSettingsPanel } from "./BoardSettingsPanel";
-import { TileSlotCard } from "./TileSlotCard";
-import { DescriptorSlotCard } from "./DescriptorSlotCard";
-import { gridLayoutFor } from "@/lib/boards/grid";
+import { BoardPreviewCanvas } from "./BoardPreviewCanvas";
 import { downloadBlob, exportBoardPage1, exportBoardPage2 } from "@/lib/boards/exportBoard";
 import { DEFAULT_AXO_VIEW, defaultBoardConfig, type AxoViewKey, type BoardSlot } from "@/lib/boards/types";
 
@@ -23,10 +21,34 @@ function newSlotId() {
 export function BoardsTab() {
   const { tiles } = useProject();
   const [config, setConfig] = useState(defaultBoardConfig);
+  const [previewPage, setPreviewPage] = useState<1 | 2>(1);
+  const [exporting, setExporting] = useState(false);
+  const previewAreaRef = useRef<HTMLDivElement>(null);
+  const [previewAreaSize, setPreviewAreaSize] = useState({ width: 800, height: 600 });
 
   const tileById = useMemo(() => new Map(tiles.map((t) => [t.id, t])), [tiles]);
-  const totalCells = config.slots.length + (config.textBox.enabled ? 1 : 0);
-  const { columns, rows } = gridLayoutFor(totalCells || 1);
+
+  useEffect(() => {
+    const el = previewAreaRef.current;
+    if (!el) return;
+    const PADDING = 32; // p-4 on both sides
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      setPreviewAreaSize({ width: Math.max(0, rect.width - PADDING), height: Math.max(0, rect.height - PADDING) });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Fit the board's own aspect ratio inside the available area -- whichever
+  // axis is tighter wins, exactly like `object-fit: contain` -- computed in
+  // JS (not CSS aspect-ratio) because an aspect-ratio box whose own child
+  // sizes itself as a percentage of that box has no way to resolve both
+  // axes at once and collapses to zero.
+  const boardRatio = config.widthIn / config.heightIn;
+  const fitWidth = Math.min(previewAreaSize.width, previewAreaSize.height * boardRatio);
+  const fitHeight = fitWidth / boardRatio;
 
   const patchConfig = (patch: Partial<typeof config>) => setConfig((prev) => ({ ...prev, ...patch }));
 
@@ -36,7 +58,7 @@ export function BoardsTab() {
       if (existingIndex >= 0) {
         return { ...prev, slots: prev.slots.filter((_, i) => i !== existingIndex) };
       }
-      const slot: BoardSlot = { id: newSlotId(), tileId, view: DEFAULT_AXO_VIEW };
+      const slot: BoardSlot = { id: newSlotId(), tileId, view: DEFAULT_AXO_VIEW, nameFontSizePt: null };
       return { ...prev, slots: [...prev.slots, slot] };
     });
   };
@@ -49,8 +71,10 @@ export function BoardsTab() {
     setConfig((prev) => ({ ...prev, slots: prev.slots.map((s) => (s.id === slotId ? { ...s, view } : s)) }));
   };
 
-  const [previewPage, setPreviewPage] = useState<1 | 2>(1);
-  const [exporting, setExporting] = useState(false);
+  const changeSlotNameSize = (slotId: string, nameFontSizePt: number | null) => {
+    setConfig((prev) => ({ ...prev, slots: prev.slots.map((s) => (s.id === slotId ? { ...s, nameFontSizePt } : s)) }));
+  };
+
   const exportPngs = async () => {
     setExporting(true);
     try {
@@ -65,8 +89,6 @@ export function BoardsTab() {
       setExporting(false);
     }
   };
-
-  const aspect = config.widthIn / config.heightIn;
 
   return (
     <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)_280px] grid-rows-[minmax(0,1fr)] gap-4">
@@ -83,7 +105,8 @@ export function BoardsTab() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="font-mono text-xs text-muted-foreground">
-              {config.slots.length} tile(s){config.textBox.enabled ? " + caption" : ""} · {columns}×{rows} grid
+              {config.slots.length} tile(s)
+              {config.textBox.enabled ? " + caption" : ""}
             </div>
             <div className="inline-flex rounded-full border-hair p-0.5">
               {([1, 2] as const).map((p) => (
@@ -103,53 +126,23 @@ export function BoardsTab() {
             {exporting ? "Exporting…" : "Export PNGs"}
           </Button>
         </div>
-        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border-hair bg-black/40 p-4">
-          <div
-            className="relative flex flex-col gap-3 p-6 shadow-2xl"
-            style={{ aspectRatio: `${aspect}`, width: "100%", maxHeight: "100%", backgroundColor: config.backgroundColor, fontFamily: config.fontFamily }}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="truncate text-lg font-semibold uppercase tracking-wide" style={{ color: config.titleColor }}>
-                  {config.name}
-                </div>
-              </div>
+        <div ref={previewAreaRef} className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border-hair bg-black/40 p-4">
+          {config.slots.length ? (
+            // Visible only here on screen (never baked into the exported PNG) so an
+            // all-black board doesn't disappear into the app's own dark background.
+            <div className="rounded-sm border border-white/15" style={{ width: fitWidth, height: fitHeight }}>
+              <BoardPreviewCanvas
+                config={config}
+                tileById={tileById}
+                page={previewPage}
+                onRemoveSlot={removeSlot}
+                onChangeSlotView={changeSlotView}
+                onChangeSlotNameSize={changeSlotNameSize}
+              />
             </div>
-            {totalCells ? (
-              <div
-                className="grid flex-1"
-                style={{
-                  gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-                  gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
-                  gap: `${(config.gapIn / config.widthIn) * 100}%`,
-                }}
-              >
-                {config.textBox.enabled && (
-                  <div className="flex items-start px-2 py-1.5 text-xs" style={{ color: config.textBox.color }}>
-                    {previewPage === 1 ? config.textBox.text || "Caption text…" : null}
-                  </div>
-                )}
-                {config.slots.map((slot) => {
-                  const tile = slot.tileId ? tileById.get(slot.tileId) : undefined;
-                  if (!tile) return null;
-                  return previewPage === 1 ? (
-                    <TileSlotCard
-                      key={slot.id}
-                      slot={slot}
-                      tile={tile}
-                      config={config}
-                      onChangeView={(view) => changeSlotView(slot.id, view)}
-                      onRemove={() => removeSlot(slot.id)}
-                    />
-                  ) : (
-                    <DescriptorSlotCard key={slot.id} slot={slot} tile={tile} config={config} />
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Check tiles on the left to add them to the board.</div>
-            )}
-          </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">Check tiles on the left to add them to the board.</div>
+          )}
         </div>
       </div>
 
@@ -160,7 +153,8 @@ export function BoardsTab() {
             <BoardSettingsPanel config={config} onChange={patchConfig} />
             <Separator className="my-4" />
             <p className="text-[11px] text-muted-foreground">
-              Exports two PNGs: the board itself, and a second page listing each tile&rsquo;s scored descriptors with its top 3 highlighted.
+              Exports two PNGs: the board itself, and a second page showing each tile&rsquo;s scored descriptors with its top 3 highlighted. Click a tile&rsquo;s
+              name on the board to set its own text size.
             </p>
           </div>
         </GlowPanel>

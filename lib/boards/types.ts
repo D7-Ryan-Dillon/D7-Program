@@ -10,6 +10,9 @@ export interface BoardSlot {
   id: string;
   tileId: string | null;
   view: AxoViewKey;
+  /** Manual override for this tile's name-tag text size, in points. Unset
+   * (or null) means auto-fit. */
+  nameFontSizePt: number | null;
 }
 
 export interface BoardTextBox {
@@ -36,6 +39,9 @@ export interface BoardConfig {
   outlineWidthPt: number;
   /** Gap between tiles (and the caption cell), in inches. */
   gapIn: number;
+  /** Manual size overrides, in points; unset (or null) means auto-fit. */
+  titleFontSizePt: number | null;
+  captionFontSizePt: number | null;
   slots: BoardSlot[];
   textBox: BoardTextBox;
 }
@@ -45,6 +51,12 @@ export const MIN_TILES = 1;
 export const MAX_TILES = 12;
 
 export const DEFAULT_AXO_VIEW: AxoViewKey = "iso-ne";
+
+/** How a tile's own name is shown on a board -- underscores read as
+ * placeholders in a stored id, not as part of a title. */
+export function displayName(name: string): string {
+  return name.replace(/_/g, " ");
+}
 
 export function defaultBoardConfig(): BoardConfig {
   return {
@@ -56,12 +68,14 @@ export function defaultBoardConfig(): BoardConfig {
     titleColor: "#e8a6c8",
     descriptorColor: "#9aa0a6",
     highlightColor: "#db7228",
-    foamColor: "#e8a6c8",
-    voidColor: "#1c1c1f",
-    foamOpacity: 1,
+    foamColor: "#ffffff",
+    voidColor: "#db7228",
+    foamOpacity: 0.1,
     voidOpacity: 1,
     outlineWidthPt: 1.5,
     gapIn: 0.2,
+    titleFontSizePt: null,
+    captionFontSizePt: null,
     slots: [],
     textBox: { enabled: false, text: "", color: "#e6e6e6" },
   };
