@@ -29,6 +29,52 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [255, 255, 255];
+}
+
+let logoImagePromise: Promise<HTMLImageElement> | null = null;
+function loadLogoImage(): Promise<HTMLImageElement> {
+  if (!logoImagePromise) logoImagePromise = loadImage("/school-logo.png");
+  return logoImagePromise;
+}
+
+const tintedLogoCache = new Map<string, HTMLCanvasElement>();
+
+/** The school logo is a flat white-on-black PNG (no alpha channel), so it
+ * can't just be drawn in an arbitrary color or over a non-black board --
+ * this re-derives an alpha channel from each pixel's brightness (bright =
+ * opaque line art, dark = transparent background) and recolors the result
+ * to match the footer's one color picker. Cached per color since it's the
+ * same handful of colors across every redraw of a given board. */
+async function getTintedLogo(color: string): Promise<HTMLCanvasElement> {
+  const cached = tintedLogoCache.get(color);
+  if (cached) return cached;
+
+  const img = await loadLogoImage();
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable");
+  ctx.drawImage(img, 0, 0);
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const [r, g, b] = hexToRgb(color);
+  const { data } = imageData;
+  for (let i = 0; i < data.length; i += 4) {
+    const luminance = (data[i] + data[i + 1] + data[i + 2]) / 3;
+    data[i] = r;
+    data[i + 1] = g;
+    data[i + 2] = b;
+    data[i + 3] = luminance;
+  }
+  ctx.putImageData(imageData, 0, 0);
+  tintedLogoCache.set(color, canvas);
+  return canvas;
+}
+
 export interface PageGeometry {
   widthPx: number;
   heightPx: number;
@@ -40,6 +86,10 @@ export interface PageGeometry {
   cells: GridCell[];
   /** Index into `cells` the caption occupies, or null if disabled. */
   captionCellIndex: number | null;
+  /** Null when the footer is off. Otherwise everything needed to draw it:
+   * the rule's y position, and the vertical center of the text/logo row
+   * below it. */
+  footer: { fontSizePx: number; lineY: number; textCenterY: number } | null;
 }
 
 /** Everything about where things go, independent of what's actually drawn
@@ -54,9 +104,22 @@ export function computeGeometry(config: BoardConfig, dpi: number = DPI): PageGeo
   const gapX = config.gapXIn * dpi;
   const gapY = config.gapYIn * dpi;
 
+  let footer: PageGeometry["footer"] = null;
+  let gridBottom = heightPx - margin;
+  if (config.footer.enabled) {
+    const fontSizePx = config.footerFontSizePt ? ptToPx(config.footerFontSizePt, dpi) : heightPx * 0.016;
+    const gapAboveLine = fontSizePx * 0.9;
+    const gapBelowLine = fontSizePx * 0.9;
+    const bottomPad = fontSizePx * 0.5;
+    const totalFooterHeight = gapAboveLine + gapBelowLine + fontSizePx + bottomPad;
+    gridBottom = heightPx - margin - totalFooterHeight;
+    const lineY = gridBottom + gapAboveLine;
+    footer = { fontSizePx, lineY, textCenterY: lineY + gapBelowLine + fontSizePx / 2 };
+  }
+
   const totalCells = config.slots.length + (config.textBox.enabled ? 1 : 0);
   const availableWidth = widthPx - margin * 2;
-  const availableHeight = heightPx - titleBottom - margin;
+  const availableHeight = gridBottom - titleBottom;
   const layout = squareGridLayout(totalCells || 1, availableWidth, availableHeight, gapX, gapY);
   const cells = squareGridCells(layout, gapX, gapY).map((cell) => ({ x: cell.x + margin, y: cell.y + titleBottom, size: cell.size }));
 
@@ -70,6 +133,7 @@ export function computeGeometry(config: BoardConfig, dpi: number = DPI): PageGeo
     gapY,
     cells,
     captionCellIndex: config.textBox.enabled ? 0 : null,
+    footer,
   };
 }
 
@@ -103,6 +167,42 @@ function drawCaptionCell(ctx: CanvasRenderingContext2D, cell: GridCell, config: 
   ctx.font = `${fontSize}px "${config.fontFamily}"`;
   ctx.textBaseline = "top";
   lines.forEach((line, i) => ctx.fillText(line, cell.x + padding, cell.y + padding + i * fontSize * 1.3));
+  ctx.restore();
+}
+
+/** The credit line along the bottom: a rule spanning the full content
+ * width, the school logo + left text flush left, the right text flush
+ * right -- one color for all of it. The line's length is just however
+ * wide the page's margin-to-margin content area is, so it scales with the
+ * board automatically; the two text blocks stay pinned to its two ends. */
+async function drawFooter(ctx: CanvasRenderingContext2D, config: BoardConfig, geo: PageGeometry) {
+  if (!geo.footer) return;
+  const { footer } = config;
+  const { fontSizePx, lineY, textCenterY } = geo.footer;
+
+  ctx.save();
+  ctx.strokeStyle = footer.color;
+  ctx.lineWidth = Math.max(1, fontSizePx * 0.045);
+  ctx.beginPath();
+  ctx.moveTo(geo.margin, lineY);
+  ctx.lineTo(geo.widthPx - geo.margin, lineY);
+  ctx.stroke();
+  ctx.restore();
+
+  const logoSize = fontSizePx * 1.3;
+  const logo = await getTintedLogo(footer.color);
+
+  ctx.save();
+  ctx.drawImage(logo, geo.margin, textCenterY - logoSize / 2, logoSize, logoSize);
+
+  ctx.fillStyle = footer.color;
+  ctx.font = `${fontSizePx}px "${config.fontFamily}"`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.fillText(footer.leftText, geo.margin + logoSize + fontSizePx * 0.45, textCenterY);
+
+  ctx.textAlign = "right";
+  ctx.fillText(footer.rightText, geo.widthPx - geo.margin, textCenterY);
   ctx.restore();
 }
 
@@ -292,6 +392,7 @@ export async function drawBoardPage(
     if (page === 1) await drawImageModule(ctx, cell, slot, tile, config, dpi);
     else await drawDescriptorModule(ctx, cell, slot, tile, config, dpi);
   }
+  await drawFooter(ctx, config, geo);
   return geo;
 }
 

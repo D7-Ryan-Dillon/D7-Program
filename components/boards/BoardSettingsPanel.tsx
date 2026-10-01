@@ -165,6 +165,35 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
           </>
         )}
       </div>
+
+      <div className="space-y-2 border-t border-border pt-3">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Footer</span>
+          <Switch checked={config.footer.enabled} onCheckedChange={(enabled) => onChange({ footer: { ...config.footer, enabled } })} />
+        </div>
+        {config.footer.enabled && (
+          <>
+            <label className="block text-xs">
+              <span className="mb-1 block text-muted-foreground">Left text</span>
+              <Input
+                value={config.footer.leftText}
+                onChange={(e) => onChange({ footer: { ...config.footer, leftText: e.target.value } })}
+                className="h-8 text-xs"
+              />
+            </label>
+            <label className="block text-xs">
+              <span className="mb-1 block text-muted-foreground">Right text</span>
+              <Input
+                value={config.footer.rightText}
+                onChange={(e) => onChange({ footer: { ...config.footer, rightText: e.target.value } })}
+                className="h-8 text-xs"
+              />
+            </label>
+            <ColorField label="Line, text & logo color" value={config.footer.color} onChange={(color) => onChange({ footer: { ...config.footer, color } })} />
+            <OptionalSizeField label="Text size" valuePt={config.footerFontSizePt} onChange={(footerFontSizePt) => onChange({ footerFontSizePt })} />
+          </>
+        )}
+      </div>
     </div>
   );
 }

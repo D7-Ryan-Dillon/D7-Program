@@ -21,6 +21,17 @@ export interface BoardTextBox {
   color: string;
 }
 
+/** The credit line along the bottom of the board: a rule spanning the full
+ * content width, with the school logo + left-side text flush to the left
+ * margin and the right-side text flush to the right margin. One color
+ * covers the line, both text blocks, and the (recolored) logo together. */
+export interface BoardFooter {
+  enabled: boolean;
+  leftText: string;
+  rightText: string;
+  color: string;
+}
+
 export interface BoardConfig {
   name: string;
   widthIn: number;
@@ -45,8 +56,10 @@ export interface BoardConfig {
   /** Manual size overrides, in points; unset (or null) means auto-fit. */
   titleFontSizePt: number | null;
   captionFontSizePt: number | null;
+  footerFontSizePt: number | null;
   slots: BoardSlot[];
   textBox: BoardTextBox;
+  footer: BoardFooter;
 }
 
 export const DPI = 300;
@@ -89,7 +102,9 @@ export function defaultBoardConfig(): BoardConfig {
     gapYIn: 0.5,
     titleFontSizePt: null,
     captionFontSizePt: null,
+    footerFontSizePt: null,
     slots: [],
     textBox: { enabled: false, text: "", color: "#e6e6e6" },
+    footer: { enabled: false, leftText: "DESIGN 7 | FALL 2026 | DUSTIN WHITE", rightText: "RYAN BURGESS, DILLON MITKO", color: "#ffffff" },
   };
 }
