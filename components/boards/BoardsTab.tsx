@@ -9,8 +9,8 @@ import { Separator } from "@/components/ui/separator";
 import { TilePicker } from "./TilePicker";
 import { BoardSettingsPanel } from "./BoardSettingsPanel";
 import { TileSlotCard } from "./TileSlotCard";
+import { DescriptorSlotCard } from "./DescriptorSlotCard";
 import { gridLayoutFor } from "@/lib/boards/grid";
-import { cutCornerClipPathPercent } from "@/lib/boards/cutCorner";
 import { downloadBlob, exportBoardPage1, exportBoardPage2 } from "@/lib/boards/exportBoard";
 import { DEFAULT_AXO_VIEW, defaultBoardConfig, type AxoViewKey, type BoardSlot } from "@/lib/boards/types";
 
@@ -49,6 +49,7 @@ export function BoardsTab() {
     setConfig((prev) => ({ ...prev, slots: prev.slots.map((s) => (s.id === slotId ? { ...s, view } : s)) }));
   };
 
+  const [previewPage, setPreviewPage] = useState<1 | 2>(1);
   const [exporting, setExporting] = useState(false);
   const exportPngs = async () => {
     setExporting(true);
@@ -80,8 +81,23 @@ export function BoardsTab() {
 
       <div className="flex min-h-0 min-w-0 flex-col gap-3">
         <div className="flex items-center justify-between">
-          <div className="font-mono text-xs text-muted-foreground">
-            {config.slots.length} tile(s){config.textBox.enabled ? " + caption" : ""} · {columns}×{rows} grid
+          <div className="flex items-center gap-3">
+            <div className="font-mono text-xs text-muted-foreground">
+              {config.slots.length} tile(s){config.textBox.enabled ? " + caption" : ""} · {columns}×{rows} grid
+            </div>
+            <div className="inline-flex rounded-full border-hair p-0.5">
+              {([1, 2] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPreviewPage(p)}
+                  className={`rounded-full px-3 py-1 font-mono text-[11px] tracking-label uppercase transition-colors ${
+                    previewPage === p ? "bg-gradient-to-r from-magenta to-orange text-white" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Page {p}
+                </button>
+              ))}
+            </div>
           </div>
           <Button size="sm" disabled={!config.slots.length || exporting} onClick={() => void exportPngs()}>
             {exporting ? "Exporting…" : "Export PNGs"}
@@ -101,21 +117,22 @@ export function BoardsTab() {
             </div>
             {totalCells ? (
               <div
-                className="grid flex-1 gap-3"
-                style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))` }}
+                className="grid flex-1"
+                style={{
+                  gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                  gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+                  gap: `${(config.gapIn / config.widthIn) * 100}%`,
+                }}
               >
                 {config.textBox.enabled && (
-                  <div
-                    className="flex items-start border px-2 py-1.5 text-xs"
-                    style={{ color: config.textBox.color, borderColor: config.textBox.color, clipPath: cutCornerClipPathPercent() }}
-                  >
-                    {config.textBox.text || "Caption text…"}
+                  <div className="flex items-start px-2 py-1.5 text-xs" style={{ color: config.textBox.color }}>
+                    {previewPage === 1 ? config.textBox.text || "Caption text…" : null}
                   </div>
                 )}
                 {config.slots.map((slot) => {
                   const tile = slot.tileId ? tileById.get(slot.tileId) : undefined;
                   if (!tile) return null;
-                  return (
+                  return previewPage === 1 ? (
                     <TileSlotCard
                       key={slot.id}
                       slot={slot}
@@ -124,6 +141,8 @@ export function BoardsTab() {
                       onChangeView={(view) => changeSlotView(slot.id, view)}
                       onRemove={() => removeSlot(slot.id)}
                     />
+                  ) : (
+                    <DescriptorSlotCard key={slot.id} slot={slot} tile={tile} config={config} />
                   );
                 })}
               </div>

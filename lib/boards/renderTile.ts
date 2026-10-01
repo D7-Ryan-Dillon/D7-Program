@@ -23,7 +23,12 @@ function loadScene(glbUrl: string): Promise<THREE.Group> {
 export interface TileRenderOptions {
   glbUrl: string;
   view: AxoViewKey;
-  size: number;
+  /** Target pixel size -- rendered at this exact aspect ratio (not forced
+   * square), and the camera distance is fit to whichever axis is tighter,
+   * so the whole tile shows with no cropping regardless of the cell's own
+   * proportions. */
+  width: number;
+  height: number;
   backgroundColor: string | null;
   foamColor: string;
   voidColor: string;
@@ -65,8 +70,18 @@ export async function renderTileToDataUrl(opts: TileRenderOptions): Promise<stri
 
   const preset = AXO_VIEWS.find((v) => v.key === opts.view) ?? AXO_VIEWS[0];
   const dir = new THREE.Vector3(...preset.dir).normalize();
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 500);
-  camera.position.copy(sphere.center).addScaledVector(dir, radius * 2.6);
+  const aspect = opts.width / opts.height;
+  const vFov = 42;
+  // The sphere must fit inside whichever of the two field-of-view angles
+  // (vertical, fixed; horizontal, derived from aspect) is tighter -- a
+  // portrait cell (aspect < 1) narrows the horizontal fov below the
+  // vertical one, so fitting only to vFov would crop the sides.
+  const vHalf = (vFov * Math.PI) / 360;
+  const hHalf = Math.atan(Math.tan(vHalf) * aspect);
+  const constrainingHalf = Math.min(vHalf, hHalf);
+  const distance = (radius / Math.sin(constrainingHalf)) * 1.08;
+  const camera = new THREE.PerspectiveCamera(vFov, aspect, 0.05, 500);
+  camera.position.copy(sphere.center).addScaledVector(dir, distance);
   camera.up.set(...preset.up);
   camera.lookAt(sphere.center);
 
@@ -82,10 +97,10 @@ export async function renderTileToDataUrl(opts: TileRenderOptions): Promise<stri
   threeScene.add(fill);
 
   const canvas = document.createElement("canvas");
-  canvas.width = opts.size;
-  canvas.height = opts.size;
+  canvas.width = opts.width;
+  canvas.height = opts.height;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: !opts.backgroundColor, preserveDrawingBuffer: true });
-  renderer.setSize(opts.size, opts.size, false);
+  renderer.setSize(opts.width, opts.height, false);
   renderer.setPixelRatio(1);
   renderer.render(threeScene, camera);
   const dataUrl = canvas.toDataURL("image/png");

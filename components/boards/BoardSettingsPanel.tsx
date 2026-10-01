@@ -7,13 +7,31 @@ import { ColorField } from "./ColorField";
 import { FontPicker } from "./FontPicker";
 import type { BoardConfig } from "@/lib/boards/types";
 
-function NumberSlider({ label, value, min, max, step = 1, suffix = "", onChange }: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; onChange: (v: number) => void }) {
+function NumberSlider({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  suffix = "",
+  decimals = 0,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  suffix?: string;
+  decimals?: number;
+  onChange: (v: number) => void;
+}) {
   return (
     <label className="block text-xs">
       <div className="mb-1 flex items-center justify-between">
         <span className="text-muted-foreground">{label}</span>
         <span className="font-mono tabular-nums">
-          {value}
+          {value.toFixed(decimals)}
           {suffix}
         </span>
       </div>
@@ -36,6 +54,12 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
           {config.widthIn * 300}×{config.heightIn * 300}px at 300dpi
         </p>
         <ColorField label="Background" value={config.backgroundColor} onChange={(backgroundColor) => onChange({ backgroundColor })} />
+      </div>
+
+      <div className="space-y-2 border-t border-border pt-3">
+        <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Layout</div>
+        <NumberSlider label="Outline weight" value={config.outlineWidthPt} min={0.5} max={8} step={0.25} decimals={2} suffix="pt" onChange={(outlineWidthPt) => onChange({ outlineWidthPt })} />
+        <NumberSlider label="Gap between tiles" value={config.gapIn} min={0} max={1} step={0.05} decimals={2} suffix="in" onChange={(gapIn) => onChange({ gapIn })} />
       </div>
 
       <div className="space-y-2 border-t border-border pt-3">

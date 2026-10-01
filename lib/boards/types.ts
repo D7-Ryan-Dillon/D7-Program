@@ -31,6 +31,11 @@ export interface BoardConfig {
   voidColor: string;
   foamOpacity: number;
   voidOpacity: number;
+  /** Frame stroke weight, in points (1pt = 1/72in, same convention as
+   * print/vector tools -- independent of the board's own DPI). */
+  outlineWidthPt: number;
+  /** Gap between tiles (and the caption cell), in inches. */
+  gapIn: number;
   slots: BoardSlot[];
   textBox: BoardTextBox;
 }
@@ -55,6 +60,8 @@ export function defaultBoardConfig(): BoardConfig {
     voidColor: "#1c1c1f",
     foamOpacity: 1,
     voidOpacity: 1,
+    outlineWidthPt: 1.5,
+    gapIn: 0.2,
     slots: [],
     textBox: { enabled: false, text: "", color: "#e6e6e6" },
   };

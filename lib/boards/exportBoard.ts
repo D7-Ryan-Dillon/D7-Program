@@ -1,13 +1,14 @@
 // Composes a Board (lib/boards/types.ts) onto a full print-resolution 2D
-// canvas and rasterizes it to a PNG -- page 1 is the tile renders, page 2
-// is each tile's scored descriptors (lib/scoring/descriptors.ts), top 3
-// highlighted. Both pages share the exact same grid geometry so they line
-// up if printed/viewed side by side.
+// canvas and rasterizes it to a PNG -- page 1 is the tile renders (image +
+// name tag only), page 2 is the same frame with the image shrunk into the
+// right portion and each tile's scored descriptors (lib/scoring/
+// descriptors.ts) listed on the left, top 3 highlighted. Both pages share
+// the exact same grid geometry so they line up if viewed side by side.
 
 import { scoreTile, type DescriptorResult } from "@/lib/scoring/descriptors";
 import type { ParsedTile } from "@/lib/types";
 import { renderTileToDataUrl } from "./renderTile";
-import { traceCutCorner, chamferFor } from "./cutCorner";
+import { traceFrame, frameMetricsFor, frameContentHeight } from "./cutCorner";
 import { gridLayoutFor } from "./grid";
 import { DPI, type BoardConfig } from "./types";
 
@@ -18,6 +19,10 @@ interface Cell {
   height: number;
 }
 
+function ptToPx(pt: number): number {
+  return (pt / 72) * DPI;
+}
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -25,15 +30,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error("Couldn't load rendered tile image"));
     img.src = src;
   });
-}
-
-function drawImageCover(ctx: CanvasRenderingContext2D, img: HTMLImageElement, cell: Cell) {
-  const scale = Math.max(cell.width / img.width, cell.height / img.height);
-  const w = img.width * scale;
-  const h = img.height * scale;
-  const x = cell.x + (cell.width - w) / 2;
-  const y = cell.y + (cell.height - h) / 2;
-  ctx.drawImage(img, x, y, w, h);
 }
 
 interface BoardLayout {
@@ -54,7 +50,7 @@ function computeLayout(config: BoardConfig): BoardLayout {
   const margin = DPI * 0.4;
   const titleSize = heightPx * 0.032;
   const titleBottom = margin + titleSize * 1.8;
-  const gap = DPI * 0.15;
+  const gap = config.gapIn * DPI;
 
   const totalCells = config.slots.length + (config.textBox.enabled ? 1 : 0);
   const { columns, rows } = gridLayoutFor(totalCells || 1);
@@ -72,7 +68,7 @@ function computeLayout(config: BoardConfig): BoardLayout {
   return { widthPx, heightPx, margin, titleSize, titleBottom, gap, columns, rows, cells };
 }
 
-function drawTitle(ctx: CanvasRenderingContext2D, config: BoardConfig, layout: BoardLayout) {
+function drawBackgroundAndTitle(ctx: CanvasRenderingContext2D, config: BoardConfig, layout: BoardLayout) {
   ctx.fillStyle = config.backgroundColor;
   ctx.fillRect(0, 0, layout.widthPx, layout.heightPx);
   ctx.fillStyle = config.titleColor;
@@ -98,30 +94,44 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   return lines;
 }
 
+/** No frame, no border -- just the caption text, per spec. */
 function drawTextBoxCell(ctx: CanvasRenderingContext2D, cell: Cell, config: BoardConfig) {
-  const chamfer = chamferFor(cell.width, cell.height);
   ctx.save();
-  ctx.strokeStyle = config.textBox.color;
-  ctx.lineWidth = DPI * 0.012;
-  traceCutCorner(ctx, cell.x, cell.y, cell.width, cell.height, chamfer);
-  ctx.stroke();
   ctx.fillStyle = config.textBox.color;
   const fontSize = Math.max(12, cell.height * 0.07);
   ctx.font = `${fontSize}px "${config.fontFamily}"`;
   ctx.textBaseline = "top";
-  const padding = cell.width * 0.06;
+  const padding = cell.width * 0.04;
   const lines = wrapText(ctx, config.textBox.text || "", cell.width - padding * 2);
   lines.forEach((line, i) => ctx.fillText(line, cell.x + padding, cell.y + padding + i * fontSize * 1.3));
   ctx.restore();
 }
 
-async function drawTileCell(ctx: CanvasRenderingContext2D, cell: Cell, tile: ParsedTile, viewKey: BoardConfig["slots"][number]["view"], config: BoardConfig) {
-  const chamfer = chamferFor(cell.width, cell.height);
-  const renderSize = Math.round(Math.max(512, Math.min(2400, Math.max(cell.width, cell.height))));
+function drawNameTag(ctx: CanvasRenderingContext2D, cell: Cell, mainHeight: number, name: string, config: BoardConfig) {
+  const tagTop = cell.y + mainHeight;
+  const tagHeight = cell.height - mainHeight;
+  const fontSize = Math.max(10, tagHeight * 0.4);
+  ctx.fillStyle = config.highlightColor;
+  ctx.font = `${fontSize}px "${config.fontFamily}"`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "right";
+  ctx.fillText(name.toUpperCase(), cell.x + cell.width - cell.width * 0.03, tagTop + tagHeight / 2);
+  ctx.textAlign = "left";
+}
+
+/** Page 1: the tile render fills the whole frame above the name tag, at
+ * its own exact aspect ratio (renderTileToDataUrl fits the camera to
+ * whichever axis is tighter), so nothing is cropped. */
+async function drawImageCell(ctx: CanvasRenderingContext2D, cell: Cell, tile: ParsedTile, viewKey: BoardConfig["slots"][number]["view"], config: BoardConfig) {
+  const metrics = frameMetricsFor(cell.width, cell.height);
+  const mainHeight = frameContentHeight(cell.height, metrics);
+  const lineWidth = ptToPx(config.outlineWidthPt);
+
   const dataUrl = await renderTileToDataUrl({
     glbUrl: tile.glbUrl,
     view: viewKey,
-    size: renderSize,
+    width: Math.round(cell.width),
+    height: Math.round(mainHeight),
     backgroundColor: config.backgroundColor,
     foamColor: config.foamColor,
     voidColor: config.voidColor,
@@ -132,34 +142,64 @@ async function drawTileCell(ctx: CanvasRenderingContext2D, cell: Cell, tile: Par
   });
   const img = await loadImage(dataUrl);
 
-  const labelHeight = cell.height * 0.055;
-  const imageCell: Cell = { x: cell.x, y: cell.y, width: cell.width, height: cell.height - labelHeight };
-
   ctx.save();
-  traceCutCorner(ctx, imageCell.x, imageCell.y, imageCell.width, imageCell.height, chamfer);
+  traceFrame(ctx, cell.x, cell.y, cell.width, cell.height, metrics);
   ctx.clip();
-  drawImageCover(ctx, img, imageCell);
+  ctx.drawImage(img, cell.x, cell.y, cell.width, mainHeight);
   ctx.restore();
 
   ctx.save();
   ctx.strokeStyle = config.descriptorColor;
-  ctx.lineWidth = Math.max(1, DPI * 0.006);
-  traceCutCorner(ctx, imageCell.x, imageCell.y, imageCell.width, imageCell.height, chamfer);
+  ctx.lineWidth = lineWidth;
+  traceFrame(ctx, cell.x, cell.y, cell.width, cell.height, metrics);
   ctx.stroke();
   ctx.restore();
 
-  ctx.fillStyle = config.descriptorColor;
-  ctx.font = `${Math.max(10, labelHeight * 0.6)}px "${config.fontFamily}"`;
-  ctx.textBaseline = "top";
-  ctx.fillText(tile.name.toUpperCase(), cell.x, cell.y + imageCell.height + labelHeight * 0.2);
+  drawNameTag(ctx, cell, mainHeight, tile.name, config);
 }
 
-function drawDescriptorCell(ctx: CanvasRenderingContext2D, cell: Cell, tile: ParsedTile, config: BoardConfig) {
-  const chamfer = chamferFor(cell.width, cell.height);
+/** Page 2: descriptors fill the left portion, the tile render is shrunk
+ * into the right portion -- same outer frame and name tag as page 1. */
+async function drawDescriptorCell(ctx: CanvasRenderingContext2D, cell: Cell, tile: ParsedTile, viewKey: BoardConfig["slots"][number]["view"], config: BoardConfig) {
+  const metrics = frameMetricsFor(cell.width, cell.height);
+  const mainHeight = frameContentHeight(cell.height, metrics);
+  const lineWidth = ptToPx(config.outlineWidthPt);
+
+  const imageWidth = cell.width * 0.34;
+  const imageX = cell.x + cell.width - imageWidth;
+  const descWidth = cell.width - imageWidth;
+
+  const dataUrl = await renderTileToDataUrl({
+    glbUrl: tile.glbUrl,
+    view: viewKey,
+    width: Math.round(imageWidth),
+    height: Math.round(mainHeight),
+    backgroundColor: config.backgroundColor,
+    foamColor: config.foamColor,
+    voidColor: config.voidColor,
+    foamOpacity: config.foamOpacity,
+    voidOpacity: config.voidOpacity,
+    foamVisible: true,
+    voidVisible: true,
+  });
+  const img = await loadImage(dataUrl);
+
+  ctx.save();
+  traceFrame(ctx, cell.x, cell.y, cell.width, cell.height, metrics);
+  ctx.clip();
+  ctx.fillStyle = config.backgroundColor;
+  ctx.fillRect(cell.x, cell.y, cell.width, cell.height);
+  ctx.drawImage(img, imageX, cell.y, imageWidth, mainHeight);
+  ctx.restore();
+
   ctx.save();
   ctx.strokeStyle = config.descriptorColor;
-  ctx.lineWidth = Math.max(1, DPI * 0.006);
-  traceCutCorner(ctx, cell.x, cell.y, cell.width, cell.height, chamfer);
+  ctx.lineWidth = lineWidth;
+  traceFrame(ctx, cell.x, cell.y, cell.width, cell.height, metrics);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(imageX, cell.y);
+  ctx.lineTo(imageX, cell.y + mainHeight);
   ctx.stroke();
   ctx.restore();
 
@@ -171,41 +211,36 @@ function drawDescriptorCell(ctx: CanvasRenderingContext2D, cell: Cell, tile: Par
       .map((r) => r.key),
   );
 
-  const padding = cell.width * 0.05;
-  const headerSize = Math.max(11, cell.height * 0.045);
-  ctx.fillStyle = config.descriptorColor;
-  ctx.font = `600 ${headerSize}px "${config.fontFamily}"`;
-  ctx.textBaseline = "top";
-  ctx.fillText(tile.name.toUpperCase(), cell.x + padding, cell.y + padding);
-
-  const listTop = cell.y + padding + headerSize * 1.6;
-  const listHeight = cell.y + cell.height - padding - listTop;
+  const padding = descWidth * 0.06;
+  const listTop = cell.y + Math.max(padding, metrics.chamfer + padding * 0.4);
+  const listHeight = cell.y + mainHeight - listTop - padding * 0.5;
   const rowHeight = listHeight / results.length;
-  const labelSize = Math.max(9, rowHeight * 0.42);
-  const barX = cell.x + cell.width * 0.5;
-  const barWidth = cell.width * 0.32;
-  const barHeight = Math.max(2, rowHeight * 0.14);
+  const labelSize = Math.max(9, rowHeight * 0.3);
+  const barWidth = descWidth - padding * 2 - labelSize * 2.6;
+  const barHeight = Math.max(2, rowHeight * 0.12);
 
   results.forEach((r, i) => {
-    const y = listTop + i * rowHeight;
+    const rowTop = listTop + i * rowHeight;
     const highlighted = topKeys.has(r.key);
     const color = highlighted ? config.highlightColor : config.descriptorColor;
+
     ctx.fillStyle = color;
     ctx.font = `${highlighted ? "600 " : ""}${labelSize}px "${config.fontFamily}"`;
-    ctx.textBaseline = "middle";
-    ctx.fillText(r.label.toUpperCase(), cell.x + padding, y + rowHeight * 0.45);
+    ctx.textBaseline = "top";
+    ctx.fillText(r.label.toUpperCase(), cell.x + padding, rowTop);
 
-    const barY = y + rowHeight * 0.45 - barHeight / 2;
+    const barY = rowTop + labelSize * 1.5;
     ctx.fillStyle = `${color}33`;
-    ctx.fillRect(barX, barY, barWidth, barHeight);
+    ctx.fillRect(cell.x + padding, barY, barWidth, barHeight);
     ctx.fillStyle = color;
-    ctx.fillRect(barX, barY, (barWidth * r.score) / 100, barHeight);
+    ctx.fillRect(cell.x + padding, barY, (barWidth * r.score) / 100, barHeight);
 
     ctx.font = `${labelSize}px "${config.fontFamily}"`;
-    ctx.textAlign = "right";
-    ctx.fillText(String(r.score), cell.x + cell.width - padding, y + rowHeight * 0.45);
-    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(String(r.score), cell.x + padding + barWidth + labelSize * 0.5, barY + barHeight / 2);
   });
+
+  drawNameTag(ctx, cell, mainHeight, tile.name, config);
 }
 
 function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -217,14 +252,19 @@ function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-export async function exportBoardPage1(config: BoardConfig, tileById: Map<string, ParsedTile>): Promise<Blob> {
-  const layout = computeLayout(config);
+function newCanvas(layout: BoardLayout): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
   canvas.width = layout.widthPx;
   canvas.height = layout.heightPx;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D context unavailable");
-  drawTitle(ctx, config, layout);
+  return { canvas, ctx };
+}
+
+export async function exportBoardPage1(config: BoardConfig, tileById: Map<string, ParsedTile>): Promise<Blob> {
+  const layout = computeLayout(config);
+  const { canvas, ctx } = newCanvas(layout);
+  drawBackgroundAndTitle(ctx, config, layout);
 
   let cellIndex = 0;
   if (config.textBox.enabled) {
@@ -236,19 +276,15 @@ export async function exportBoardPage1(config: BoardConfig, tileById: Map<string
     const cell = layout.cells[cellIndex];
     cellIndex++;
     if (!tile || !cell) continue;
-    await drawTileCell(ctx, cell, tile, slot.view, config);
+    await drawImageCell(ctx, cell, tile, slot.view, config);
   }
   return canvasToPngBlob(canvas);
 }
 
 export async function exportBoardPage2(config: BoardConfig, tileById: Map<string, ParsedTile>): Promise<Blob> {
   const layout = computeLayout(config);
-  const canvas = document.createElement("canvas");
-  canvas.width = layout.widthPx;
-  canvas.height = layout.heightPx;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas 2D context unavailable");
-  drawTitle(ctx, config, layout);
+  const { canvas, ctx } = newCanvas(layout);
+  drawBackgroundAndTitle(ctx, config, layout);
 
   let cellIndex = config.textBox.enabled ? 1 : 0;
   for (const slot of config.slots) {
@@ -256,7 +292,7 @@ export async function exportBoardPage2(config: BoardConfig, tileById: Map<string
     const cell = layout.cells[cellIndex];
     cellIndex++;
     if (!tile || !cell) continue;
-    drawDescriptorCell(ctx, cell, tile, config);
+    await drawDescriptorCell(ctx, cell, tile, slot.view, config);
   }
   return canvasToPngBlob(canvas);
 }
