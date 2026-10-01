@@ -127,28 +127,32 @@ function coordinates(face: VolumeFaceName, x: number, y: number, z: number, shap
 export interface VolumeField {
   field: Float32Array;
   resolution: number;
-  /** Percent of face-mask cells whose sign survived into the final blended
-   * field unchanged -- a rough "how much did lofting distort your drawn
-   * shapes" readout for the builder UI. */
+  /** Percent of face-mask cells whose sign survived the merge unchanged --
+   * a rough "how much did merging distort your drawn shape" readout for
+   * the builder UI. */
   faceFit: number;
 }
 
-/** Builds the lofted 3D scalar field for a set of face assignments. Every
- * voxel is classified by blending the (inverse-depth-squared-weighted)
- * signed distance from every active face's mask, with faces actually
- * touching that voxel (depth ~ 0) overriding the blend outright so the
- * surface reads as the real drawn silhouette, not a blurred average; the
- * interior (far from every face) gets a smooth noise-touched fill instead
- * of flattening to a uniform solid. 18 relaxation passes afterward feather
- * the seams between adjacent faces' independently-authored masks into one
- * continuous surface. */
-export function buildVolumeField(
-  assignments: VolumeAssignments,
-  shape: VolumeShape,
-  seed: number,
-  fitTolerance: number,
-  resolution = 46,
-): VolumeField {
+/** A smooth/organic version of Math.max(a, b): identical to Math.max at
+ * k = 0 (a sharp boolean union), rounding the seam where a and b cross as
+ * k grows. Used to merge each active face's own mass into one continuous
+ * surface instead of a hard-edged union. */
+function smoothMax(a: number, b: number, k: number): number {
+  if (k <= 0) return Math.max(a, b);
+  return (a + b + Math.sqrt((a - b) * (a - b) + k * k)) / 2;
+}
+
+/** Builds the merged 3D scalar field for a set of face assignments: each
+ * active face's drawn mask is a *mass* on that side of the cube/hex, not a
+ * decal, so it's extruded through the full depth (its signed value at a
+ * point depends only on that point's lateral position on the face's own
+ * plane, never on how far the point is from the face) -- then every
+ * active face's extrusion is merged into one field with a smooth/organic
+ * union (see smoothMax), so the result reads as all the drawn masses
+ * fused into a single solid, not a blurry average of them. The "foam"
+ * tile is this merged solid; "void" is simply its geometric complement
+ * (see voxelize.ts) -- there's no separate void computation. */
+export function buildVolumeField(assignments: VolumeAssignments, shape: VolumeShape, fitTolerance: number, resolution = 46): VolumeField {
   const active = facesForShape(shape).flatMap((name) => {
     const trace = assignments[name];
     if (!trace) return [];
@@ -158,11 +162,9 @@ export function buildVolumeField(
   const field = new Float32Array(n * n * n);
   if (!active.length) return { field, resolution: n, faceFit: 0 };
 
-  const initial = new Float32Array(field.length);
-  const fixed = new Uint8Array(field.length);
   const index = (x: number, y: number, z: number) => z * n * n + y * n + x;
   const tolerance = Math.max(0, Math.min(100, fitTolerance));
-  const seamBand = 0.012 + tolerance * 0.0007;
+  const mergeK = 0.03 + tolerance * 0.004;
   let compared = 0;
   let changed = 0;
 
@@ -171,8 +173,7 @@ export function buildVolumeField(
       for (let x = 0; x < n; x++) {
         const i = index(x, y, z);
         if (x <= 1 || y <= 1 || z <= 1 || x >= n - 2 || y >= n - 2 || z >= n - 2) {
-          field[i] = initial[i] = -1;
-          fixed[i] = 1;
+          field[i] = -1;
           continue;
         }
         const p = [x, y, z].map((value) => (value - 2) / (n - 5));
@@ -185,61 +186,31 @@ export function buildVolumeField(
             clearance = Math.min(clearance, HEX_APOTHEM - worldX * Math.cos(angle) - worldZ * Math.sin(angle));
           }
           if (clearance < 0) {
-            field[i] = initial[i] = -1;
-            fixed[i] = 1;
+            field[i] = -1;
             continue;
           }
         }
-        let weighted = 0;
-        let weights = 0;
-        let ownerSum = 0;
-        const owners: { name: VolumeFaceName; u: number; v: number; signed: number }[] = [];
+
+        let value = -1;
+        let first = true;
+        const owned: number[] = [];
         for (const face of active) {
           const [u, v, depth] = coordinates(face.name, p[0], p[1], p[2], shape);
           const mx = Math.max(0, Math.min(MASK_SIZE - 1, Math.round(u * (MASK_SIZE - 1))));
           const my = Math.max(0, Math.min(MASK_SIZE - 1, Math.round(v * (MASK_SIZE - 1))));
           const signed = Math.max(-1, Math.min(1, face.distance[my * MASK_SIZE + mx] / 2.4));
-          const weight = 1 / Math.pow(0.055 + depth, 2);
-          weighted += signed * weight;
-          weights += weight;
-          if (depth < (shape === "hex-prism" && face.name.startsWith("side") ? 0.035 : 0.0001)) {
-            ownerSum += signed;
-            owners.push({ name: face.name, u, v, signed });
-          }
+          value = first ? signed : smoothMax(value, signed, mergeK);
+          first = false;
+          if (depth < (shape === "hex-prism" && face.name.startsWith("side") ? 0.035 : 0.0001)) owned.push(signed);
         }
-        let value = weighted / weights;
-        if (owners.length) {
-          const own = ownerSum / owners.length;
-          const adjacent = active.filter((face) => coordinates(face.name, p[0], p[1], p[2], shape)[2] < seamBand);
-          const seam = adjacent.length > owners.length;
-          value = seam ? value * (tolerance / 100) * 0.42 + own * (1 - (tolerance / 100) * 0.42) : own;
-          fixed[i] = 1;
-          for (const owner of owners) {
-            compared++;
-            if (value > 0 !== owner.signed > 0) changed++;
-          }
-        } else {
-          const nearest = Math.min(...active.map((face) => coordinates(face.name, p[0], p[1], p[2], shape)[2]));
-          const interior = Math.min(1, nearest * 4);
-          const wave = Math.sin(p[0] * 9.7 + seed * 1.31) * Math.cos(p[1] * 8.3 - seed * 0.89) * Math.sin(p[2] * 7.1 + seed * 0.43);
-          value += wave * interior * 0.22;
+        for (const signed of owned) {
+          compared++;
+          if (value > 0 !== signed > 0) changed++;
         }
         if (shape === "hex-prism") value = Math.min(value, clearance * 3);
-        field[i] = initial[i] = value;
+        field[i] = value;
       }
 
-  const next = new Float32Array(field);
-  for (let pass = 0; pass < 18; pass++) {
-    for (let z = 2; z < n - 2; z++)
-      for (let y = 2; y < n - 2; y++)
-        for (let x = 2; x < n - 2; x++) {
-          const i = index(x, y, z);
-          if (fixed[i]) continue;
-          const nearby = (field[i - 1] + field[i + 1] + field[i - n] + field[i + n] + field[i - n * n] + field[i + n * n]) / 6;
-          next[i] = nearby * 0.69 + initial[i] * 0.31;
-        }
-    field.set(next);
-  }
   return { field, resolution: n, faceFit: compared ? Math.round((1 - changed / compared) * 100) : 0 };
 }
 

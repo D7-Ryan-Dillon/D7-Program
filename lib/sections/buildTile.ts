@@ -67,7 +67,7 @@ export async function buildSectionTile(input: BuildSectionTileInput): Promise<Pa
   const fitTolerance = input.fitTolerance ?? 50;
   const isHex = input.shape === "hex-prism";
 
-  const volume = buildVolumeField(input.assignments, input.shape, seed, fitTolerance, 46);
+  const volume = buildVolumeField(input.assignments, input.shape, fitTolerance, 46);
   const voxels = voxelizeVolumeField(volume);
   if (!voxels.void || !voxels.material || !voxels.voidSmooth) {
     throw new Error("Voxelization produced no data -- this is a bug in lib/sections/voxelize.ts, not a bad input.");
