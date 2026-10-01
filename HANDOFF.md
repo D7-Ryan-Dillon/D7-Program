@@ -49,11 +49,16 @@ All under the `D7-Ryan-Dillon` GitHub org:
   behavior, since it's the real original tool, not just source code.
 
 The Grasshopper/Python tool chain that *produces* the tiles the Viewer tab
-reads (`erosion_engine_5f.py`, the `.gh` file, the 15 tile recipes) lives
-only on the project owner's local machine, not in any git repo -- it's not
-something this app's development needs to touch. What this app needs from
-it is purely the data-format contract in
-[docs/DATA_FORMAT.md](docs/DATA_FORMAT.md).
+reads now lives in this repo too, under [`engine/`](engine/)
+(`erosion_engine_5f.py`, `erosion_foam.py`, `erosion_source.py`) -- added
+2026-10-01 so both project members can see and edit it alongside the web
+app. The `.gh` file and the 15 tile recipes are still local-only (binary
+Rhino file, not meaningfully diffable). Both the Grasshopper scripts and
+this app are actively worked on by both project members, not split by
+person. The app itself never executes these scripts -- what it needs from
+them is purely the data-format contract in
+[docs/DATA_FORMAT.md](docs/DATA_FORMAT.md), which `engine/README.md` points
+back to.
 
 ## 3. Stack
 
