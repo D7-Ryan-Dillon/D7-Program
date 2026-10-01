@@ -2,6 +2,7 @@
 
 import { useProject } from "@/lib/project-store";
 import { cn } from "@/lib/utils";
+import { TileThumbnail } from "@/components/shared/TileThumbnail";
 import { MAX_TILES, type BoardSlot } from "@/lib/boards/types";
 
 export function TilePicker({ slots, onToggle }: { slots: BoardSlot[]; onToggle: (tileId: string) => void }) {
@@ -30,6 +31,7 @@ export function TilePicker({ slots, onToggle }: { slots: BoardSlot[]; onToggle: 
             )}
           >
             <input type="checkbox" className="accent-[var(--magenta)]" checked={active} disabled={disabled} onChange={() => onToggle(tile.id)} />
+            <TileThumbnail glbUrl={tile.glbUrl} size={22} />
             <span className="truncate">{tile.name}</span>
           </label>
         );

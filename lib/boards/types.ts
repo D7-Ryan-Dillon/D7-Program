@@ -4,7 +4,12 @@
 // lib/scoring/descriptors.ts). Kept as a plain serializable config so it can
 // eventually be persisted the same way Viewer/Arrange state is.
 
-export type AxoViewKey = "iso-ne" | "iso-nw" | "iso-se" | "iso-sw" | "perspective";
+// AxoViewKey/DEFAULT_AXO_VIEW now live in lib/faceViews.ts (the view presets
+// moved there too, used by the shared lib/renderTile.ts, not just Boards) --
+// re-exported here so nothing importing them from this file had to change.
+import type { AxoViewKey } from "@/lib/faceViews";
+export type { AxoViewKey } from "@/lib/faceViews";
+export { DEFAULT_AXO_VIEW } from "@/lib/faceViews";
 
 export interface BoardSlot {
   id: string;
@@ -65,8 +70,6 @@ export interface BoardConfig {
 export const DPI = 300;
 export const MIN_TILES = 1;
 export const MAX_TILES = 12;
-
-export const DEFAULT_AXO_VIEW: AxoViewKey = "iso-ne";
 
 /** How a tile's own name is shown on a board -- underscores read as
  * placeholders in a stored id, not as part of a title. */

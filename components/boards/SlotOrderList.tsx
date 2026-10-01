@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronUp, ChevronDown, X } from "lucide-react";
+import { TileThumbnail } from "@/components/shared/TileThumbnail";
 import { displayName, type BoardSlot } from "@/lib/boards/types";
 import type { ParsedTile } from "@/lib/types";
 
@@ -29,6 +30,7 @@ export function SlotOrderList({
         return (
           <li key={slot.id} className="flex items-center gap-1 rounded-md border-hair bg-white/[0.02] px-2 py-1.5 text-xs">
             <span className="w-4 shrink-0 text-center font-mono text-[10px] text-muted-foreground">{i + 1}</span>
+            {tile && <TileThumbnail glbUrl={tile.glbUrl} size={22} />}
             <span className="min-w-0 flex-1 truncate">{tile ? displayName(tile.name) : "—"}</span>
             <button
               type="button"

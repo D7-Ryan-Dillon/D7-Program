@@ -3,6 +3,7 @@
 import { useProject } from "@/lib/project-store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { TileThumbnail } from "@/components/shared/TileThumbnail";
 
 export function BankPanel({
   selected,
@@ -40,6 +41,7 @@ export function BankPanel({
           )}
         >
           <input type="checkbox" className="accent-[var(--magenta)]" checked={selected.has(tile.id)} onChange={() => onToggle(tile.id)} />
+          <TileThumbnail glbUrl={tile.glbUrl} size={22} />
           <span className="truncate">{tile.name}</span>
         </label>
       ))}

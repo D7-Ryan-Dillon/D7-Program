@@ -48,3 +48,6 @@ export const AXO_VIEWS: ViewPreset[] = [
   view("iso-sw", "Isometric SW", [-1, 1, 1], [0, 0, 1]),
   PERSPECTIVE_VIEW,
 ];
+
+export type AxoViewKey = "iso-ne" | "iso-nw" | "iso-se" | "iso-sw" | "perspective";
+export const DEFAULT_AXO_VIEW: AxoViewKey = "iso-ne";

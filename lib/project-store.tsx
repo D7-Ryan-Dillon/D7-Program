@@ -47,6 +47,11 @@ type ProjectState = {
   updateTile: (id: string, patch: Partial<ParsedTile>) => void;
   setActiveTile: (id: string | null) => void;
   lastUsedCode: string | null;
+  /** Tiles pinned to the front of the tile switcher (Viewer/Analysis) --
+   * a working-session convenience, not synced to Supabase, so it resets
+   * when the project is left. */
+  pinnedTileIds: string[];
+  togglePinned: (id: string) => void;
 };
 
 const ProjectContext = createContext<ProjectState | null>(null);
@@ -58,6 +63,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [activeTileId, setActiveTileId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [pinnedTileIds, setPinnedTileIds] = useState<string[]>([]);
   const lastUsedCode = useSyncExternalStore(subscribeToLastCode, getLastCodeSnapshot, getLastCodeServerSnapshot);
 
   // Guards against re-saving the tiles we just loaded for a code, and against
@@ -71,6 +77,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setProjectCode(code);
     setTiles([]);
     setActiveTileId(null);
+    setPinnedTileIds([]);
     setSaveStatus("loading");
     window.localStorage.setItem(LAST_CODE_KEY, code);
 
@@ -95,6 +102,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setProjectCode(null);
     setTiles([]);
     setActiveTileId(null);
+    setPinnedTileIds([]);
     setSaveStatus("idle");
   }, []);
 
@@ -127,6 +135,11 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const removeTile = useCallback((id: string) => {
     setTiles((prev) => prev.filter((t) => t.id !== id));
     setActiveTileId((current) => (current === id ? null : current));
+    setPinnedTileIds((prev) => prev.filter((pinnedId) => pinnedId !== id));
+  }, []);
+
+  const togglePinned = useCallback((id: string) => {
+    setPinnedTileIds((prev) => (prev.includes(id) ? prev.filter((pinnedId) => pinnedId !== id) : [...prev, id]));
   }, []);
 
   const updateTile = useCallback((id: string, patch: Partial<ParsedTile>) => {
@@ -147,8 +160,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       updateTile,
       setActiveTile: setActiveTileId,
       lastUsedCode,
+      pinnedTileIds,
+      togglePinned,
     }),
-    [projectCode, tiles, activeTileId, saveStatus, saveError, enterProject, leaveProject, addTile, removeTile, updateTile, lastUsedCode],
+    [projectCode, tiles, activeTileId, saveStatus, saveError, enterProject, leaveProject, addTile, removeTile, updateTile, lastUsedCode, pinnedTileIds, togglePinned],
   );
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;

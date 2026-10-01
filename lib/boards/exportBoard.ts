@@ -10,7 +10,7 @@
 
 import { scoreTile, type DescriptorResult } from "@/lib/scoring/descriptors";
 import type { ParsedTile } from "@/lib/types";
-import { renderTileToDataUrl } from "./renderTile";
+import { renderTileToDataUrl } from "@/lib/renderTile";
 import { traceModuleOutline, traceSquareOnly, DIVIDER_X, TAG_HEIGHT_FRACTION, TOP_EDGE_FRACTION } from "./frameShape";
 import { squareGridLayout, squareGridCells, type GridCell } from "./grid";
 import { fitText, wrapToWidth } from "./textFit";

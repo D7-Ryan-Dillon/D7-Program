@@ -1,12 +1,13 @@
 // Headless (non-React) three.js rendering of a tile's GLB from a fixed axo
-// preset, for the Boards tab -- both its live on-screen preview (small) and
-// its print-resolution export (large) go through this same function, just
-// at different pixel sizes, so what you see is what you get.
+// preset. Originally built for the Boards tab -- both its live on-screen
+// preview (small) and its print-resolution export (large) go through this
+// same function, just at different pixel sizes, so what you see is what you
+// get -- now also the source of the small identifying thumbnails shown next
+// to a tile's name in every tile bank/list across the app.
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { AXO_VIEWS } from "@/lib/faceViews";
-import type { AxoViewKey } from "./types";
+import { AXO_VIEWS, type AxoViewKey } from "@/lib/faceViews";
 
 const loader = new GLTFLoader();
 const sceneCache = new Map<string, Promise<THREE.Group>>();
@@ -52,11 +53,32 @@ function applyMaterial(mesh: THREE.Object3D | undefined, color: string, opacity:
   });
 }
 
-/** Renders one tile to a dataURL at `size`x`size` pixels. A fresh renderer
- * per call (rather than a pooled one) keeps this safe to run for several
- * tiles back to back, including at very large export sizes, without one
- * render's leftover state leaking into the next. */
-export async function renderTileToDataUrl(opts: TileRenderOptions): Promise<string> {
+// Browsers cap how many live WebGL contexts can exist at once (commonly
+// 8-16); a bank with a dozen-plus tiles would otherwise fire off that many
+// renderTileToDataUrl calls at the same instant (one per thumbnail mounting
+// together) and start silently losing contexts. Serializing every call
+// through this queue -- thumbnails and the Boards tab's own export/preview
+// calls alike -- keeps at most one renderer alive at a time; Boards already
+// awaits these sequentially in its own loop, so this changes nothing for it.
+let renderQueue: Promise<unknown> = Promise.resolve();
+function serialized<T>(task: () => Promise<T>): Promise<T> {
+  const run = renderQueue.then(task, task);
+  renderQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/** Renders one tile to a dataURL at `width`x`height` pixels. A fresh
+ * renderer per call (rather than a pooled one) keeps this safe to run for
+ * several tiles back to back, including at very large export sizes,
+ * without one render's leftover state leaking into the next. */
+export function renderTileToDataUrl(opts: TileRenderOptions): Promise<string> {
+  return serialized(() => renderTileToDataUrlNow(opts));
+}
+
+async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> {
   const original = await loadScene(opts.glbUrl);
   const scene = original.clone(true);
 
@@ -106,4 +128,37 @@ export async function renderTileToDataUrl(opts: TileRenderOptions): Promise<stri
   const dataUrl = canvas.toDataURL("image/png");
   renderer.dispose();
   return dataUrl;
+}
+
+const thumbnailCache = new Map<string, Promise<string>>();
+
+/** A small identifying preview for a tile bank/list row -- same fixed angle
+ * and colors everywhere (matching the Viewer tab's own default look) so
+ * thumbnails read consistently across Viewer, Analysis, Arrange and Boards,
+ * rather than each tab inventing its own. Cached per glbUrl+size: several
+ * banks can show the same tile at the same time (e.g. Arrange and Boards
+ * open together isn't possible today, but Viewer/Analysis's own switcher
+ * and a future split view might), and a tile's GLB never changes once
+ * loaded. */
+export function renderTileThumbnail(glbUrl: string, size: number): Promise<string> {
+  const key = `${glbUrl}@${size}`;
+  let cached = thumbnailCache.get(key);
+  if (!cached) {
+    cached = renderTileToDataUrl({
+      glbUrl,
+      view: "iso-ne",
+      width: size,
+      height: size,
+      backgroundColor: null,
+      foamColor: "#e8a6c8",
+      voidColor: "#1c1c1f",
+      foamOpacity: 1,
+      voidOpacity: 1,
+      foamVisible: true,
+      voidVisible: true,
+    });
+    thumbnailCache.set(key, cached);
+    cached.catch(() => thumbnailCache.delete(key));
+  }
+  return cached;
 }
