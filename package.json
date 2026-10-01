@@ -19,6 +19,7 @@
     "lucide-react": "^1.48.0",
     "next": "16.3.7",
     "next-themes": "^0.4.6",
+    "paper": "^0.12.18",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1",
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/paper": "^0.11.14",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.186.0",

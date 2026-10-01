@@ -2,12 +2,13 @@
 
 import { cn } from "@/lib/utils";
 
-export type WorkspaceTabKey = "viewer" | "analysis" | "arrange";
+export type WorkspaceTabKey = "viewer" | "analysis" | "arrange" | "sections";
 
 const TABS: { key: WorkspaceTabKey; label: string }[] = [
   { key: "viewer", label: "01 Viewer" },
   { key: "analysis", label: "02 Analysis" },
   { key: "arrange", label: "03 Arrange" },
+  { key: "sections", label: "04 Sections" },
 ];
 
 export function TabNav({ active, onChange }: { active: WorkspaceTabKey; onChange: (key: WorkspaceTabKey) => void }) {
