@@ -42,6 +42,11 @@ export function TileSwitcher() {
               )}
             >
               <TileThumbnail glbUrl={tile.glbUrl} size={22} className="rounded-full" />
+              {tile.sectionRecipe?.plates?.enabled && (
+                <span className="shrink-0 rounded bg-magenta/70 px-1 font-mono text-[9px] leading-tight text-white" title={`${tile.sectionRecipe.plates.count} floor plate(s)`}>
+                  ▤{tile.sectionRecipe.plates.count}
+                </span>
+              )}
               {pinned && <Pin className="h-2.5 w-2.5 shrink-0 fill-current text-magenta" aria-label="Pinned" />}
               <span className="max-w-[16ch] truncate">{tile.name}</span>
               <button

@@ -6,7 +6,7 @@ export type WorkspaceTabKey = "viewer" | "analysis" | "arrange" | "sections" | "
 
 const TABS: { key: WorkspaceTabKey; label: string }[] = [
   { key: "viewer", label: "01 Viewer" },
-  { key: "sections", label: "02 Sections" },
+  { key: "sections", label: "02 Builder" },
   { key: "analysis", label: "03 Analysis" },
   { key: "arrange", label: "04 Arrange" },
   { key: "boards", label: "05 Boards" },

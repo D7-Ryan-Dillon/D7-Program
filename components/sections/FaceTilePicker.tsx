@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, Lock, LockOpen, RotateCw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TileThumb } from "@/components/sections/TileBank";
 import type { BankTile } from "@/lib/sections/tileLibrary";
@@ -16,6 +16,10 @@ export function FaceTilePicker({
   open,
   onToggle,
   onChange,
+  turns,
+  onRotate,
+  locked,
+  onLock,
 }: {
   face: string;
   assigned: BankTile | undefined;
@@ -23,6 +27,12 @@ export function FaceTilePicker({
   open: boolean;
   onToggle: () => void;
   onChange: (name: string | undefined) => void;
+  /** Quarter turns (0-3) given to this face's tile. */
+  turns: number;
+  onRotate: () => void;
+  /** A locked face keeps its tile and turn through Auto-fill. */
+  locked: boolean;
+  onLock: () => void;
 }) {
   return (
     <div className="rounded-lg border-hair">
@@ -42,13 +52,40 @@ export function FaceTilePicker({
       >
         <span className="w-14 shrink-0 font-mono text-[11px] uppercase text-muted-foreground">{face}</span>
         {assigned ? (
-          <span className="pointer-events-none block h-11 w-11 shrink-0">
+          <span className="pointer-events-none block h-11 w-11 shrink-0 transition-transform" style={{ transform: `rotate(${turns * 90}deg)` }}>
             <TileThumb tile={assigned} selected={false} onClick={() => {}} />
           </span>
         ) : (
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-dashed border-white/20 text-[10px] text-muted-foreground">empty</span>
         )}
         <span className={cn("min-w-0 flex-1 truncate text-xs", assigned ? "text-foreground" : "text-muted-foreground")}>{assigned ? assigned.displayName : "Choose a tile"}</span>
+        {assigned && (
+          <button
+            type="button"
+            title="Turn this tile 90 degrees"
+            aria-label={`Turn the tile on ${face} 90 degrees`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRotate();
+            }}
+            className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+          >
+            <RotateCw className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <button
+          type="button"
+          title={locked ? "Locked: Auto-fill keeps this face" : "Unlocked: Auto-fill may replace this face"}
+          aria-label={locked ? `Unlock ${face}` : `Lock ${face}`}
+          aria-pressed={locked}
+          onClick={(e) => {
+            e.stopPropagation();
+            onLock();
+          }}
+          className={cn("shrink-0 rounded p-1 transition-colors hover:bg-white/10", locked ? "text-magenta" : "text-muted-foreground hover:text-foreground")}
+        >
+          {locked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}
+        </button>
         <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
       </div>
       {open && (

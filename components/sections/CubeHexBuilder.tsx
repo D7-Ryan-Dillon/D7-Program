@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/select";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Bounds, OrbitControls } from "@react-three/drei";
@@ -21,7 +22,16 @@ import { ColorField } from "@/components/boards/ColorField";
 import { FaceTilePicker } from "@/components/sections/FaceTilePicker";
 import { NumberSlider } from "@/components/shared/NumberSlider";
 import { applyClipToMesh, buildClipOutline, buildClipPlane, buildCutFaceCap, defaultClipState, type ClipState } from "@/lib/clipping";
-import { useProject } from "@/lib/project-store";
+import { useProject, useProjectUi } from "@/lib/project-store";
+import { useUiField } from "@/lib/useUiField";
+import { CaptureBridge } from "@/components/shared/CaptureBridge";
+import { ViewportTools } from "@/components/shared/ViewportTools";
+import { Segmented } from "@/components/shared/Segmented";
+import { Section } from "@/components/shared/Section";
+import type { ViewportHandle } from "@/lib/viewportCapture";
+import { rotateTrace } from "@/lib/sections/rotateTrace";
+import { autoFill } from "@/lib/sections/autoFill";
+import { applyPlates, arePlatesActive, defaultPlates, type PlateFootprint, type PlateSettings } from "@/lib/sections/plates";
 import type { BankTile } from "@/lib/sections/tileLibrary";
 import { cubeFaces, facesForShape, hexSidePose, HEX_APOTHEM, prismFaces, type SectionTrace, type VolumeAssignments, type VolumeFaceName, type VolumeShape } from "@/lib/sections/volumeField";
 import { buildVolumeField, type VolumeField } from "@/lib/sections/volumeField";
@@ -159,6 +169,13 @@ function PreviewScene({
     const ghosted = displayMode === "ghosted";
     applyPreviewMaterial(group.getObjectByName("foam"), colors.foam, visibility.foam, ghosted, "foam");
     applyPreviewMaterial(group.getObjectByName("void"), colors.void, visibility.void, ghosted, "void");
+    return () => {
+      // The next run builds fresh materials; free this run's.
+      for (const name of ["foam", "void"]) {
+        const m = (group.getObjectByName(name) as THREE.Mesh | undefined)?.material;
+        if (m && !Array.isArray(m)) m.dispose();
+      }
+    };
   }, [group, displayMode, visibility, colors]);
 
   useEffect(() => {
@@ -207,6 +224,9 @@ function PreviewScene({
 }
 
 const TILE_FT: [number, number, number] = [20, 20, 20];
+/** The loft's own seed / seam-fit settings are fixed -- they only ever shifted the result slightly. Saved pieces keep the values they were made with. */
+const BUILD_SEED = 1;
+const BUILD_FIT_TOLERANCE = 50;
 
 /** The raw lofted field for the current face assignments -- cleanup and
  * meshing happen downstream of it so the cleanup sliders can re-run without
@@ -223,6 +243,7 @@ interface RawPreview {
   traces: Record<string, SectionTrace>;
   seed: number;
   fitTolerance: number;
+  rotations: Record<string, number>;
 }
 
 function freshCubeStamp() {
@@ -254,27 +275,74 @@ async function thumbnailFor(group: THREE.Group): Promise<string> {
   }
 }
 
+/** What the builder remembers per project (the generated preview itself re-makes with Generate; every piece is already kept under Saved objects). */
+interface BuilderUi {
+  shape: VolumeShape;
+  assignments: Partial<Record<VolumeFaceName, string>>;
+  /** Quarter turns (0-3) given to each face's tile. */
+  rotations: Partial<Record<VolumeFaceName, number>>;
+  /** Faces Auto-fill leaves alone. */
+  locks: Partial<Record<VolumeFaceName, boolean>>;
+  cleanup: CleanupSettings;
+  swapped: boolean;
+  plates: PlateSettings;
+  name: string;
+  category: (typeof CATEGORY_OPTIONS)[number] | "";
+  typology: string;
+  displayMode: DisplayMode | "faces";
+  visibility: MeshVisibility;
+  colors: MeshColors;
+  clip: ClipState;
+  pool: "checked" | "all";
+  autoRotate: boolean;
+  rotateSecs: number;
+}
+const defaultBuilderUi = (): BuilderUi => ({
+  shape: "cube",
+  assignments: {},
+  rotations: {},
+  locks: {},
+  cleanup: defaultCleanup,
+  swapped: false,
+  plates: defaultPlates(),
+  name: "",
+  category: "",
+  typology: "",
+  displayMode: "rendered",
+  visibility: { foam: true, void: false },
+  colors: { foam: "#e8a6c8", void: "#1c1c1f" },
+  clip: defaultClipState(),
+  pool: "checked",
+  autoRotate: false,
+  rotateSecs: 24,
+});
+
 export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: BankTile[]; allTiles: BankTile[]; onSaved: (tile: ParsedTile) => void }) {
   const { addTile, cubes, saveCube, removeCube } = useProject();
-  const [shape, setShape] = useState<VolumeShape>("cube");
-  const [assignments, setAssignments] = useState<Partial<Record<VolumeFaceName, string>>>({});
-  const [seed, setSeed] = useState(1);
-  const [fitTolerance, setFitTolerance] = useState(50);
-  const [cleanup, setCleanup] = useState<CleanupSettings>(defaultCleanup);
-  const [swapped, setSwapped] = useState(false);
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState<(typeof CATEGORY_OPTIONS)[number] | "">("");
-  const [typology, setTypology] = useState("");
+  const [bui, setBui] = useProjectUi<BuilderUi>("builder", defaultBuilderUi);
+  const [shape, setShape] = useUiField(bui, setBui, "shape");
+  const [assignments, setAssignments] = useUiField(bui, setBui, "assignments");
+  const [rotations, setRotations] = useUiField(bui, setBui, "rotations");
+  const [locks, setLocks] = useUiField(bui, setBui, "locks");
+  const [cleanup, setCleanup] = useUiField(bui, setBui, "cleanup");
+  const [swapped, setSwapped] = useUiField(bui, setBui, "swapped");
+  const [plates, setPlates] = useUiField(bui, setBui, "plates");
+  const [name, setName] = useUiField(bui, setBui, "name");
+  const [category, setCategory] = useUiField(bui, setBui, "category");
+  const [typology, setTypology] = useUiField(bui, setBui, "typology");
+  const [autoRotate, setAutoRotate] = useUiField(bui, setBui, "autoRotate");
+  const [rotateSecs, setRotateSecs] = useUiField(bui, setBui, "rotateSecs");
+  const viewportHandle = useRef<ViewportHandle | null>(null);
   const [raw, setRaw] = useState<RawPreview | null>(null);
   const [faceFit, setFaceFit] = useState<number | null>(null);
   const [assignedFaceCount, setAssignedFaceCount] = useState<number | null>(null);
-  const [displayMode, setDisplayMode] = useState<DisplayMode | "faces">("rendered");
-  const [visibility, setVisibility] = useState<MeshVisibility>({ foam: true, void: false });
-  const [colors, setColors] = useState<MeshColors>({ foam: "#e8a6c8", void: "#1c1c1f" });
-  const [clip, setClip] = useState<ClipState>(defaultClipState());
+  const [displayMode, setDisplayMode] = useUiField(bui, setBui, "displayMode");
+  const [visibility, setVisibility] = useUiField(bui, setBui, "visibility");
+  const [colors, setColors] = useUiField(bui, setBui, "colors");
+  const [clip, setClip] = useUiField(bui, setBui, "clip");
   const [faceOverlays, setFaceOverlays] = useState<Partial<Record<VolumeFaceName, FaceOverlaySettings>>>({});
   const [openFace, setOpenFace] = useState<string | null>(null);
-  const [pool, setPool] = useState<"checked" | "all">("checked");
+  const [pool, setPool] = useUiField(bui, setBui, "pool");
   const rawCounter = useRef(0);
   const [busy, setBusy] = useState(false);
   const [exportingAnalysis, setExportingAnalysis] = useState(false);
@@ -296,21 +364,24 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
     for (const face of faceNames) {
       const tileName = assignments[face];
       const tile = tileName ? tileByName.get(tileName) : undefined;
-      if (tile) (out as Record<string, typeof tile.proposal>)[face] = tile.proposal;
+      if (tile) (out as Record<string, typeof tile.proposal>)[face] = rotateTrace(tile.proposal, rotations[face] ?? 0);
     }
     return out;
-  }, [assignments, faceNames, tileByName]);
+  }, [assignments, rotations, faceNames, tileByName]);
 
   // Cleanup runs on the already-lofted field, deferred so dragging a slider
   // stays smooth while the (heavier) clean + remesh catches up behind it.
   const deferredCleanup = useDeferredValue(cleanup);
   const deferredSwapped = useDeferredValue(swapped);
+  const deferredPlates = useDeferredValue(plates);
+  // loft -> swap -> plates -> cleanup, so the plate side always means the final foam / void.
   const built = useMemo(() => {
     if (!raw) return null;
     const lofted = deferredSwapped ? swapFoamVoid(raw.volume) : raw.volume;
-    const { volume, stats } = cleanupVolumeField(lofted, deferredCleanup, TILE_FT[0]);
-    return { group: buildTileScene(volume.field, volume.resolution, TILE_FT, raw.shape), stats };
-  }, [raw, deferredCleanup, deferredSwapped]);
+    const plated = applyPlates(lofted, deferredPlates, raw.shape, TILE_FT[0]);
+    const { volume, stats } = cleanupVolumeField(plated.volume, deferredCleanup, TILE_FT[0]);
+    return { group: buildTileScene(volume.field, volume.resolution, TILE_FT, raw.shape), stats, plateStats: plated.stats };
+  }, [raw, deferredCleanup, deferredSwapped, deferredPlates]);
   const previewGroup = built?.group ?? null;
   const cleanupStats = built && isCleanupActive(deferredCleanup) ? built.stats : null;
 
@@ -336,8 +407,10 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
       traces: raw.traces,
       seed: raw.seed,
       fitTolerance: raw.fitTolerance,
+      rotations: raw.rotations,
       cleanup: deferredCleanup,
       swapped: deferredSwapped,
+      plates: arePlatesActive(deferredPlates) ? deferredPlates : undefined,
     };
     if (existing && existing.thumb && cubeSignature(existing) === cubeSignature(entry)) return;
     let cancelled = false;
@@ -352,14 +425,14 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
         }
       }
       if (!cancelled) saveCube({ id: raw.cubeId, createdAt: existing?.createdAt ?? raw.createdAt, thumb, ...entry });
-    }, 700);
+    }, 1800); // wait for edits to settle: each thumbnail is a GLB export + a render
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [raw, built, deferredCleanup, deferredSwapped, name, saveCube]);
+  }, [raw, built, deferredCleanup, deferredSwapped, deferredPlates, name, saveCube]);
 
-  const generateFrom = (shapeNow: VolumeShape, traces: VolumeAssignments, names: Record<string, string>, seedNow: number, fitNow: number, reuse?: { id: string; createdAt: number }) => {
+  const generateFrom = (shapeNow: VolumeShape, traces: VolumeAssignments, names: Record<string, string>, seedNow: number, fitNow: number, rotationsNow: Record<string, number>, reuse?: { id: string; createdAt: number }) => {
     const volume = buildVolumeField(traces, shapeNow, seedNow, fitNow, 46);
     setFaceFit(volume.faceFit);
     setAssignedFaceCount(Object.keys(traces).length);
@@ -367,7 +440,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
     // Pressing Generate again on a recipe that is already saved reuses that
     // saved piece instead of adding a duplicate.
     const fresh = freshCubeStamp();
-    const same = reuse ?? cubes.find((c) => c.shape === shapeNow && c.seed === seedNow && c.fitTolerance === fitNow && JSON.stringify(c.assignments) === JSON.stringify(names));
+    const same = reuse ?? cubes.find((c) => c.shape === shapeNow && c.seed === seedNow && c.fitTolerance === fitNow && JSON.stringify(c.assignments) === JSON.stringify(names) && JSON.stringify(c.rotations ?? {}) === JSON.stringify(rotationsNow));
     setRaw({
       id: rawCounter.current,
       volume,
@@ -378,6 +451,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
       traces: traces as Record<string, SectionTrace>,
       seed: seedNow,
       fitTolerance: fitNow,
+      rotations: rotationsNow,
     });
     setFaceOverlays((prev) => {
       const next = { ...prev };
@@ -395,20 +469,29 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
       toast.error("Assign at least one tile to a face first.");
       return;
     }
-    generateFrom(shape, volAssignments, Object.fromEntries(Object.entries(assignments).filter(([, v]) => v)) as Record<string, string>, seed, fitTolerance);
+    generateFrom(shape, volAssignments, Object.fromEntries(Object.entries(assignments).filter(([, v]) => v)) as Record<string, string>, BUILD_SEED, BUILD_FIT_TOLERANCE, activeRotations());
   };
 
-  const autoFillEmptyFaces = () => {
+  /** Quarter turns for the faces that actually have a tile. */
+  const activeRotations = (): Record<string, number> => Object.fromEntries(faceNames.filter((f) => assignments[f] && rotations[f]).map((f) => [f, rotations[f] as number]));
+
+  /** A new, sensibly matched set (tile + quarter turn) for every unlocked face; locked faces stay. */
+  const autoFillFaces = () => {
     if (!poolTiles.length) {
       toast.error("No tiles to pick from.");
       return;
     }
+    const current: Partial<Record<VolumeFaceName, { tile: string; turns: number }>> = {};
+    for (const f of faceNames) if (assignments[f]) current[f] = { tile: assignments[f]!, turns: rotations[f] ?? 0 };
+    const fills = autoFill(faceNames, shape, poolTiles.map((t) => ({ name: t.name, proposal: t.proposal })), current, locks);
     setAssignments((prev) => {
       const next = { ...prev };
-      for (const face of faceNames) {
-        if (next[face]) continue;
-        next[face] = poolTiles[Math.floor(Math.random() * poolTiles.length)].name;
-      }
+      for (const f of faceNames) if (!locks[f] && fills[f]) next[f] = fills[f]!.tile;
+      return next;
+    });
+    setRotations((prev) => {
+      const next = { ...prev };
+      for (const f of faceNames) if (!locks[f] && fills[f]) next[f] = fills[f]!.turns;
       return next;
     });
   };
@@ -416,17 +499,18 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
   const loadCube = (cube: SavedCube) => {
     setShape(cube.shape);
     setAssignments(cube.assignments);
-    setSeed(cube.seed);
-    setFitTolerance(cube.fitTolerance);
     setCleanup(cube.cleanup);
     setSwapped(cube.swapped);
+    setRotations(cube.rotations ?? {});
+    setLocks({});
+    setPlates(cube.plates ?? defaultPlates());
     setName(cube.name);
     setClip(defaultClipState());
     setOpenFace(null);
     setFaceOverlays({});
     // Lofted straight from the traces stored with the piece, so it comes back
     // exactly as it was made.
-    generateFrom(cube.shape, cube.traces, cube.assignments, cube.seed, cube.fitTolerance, { id: cube.id, createdAt: cube.createdAt });
+    generateFrom(cube.shape, cube.traces, cube.assignments, cube.seed, cube.fitTolerance, cube.rotations ?? {}, { id: cube.id, createdAt: cube.createdAt });
     toast.success(`Opened "${cube.name}".`);
   };
 
@@ -435,10 +519,12 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
     shape,
     assignments: volAssignments,
     assignmentNames: assignments,
-    seed,
-    fitTolerance,
+    seed: raw?.seed ?? BUILD_SEED,
+    fitTolerance: raw?.fitTolerance ?? BUILD_FIT_TOLERANCE,
     cleanup,
     swapped,
+    plates,
+    rotations: activeRotations(),
     guessed: category ? { category, typology: typology.trim() || undefined } : {},
   });
 
@@ -510,6 +596,8 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                   onClick={() => {
                     setShape(s);
                     setAssignments({});
+                    setRotations({});
+                    setLocks({});
                     setRaw(null);
                     setFaceOverlays({});
                     setOpenFace(null);
@@ -522,13 +610,16 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
           </div>
         </GlowPanel>
         <GlowPanel glow="orange">
-          <div className="space-y-3 p-4">
-            <div className="flex items-center justify-between gap-2">
-              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Faces</div>
-              <Button size="sm" variant="outline" onClick={autoFillEmptyFaces}>
-                Auto-fill empty
+          <Section
+            id="builder.faces"
+            title="Faces"
+            summary={`${assignedFaceCount} set`}
+            action={
+              <Button size="sm" variant="outline" onClick={autoFillFaces} title="A new, sensibly matched set for every unlocked face -- press again for another">
+                Auto-fill
               </Button>
-            </div>
+            }
+          >
             <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
               <span>Pick from</span>
               <div className="inline-flex rounded-full border-hair p-0.5">
@@ -558,15 +649,20 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                   onToggle={() => setOpenFace((prev) => (prev === face ? null : face))}
                   onChange={(tileName) => {
                     setAssignments((prev) => ({ ...prev, [face]: tileName }));
+                    setRotations((prev) => ({ ...prev, [face]: 0 }));
                     setOpenFace(null);
                   }}
+                  turns={rotations[face] ?? 0}
+                  onRotate={() => setRotations((prev) => ({ ...prev, [face]: ((prev[face] ?? 0) + 1) % 4 }))}
+                  locked={!!locks[face]}
+                  onLock={() => setLocks((prev) => ({ ...prev, [face]: !prev[face] }))}
                 />
               ))}
             </div>
             <p className="text-[11px] text-muted-foreground">
-              {shape === "cube" ? `${cubeFaces.length} faces` : `${prismFaces.length} faces (6 sides + top/bottom)`} · tap a face to pick its tile.
+              {shape === "cube" ? `${cubeFaces.length} faces` : `${prismFaces.length} faces (6 sides + top/bottom)`} · tap a face to pick its tile, ↻ turns it 90°, the lock keeps it through Auto-fill.
             </p>
-          </div>
+          </Section>
         </GlowPanel>
         <GlowPanel glow="orange">
           <div className="p-4">
@@ -576,18 +672,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
         </GlowPanel>
         <GlowPanel glow="magenta">
           <div className="space-y-3 p-4">
-            <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Loft settings</div>
-            <label className="block text-xs">
-              Seed
-              <div className="mt-1 flex gap-1.5">
-                <Input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value) || 0)} className="h-8" />
-                <ShuffleSeedButton onShuffle={setSeed} />
-              </div>
-            </label>
-            <label className="block text-xs">
-              Seam fit tolerance ({fitTolerance})
-              <input type="range" min={0} max={100} value={fitTolerance} onChange={(e) => setFitTolerance(Number(e.target.value))} className="mt-1 w-full" />
-            </label>
+            <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Foam &amp; void</div>
             <label className="flex items-center justify-between gap-2 text-xs">
               <span>
                 Swap foam &amp; void
@@ -605,14 +690,94 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
             )}
           </div>
         </GlowPanel>
+        <GlowPanel glow="orange">
+          <Section
+            id="builder.plates"
+            title="Floor plates"
+            defaultOpen={false}
+            summary={plates.enabled ? `${plates.count} plate${plates.count === 1 ? "" : "s"}` : "off"}
+            action={
+              <>
+                {plates.enabled && (
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => setPlates({ ...defaultPlates(), enabled: true })}>
+                    Reset
+                  </Button>
+                )}
+                <Switch checked={plates.enabled} onCheckedChange={(enabled) => setPlates((p) => ({ ...p, enabled }))} />
+              </>
+            }
+          >
+            {!plates.enabled ? (
+              <p className="text-[11px] text-muted-foreground">Off: the tile is exactly your lofted shape. Turn on to add flat floors at set heights, eroded to keep vertical connections.</p>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <div className="text-xs text-muted-foreground">Plates are made of</div>
+                  <Segmented
+                    value={plates.side}
+                    options={[
+                      { value: "foam", label: "Foam" },
+                      { value: "void", label: "Void" },
+                    ]}
+                    onChange={(side) => setPlates((p) => ({ ...p, side }))}
+                  />
+                  <p className="text-[10px] text-muted-foreground">The final foam or void, whatever Swap foam &amp; void is set to.</p>
+                </div>
+                <NumberSlider label="Number of plates" value={plates.count} min={1} max={6} onChange={(count) => setPlates((p) => ({ ...p, count }))} />
+                <NumberSlider label="First plate (top surface)" value={plates.firstElevationFt} min={1} max={20} step={0.5} decimals={1} suffix=" ft" exact onChange={(firstElevationFt) => setPlates((p) => ({ ...p, firstElevationFt }))} />
+                <NumberSlider label="Floor to floor" value={plates.floorToFloorFt} min={3} max={20} step={0.5} decimals={1} suffix=" ft" exact onChange={(floorToFloorFt) => setPlates((p) => ({ ...p, floorToFloorFt }))} />
+                <NumberSlider label="Thickness" value={plates.thicknessFt} min={1} max={4} step={0.25} decimals={2} suffix=" ft" exact onChange={(thicknessFt) => setPlates((p) => ({ ...p, thicknessFt }))} />
+                <label className="block text-xs">
+                  <span className="mb-1 block text-muted-foreground">Footprint</span>
+                  <Select className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs" value={plates.footprint} onChange={(e) => setPlates((p) => ({ ...p, footprint: e.target.value as PlateFootprint }))}>
+                    <option value="full">Full tile</option>
+                    <option value="inset">Pulled in from the walls</option>
+                    <option value="L">L figure</option>
+                    <option value="T">T figure</option>
+                    <option value="plus">Plus figure</option>
+                  </Select>
+                </label>
+                {plates.footprint !== "full" && <NumberSlider label="Pull in from walls" value={plates.insetFt} min={0} max={8} step={0.25} decimals={2} suffix=" ft" exact onChange={(insetFt) => setPlates((p) => ({ ...p, insetFt }))} />}
+                <Section id="builder.plates.erosion" variant="inline" title="Openings & erosion" defaultOpen={false}>
+                  <NumberSlider label="Recede from surroundings" value={plates.erodePct} min={0} max={100} suffix="%" onChange={(erodePct) => setPlates((p) => ({ ...p, erodePct }))} />
+                  <NumberSlider label="Random erosion" value={plates.noisePct} min={0} max={100} suffix="%" onChange={(noisePct) => setPlates((p) => ({ ...p, noisePct }))} />
+                  <NumberSlider label="Opening size" value={plates.openingPct} min={0} max={80} suffix="% of width" onChange={(openingPct) => setPlates((p) => ({ ...p, openingPct }))} />
+                  <label className="block text-xs">
+                    Erosion seed
+                    <div className="mt-1 flex gap-1.5">
+                      <Input type="number" value={plates.seed} onChange={(e) => setPlates((p) => ({ ...p, seed: Number(e.target.value) || 0 }))} className="h-8" />
+                      <ShuffleSeedButton onShuffle={(v) => setPlates((p) => ({ ...p, seed: v }))} />
+                    </div>
+                  </label>
+                  <label className="flex items-center justify-between gap-2 text-xs">
+                    <span>
+                      Keep a vertical connection
+                      <span className="block text-[10px] text-muted-foreground">Every plate keeps at least one opening, placed where a void runs through it.</span>
+                    </span>
+                    <Switch checked={plates.keepConnection} onCheckedChange={(keepConnection) => setPlates((p) => ({ ...p, keepConnection }))} />
+                  </label>
+                </Section>
+                <p className="text-[11px] text-muted-foreground">
+                  {built && arePlatesActive(deferredPlates)
+                    ? `${built.plateStats.elevations.length} plate${built.plateStats.elevations.length === 1 ? "" : "s"} at ${built.plateStats.elevations.join(", ")} ft · ${built.plateStats.withOpenings} with openings`
+                    : "Generate a preview to see them."}
+                </p>
+              </>
+            )}
+          </Section>
+        </GlowPanel>
         <GlowPanel glow="magenta">
-          <div className="space-y-3 p-4">
-            <div className="flex items-center justify-between">
-              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Cleanup</div>
+          <Section
+            id="builder.cleanup"
+            title="Cleanup"
+            defaultOpen={false}
+            summary={isCleanupActive(cleanup) ? "on" : "off"}
+            action={
               <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={!isCleanupActive(cleanup)} onClick={() => setCleanup(defaultCleanup)}>
                 Reset
               </Button>
-            </div>
+            }
+          >
             <NumberSlider label="Delete floating pieces under" value={cleanup.minPieceFt3} min={0} max={800} step={1} decimals={0} suffix=" ft³" exact onChange={(minPieceFt3) => setCleanup((c) => ({ ...c, minPieceFt3 }))} />
             <NumberSlider label="Shave branches thinner than" value={cleanup.minBranchFt} min={0} max={4} step={0.05} decimals={2} suffix=" ft" exact onChange={(minBranchFt) => setCleanup((c) => ({ ...c, minBranchFt }))} />
             <NumberSlider label="Fill sealed void pockets under" value={cleanup.minPocketFt3} min={0} max={800} step={1} decimals={0} suffix=" ft³" exact onChange={(minPocketFt3) => setCleanup((c) => ({ ...c, minPocketFt3 }))} />
@@ -627,18 +792,18 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                     .join(" · ") || "nothing met those thresholds yet"
                 : "Off at 0. Anything touching a tile face is never treated as floating -- it may carry on into the next tile."}
             </p>
-          </div>
+          </Section>
         </GlowPanel>
         {savedCubes.length > 0 && (
           <GlowPanel glow="orange">
-            <div className="space-y-2 p-4">
-              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Saved objects ({savedCubes.length})</div>
+            <Section id="builder.saved" title={`Saved objects (${savedCubes.length})`}>
               <p className="text-[10px] text-muted-foreground">Every piece you generate is kept with this project code automatically.</p>
               <div className="space-y-1">
                 {savedCubes.map((c) => (
                   <div key={c.id} className="flex items-center gap-1 rounded-md border border-input pr-1 transition-colors hover:border-magenta/50">
                     <button onClick={() => loadCube(c)} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs">
-                      <span className="inline-block h-9 w-9 shrink-0 overflow-hidden rounded bg-white/5">
+                      <span className="relative inline-block h-9 w-9 shrink-0 overflow-hidden rounded bg-white/5">
+                        {c.plates?.enabled && <span className="absolute bottom-0 right-0 rounded-tl bg-magenta/80 px-1 font-mono text-[8px] leading-tight text-white" title={`${c.plates.count} floor plate(s), ${c.plates.side} side`}>▤{c.plates.count}</span>}
                         {c.thumb && (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={c.thumb} alt="" className="h-full w-full object-contain" />
@@ -647,8 +812,9 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                       <span className="min-w-0">
                         <span className="block truncate font-medium">{c.name}</span>
                         <span className="block text-[10px] text-muted-foreground">
-                          {c.shape} · seed {c.seed}
+                          {c.shape}
                           {c.swapped ? " · swapped" : ""}
+                          {c.plates?.enabled ? ` · ${c.plates.count} plate${c.plates.count === 1 ? "" : "s"}` : ""}
                         </span>
                       </span>
                     </button>
@@ -658,13 +824,14 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                   </div>
                 ))}
               </div>
-            </div>
+            </Section>
           </GlowPanel>
         )}
       </div>
 
-      <div className="order-1 min-w-0 lg:order-2 lg:min-h-0">
-        <div className="h-[min(100vw,70vh)] lg:h-full">
+      <div className="order-1 min-w-0 max-lg:sticky max-lg:top-0 max-lg:z-20 max-lg:self-start max-lg:bg-background/95 max-lg:pb-2 lg:order-2 lg:min-h-0">
+        <div className="flex h-[44vh] flex-col lg:h-full">
+          <div className="min-h-0 flex-1">
           <SquareFrame className="relative">
             {previewGroup && raw ? (
               <div className="relative h-full w-full overflow-hidden rounded-lg bg-black/40">
@@ -692,7 +859,8 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                       shape={raw.shape}
                     />
                   </Bounds>
-                  <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
+                  <OrbitControls makeDefault enableDamping dampingFactor={0.08} autoRotate={autoRotate} autoRotateSpeed={60 / Math.max(rotateSecs, 1)} />
+                  <CaptureBridge handleRef={viewportHandle} />
                 </Canvas>
               </div>
             ) : (
@@ -701,20 +869,20 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
               </div>
             )}
           </SquareFrame>
+          </div>
+          {raw && <ViewportTools handleRef={viewportHandle} name={name.trim() || "cube-builder"} autoRotate={autoRotate} onAutoRotate={setAutoRotate} rotateSecs={rotateSecs} onRotateSecs={setRotateSecs} />}
         </div>
       </div>
 
       <div className="order-3 flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto">
         <GlowPanel glow="orange">
-          <div className="p-4">
-            <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>
+          <Section id="builder.visibility" title="Visibility">
             <VisibilityPanel visibility={visibility} onVisibility={setVisibility} colors={colors} onColors={setColors} />
-          </div>
+          </Section>
         </GlowPanel>
         {displayMode === "faces" && (
           <GlowPanel glow="magenta">
-            <div className="space-y-3 p-4">
-              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Face markers</div>
+            <Section id="builder.markers" title="Face markers" defaultOpen={false}>
               {(Object.keys(assignments) as VolumeFaceName[])
                 .filter((f) => assignments[f])
                 .map((face) => {
@@ -745,7 +913,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                     </div>
                   );
                 })}
-            </div>
+            </Section>
           </GlowPanel>
         )}
         <GlowPanel glow="orange">
@@ -762,14 +930,14 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
             </label>
             <label className="block text-xs">
               Category
-              <select className="mt-1 h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs" value={category} onChange={(e) => setCategory(e.target.value as typeof category)}>
+              <Select className="mt-1 h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs" value={category} onChange={(e) => setCategory(e.target.value as typeof category)}>
                 <option value="">—</option>
                 {CATEGORY_OPTIONS.map((c) => (
                   <option key={c} value={c}>
                     {c}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="block text-xs">
               Typology

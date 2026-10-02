@@ -1,12 +1,16 @@
 "use client";
 
+import { Select } from "@/components/ui/select";
+import type { ReactNode } from "react";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { ColorField } from "./ColorField";
 import { FontPicker } from "./FontPicker";
 import { NumberSlider } from "@/components/shared/NumberSlider";
-import type { BoardConfig } from "@/lib/boards/types";
+import { Section } from "@/components/shared/Section";
+import { useSectionGroup } from "@/lib/workspaceUi";
+import { defaultBoardConfig, type BoardConfig, type LabelMode } from "@/lib/boards/types";
 
 /** A slider for coarse dragging (0.5in steps) paired with a free-form
  * number field for exact values down to the hundredth -- either one
@@ -75,10 +79,82 @@ function OptionalSizeField({ label, valuePt, onChange }: { label: string; valueP
   );
 }
 
-export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; onChange: (patch: Partial<BoardConfig>) => void }) {
+const BOARD_SECTION_IDS = ["page", "layout", "nametag", "catalogue", "typography", "descriptors", "materials", "outlines", "facets", "caption", "footer"].map((k) => `boards.${k}`);
+
+/** One collapsible group of board settings, with its own Reset link and an optional on/off switch. */
+function Group({
+  id,
+  title,
+  defaultOpen = false,
+  summary,
+  onReset,
+  extra,
+  children,
+}: {
+  id: string;
+  title: string;
+  defaultOpen?: boolean;
+  summary?: ReactNode;
+  onReset?: () => void;
+  extra?: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
+    <Section
+      id={`boards.${id}`}
+      variant="inline"
+      title={title}
+      defaultOpen={defaultOpen}
+      summary={summary}
+      action={
+        <>
+          {extra}
+          {onReset && (
+            <button type="button" onClick={onReset} className="font-mono text-[10px] uppercase tracking-label text-muted-foreground underline-offset-2 hover:text-foreground hover:underline" title="Put this group back to its defaults">
+              Reset
+            </button>
+          )}
+        </>
+      }
+    >
+      {children}
+    </Section>
+  );
+}
+
+const LABEL_MODES: { value: LabelMode; label: string }[] = [
+  { value: "short", label: "Short — gathering 4" },
+  { value: "typology", label: "Typology — contained room…" },
+  { value: "full", label: "Full — gathering 4 - contained room…" },
+  { value: "custom", label: "Custom template" },
+];
+
+export function BoardSettingsPanel({ config, onChange, criteriaCount }: { config: BoardConfig; onChange: (patch: Partial<BoardConfig>) => void; criteriaCount: number | null }) {
+  /** Puts the named top-level settings back to their defaults. */
+  const reset = (...keys: (keyof BoardConfig)[]) => {
+    const defaults = defaultBoardConfig();
+    const patch: Record<string, unknown> = {};
+    for (const k of keys) patch[k as string] = defaults[k];
+    onChange(patch as Partial<BoardConfig>);
+  };
+  const setAll = useSectionGroup(BOARD_SECTION_IDS);
+  const nt = config.nameTag;
+  const cat = config.catalogue;
+  const setNameTag = (patch: Partial<typeof nt>) => onChange({ nameTag: { ...nt, ...patch } });
+  const setCatalogue = (patch: Partial<typeof cat>) => onChange({ catalogue: { ...cat, ...patch } });
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end gap-3 font-mono text-[10px] uppercase tracking-label text-muted-foreground">
+        <button type="button" onClick={() => setAll(true)} className="underline-offset-2 hover:text-foreground hover:underline">
+          Expand all
+        </button>
+        <button type="button" onClick={() => setAll(false)} className="underline-offset-2 hover:text-foreground hover:underline">
+          Collapse all
+        </button>
+      </div>
+
+      <Group id="page" title="Page" defaultOpen summary={`${config.widthIn}×${config.heightIn} in`}>
         <label className="block text-xs">
           <span className="mb-1 block text-muted-foreground">Board name</span>
           <Input value={config.name} onChange={(e) => onChange({ name: e.target.value })} className="h-8 text-xs" />
@@ -89,34 +165,123 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
           {Math.round(config.widthIn * 300)}×{Math.round(config.heightIn * 300)}px at 300dpi
         </p>
         <ColorField label="Background" value={config.backgroundColor} onChange={(backgroundColor) => onChange({ backgroundColor })} />
-      </div>
+      </Group>
 
-      <div className="space-y-2 border-t border-border pt-3">
-        <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Layout</div>
+      <Group id="layout" title="Layout" defaultOpen onReset={() => reset("outlineWidthPt", "gapXIn", "gapYIn")}>
         <NumberSlider label="Outline weight" value={config.outlineWidthPt} min={0.01} max={8} step={0.01} decimals={2} suffix="pt" exact onChange={(outlineWidthPt) => onChange({ outlineWidthPt })} />
         <NumberSlider label="Gap X (columns)" value={config.gapXIn} min={0} max={3} step={0.05} decimals={2} suffix="in" onChange={(gapXIn) => onChange({ gapXIn })} />
         <NumberSlider label="Gap Y (rows)" value={config.gapYIn} min={0} max={3} step={0.05} decimals={2} suffix="in" onChange={(gapYIn) => onChange({ gapYIn })} />
-      </div>
+      </Group>
 
-      <div className="space-y-2 border-t border-border pt-3">
-        <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Typography</div>
+      <Group id="nametag" title="Name tag" summary={nt.labelMode} onReset={() => reset("nameTag")}>
+        <label className="block text-xs">
+          <span className="mb-1 block text-muted-foreground">Label text</span>
+          <Select className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs" value={nt.labelMode} onChange={(e) => setNameTag({ labelMode: e.target.value as LabelMode })}>
+            {LABEL_MODES.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </Select>
+        </label>
+        {nt.labelMode === "custom" && (
+          <label className="block text-xs">
+            <span className="mb-1 block text-muted-foreground">Template — {"{category} {n} {typology} {version} {name}"}</span>
+            <Input value={nt.template} onChange={(e) => setNameTag({ template: e.target.value })} className="h-8 text-xs" />
+          </label>
+        )}
+        <NumberSlider label="Tag width" value={Math.round(nt.widthFraction * 100)} min={10} max={100} suffix="%" onChange={(v) => setNameTag({ widthFraction: v / 100 })} />
+        <NumberSlider label="Tag height" value={Math.round(nt.heightFraction * 1000) / 10} min={3} max={25} step={0.1} decimals={1} suffix="%" onChange={(v) => setNameTag({ heightFraction: v / 100 })} />
+        <NumberSlider label="Max lines" value={nt.maxLines} min={1} max={3} suffix="" onChange={(maxLines) => setNameTag({ maxLines })} />
+        <NumberSlider label="Smallest text" value={nt.minFontPt} min={2} max={24} suffix="pt" exact onChange={(minFontPt) => setNameTag({ minFontPt })} />
+        <p className="text-[10px] text-muted-foreground">Text wraps to the line limit, then shrinks to fit. Click a tile&rsquo;s tag on the board to set its own text, category, number or size.</p>
+      </Group>
+
+      <Group
+        id="catalogue"
+        title="Catalogue"
+        summary={cat.enabled ? "on" : "off"}
+        onReset={() => reset("catalogue")}
+        extra={<Switch checked={cat.enabled} onCheckedChange={(enabled) => setCatalogue({ enabled })} />}
+      >
+        {!cat.enabled ? (
+          <p className="text-[10px] text-muted-foreground">Off. Turn on for one row per category and one column per typology number.</p>
+        ) : (
+          <>
+            <p className="text-[10px] text-muted-foreground">
+              One row per category (gathering / office / lobby), one column per typology number 1–5, placed from each tile&rsquo;s name (or its tag). Two tiles of one typology stack into extra rows. The caption box is hidden in this layout.
+            </p>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Dashed placeholders</span>
+              <Switch checked={cat.placeholders} onCheckedChange={(placeholders) => setCatalogue({ placeholders })} />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Row labels</span>
+              <Switch checked={cat.showRowLabels} onCheckedChange={(showRowLabels) => setCatalogue({ showRowLabels })} />
+            </div>
+            {cat.showRowLabels && (
+              <div className="space-y-1">
+                {cat.rowLabels.map((text, i) => (
+                  <Input key={i} value={text} onChange={(e) => setCatalogue({ rowLabels: cat.rowLabels.map((t, j) => (j === i ? e.target.value : t)) })} className="h-7 text-xs" aria-label={`Row ${i + 1} label`} />
+                ))}
+                <NumberSlider label="Row label band" value={cat.rowBandIn} min={0.3} max={4} step={0.05} decimals={2} suffix="in" onChange={(rowBandIn) => setCatalogue({ rowBandIn })} />
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Column labels</span>
+              <Switch checked={cat.showColumnLabels} onCheckedChange={(showColumnLabels) => setCatalogue({ showColumnLabels })} />
+            </div>
+            {cat.showColumnLabels && (
+              <div className="space-y-1">
+                <div className="grid grid-cols-5 gap-1">
+                  {cat.columnLabels.map((text, i) => (
+                    <Input key={i} value={text} onChange={(e) => setCatalogue({ columnLabels: cat.columnLabels.map((t, j) => (j === i ? e.target.value : t)) })} className="h-7 px-1 text-center text-xs" aria-label={`Column ${i + 1} label`} />
+                  ))}
+                </div>
+                <NumberSlider label="Column label band" value={cat.columnBandIn} min={0.15} max={2} step={0.05} decimals={2} suffix="in" onChange={(columnBandIn) => setCatalogue({ columnBandIn })} />
+              </div>
+            )}
+            <ColorField label="Label colour" value={cat.labelColor} onChange={(labelColor) => setCatalogue({ labelColor })} />
+            <OptionalSizeField label="Label size" valuePt={cat.labelFontPt} onChange={(labelFontPt) => setCatalogue({ labelFontPt })} />
+          </>
+        )}
+      </Group>
+
+      <Group id="typography" title="Typography" onReset={() => reset("fontFamily", "titleColor", "titleFontSizePt", "descriptorColor", "highlightColor")}>
         <FontPicker value={config.fontFamily} onChange={(fontFamily) => onChange({ fontFamily })} />
         <ColorField label="Title color" value={config.titleColor} onChange={(titleColor) => onChange({ titleColor })} />
         <OptionalSizeField label="Title size" valuePt={config.titleFontSizePt} onChange={(titleFontSizePt) => onChange({ titleFontSizePt })} />
         <ColorField label="Descriptor text" value={config.descriptorColor} onChange={(descriptorColor) => onChange({ descriptorColor })} />
-        <ColorField label="Highlighted descriptor" value={config.highlightColor} onChange={(highlightColor) => onChange({ highlightColor })} />
-      </div>
+        <ColorField label="Highlight color" value={config.highlightColor} onChange={(highlightColor) => onChange({ highlightColor })} />
+      </Group>
 
-      <div className="space-y-2 border-t border-border pt-3">
-        <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Materials (whole board)</div>
+      <Group id="descriptors" title="Descriptor page" onReset={() => reset("highlight")}>
+        <p className="text-[10px] text-muted-foreground">
+          {criteriaCount === null ? "Lists every descriptor." : `Lists the ${criteriaCount} criteria carried forward in the Analysis tab.`}
+        </p>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">Highlight top descriptors</span>
+          <Switch checked={config.highlight.enabled} onCheckedChange={(enabled) => onChange({ highlight: { ...config.highlight, enabled } })} />
+        </div>
+        {config.highlight.enabled && (
+          <NumberSlider
+            label="How many highlighted"
+            value={config.highlight.count}
+            min={1}
+            max={Math.max(1, criteriaCount ?? 12)}
+            onChange={(count) => onChange({ highlight: { ...config.highlight, count } })}
+          />
+        )}
+      </Group>
+
+      <Group id="materials" title="Materials (whole board)" onReset={() => reset("foamColor", "voidColor", "foamOpacity", "voidOpacity")}>
         <ColorField label="Foam" value={config.foamColor} onChange={(foamColor) => onChange({ foamColor })} />
         <NumberSlider label="Foam opacity" value={Math.round(config.foamOpacity * 100)} min={10} max={100} suffix="%" onChange={(v) => onChange({ foamOpacity: v / 100 })} />
         <ColorField label="Void" value={config.voidColor} onChange={(voidColor) => onChange({ voidColor })} />
         <NumberSlider label="Void opacity" value={Math.round(config.voidOpacity * 100)} min={10} max={100} suffix="%" onChange={(v) => onChange({ voidOpacity: v / 100 })} />
-      </div>
+      </Group>
 
-      <div className="space-y-2 border-t border-border pt-3">
-        <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Outlines (whole board, per tile render)</div>
+      <Group id="outlines" title="Outlines (per tile render)" onReset={() => reset("foamOutline", "voidOutline")}>
         <p className="text-[10px] text-muted-foreground">Default for every tile -- override one tile&rsquo;s own in its popup editor.</p>
         {(["foamOutline", "voidOutline"] as const).map((key) => {
           const label = key === "foamOutline" ? "Foam (outer shape)" : "Void";
@@ -137,10 +302,9 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
             </div>
           );
         })}
-      </div>
+      </Group>
 
-      <div className="space-y-2 border-t border-border pt-3">
-        <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Facet lines (whole board, per tile render)</div>
+      <Group id="facets" title="Facet lines (per tile render)" onReset={() => reset("facetLines")}>
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Foam facet lines</span>
@@ -154,14 +318,18 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
             </>
           )}
         </div>
-      </div>
+      </Group>
 
-      <div className="space-y-2 border-t border-border pt-3">
-        <div className="flex items-center justify-between">
-          <span className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Caption text box</span>
-          <Switch checked={config.textBox.enabled} onCheckedChange={(enabled) => onChange({ textBox: { ...config.textBox, enabled } })} />
-        </div>
-        {config.textBox.enabled && (
+      <Group
+        id="caption"
+        title="Caption box"
+        summary={config.textBox.enabled ? "on" : "off"}
+        onReset={() => reset("textBox", "captionFontSizePt")}
+        extra={<Switch checked={config.textBox.enabled} onCheckedChange={(enabled) => onChange({ textBox: { ...config.textBox, enabled } })} />}
+      >
+        {!config.textBox.enabled ? (
+          <p className="text-[10px] text-muted-foreground">Off. Turn on for a text box under the tiles.</p>
+        ) : (
           <>
             <textarea
               value={config.textBox.text}
@@ -173,36 +341,32 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
             <OptionalSizeField label="Text size" valuePt={config.captionFontSizePt} onChange={(captionFontSizePt) => onChange({ captionFontSizePt })} />
           </>
         )}
-      </div>
+      </Group>
 
-      <div className="space-y-2 border-t border-border pt-3">
-        <div className="flex items-center justify-between">
-          <span className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Footer</span>
-          <Switch checked={config.footer.enabled} onCheckedChange={(enabled) => onChange({ footer: { ...config.footer, enabled } })} />
-        </div>
-        {config.footer.enabled && (
+      <Group
+        id="footer"
+        title="Footer"
+        summary={config.footer.enabled ? "on" : "off"}
+        onReset={() => reset("footer", "footerFontSizePt")}
+        extra={<Switch checked={config.footer.enabled} onCheckedChange={(enabled) => onChange({ footer: { ...config.footer, enabled } })} />}
+      >
+        {!config.footer.enabled ? (
+          <p className="text-[10px] text-muted-foreground">Off. Turn on for a footer line with left and right text.</p>
+        ) : (
           <>
             <label className="block text-xs">
               <span className="mb-1 block text-muted-foreground">Left text</span>
-              <Input
-                value={config.footer.leftText}
-                onChange={(e) => onChange({ footer: { ...config.footer, leftText: e.target.value } })}
-                className="h-8 text-xs"
-              />
+              <Input value={config.footer.leftText} onChange={(e) => onChange({ footer: { ...config.footer, leftText: e.target.value } })} className="h-8 text-xs" />
             </label>
             <label className="block text-xs">
               <span className="mb-1 block text-muted-foreground">Right text</span>
-              <Input
-                value={config.footer.rightText}
-                onChange={(e) => onChange({ footer: { ...config.footer, rightText: e.target.value } })}
-                className="h-8 text-xs"
-              />
+              <Input value={config.footer.rightText} onChange={(e) => onChange({ footer: { ...config.footer, rightText: e.target.value } })} className="h-8 text-xs" />
             </label>
             <ColorField label="Line, text & logo color" value={config.footer.color} onChange={(color) => onChange({ footer: { ...config.footer, color } })} />
             <OptionalSizeField label="Text size" valuePt={config.footerFontSizePt} onChange={(footerFontSizePt) => onChange({ footerFontSizePt })} />
           </>
         )}
-      </div>
+      </Group>
     </div>
   );
 }

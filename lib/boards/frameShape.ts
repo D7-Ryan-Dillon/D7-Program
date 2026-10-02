@@ -52,12 +52,27 @@ export const MODULE_OUTLINE: Point[] = [
   // closes back to [0.0152, 1.0]
 ];
 
+/** The name tag's own geometry, as fractions of the module's side: where its
+ * left edge starts (x) and how far it hangs below the square. */
+export interface TagGeometry {
+  startX: number;
+  height: number;
+}
+export const DEFAULT_TAG: TagGeometry = { startX: DIVIDER_X, height: TAG_HEIGHT_FRACTION };
+
+/** The module outline with a custom name tag -- the tag's slanted left side
+ * keeps the same proportion to its height as the original. */
+export function moduleOutline(tag: TagGeometry = DEFAULT_TAG): Point[] {
+  const bevel = tag.height * (0.0447 / TAG_HEIGHT_FRACTION);
+  return [...MODULE_OUTLINE.slice(0, 7), [1.0, 1.0 + tag.height], [tag.startX + bevel, 1.0 + tag.height], [tag.startX, 1.0]];
+}
+
 export function scalePoints(points: Point[], size: number): Point[] {
   return points.map(([x, y]) => [x * size, y * size]);
 }
 
-export function traceModuleOutline(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
-  const points = scalePoints(MODULE_OUTLINE, size);
+export function traceModuleOutline(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, tag: TagGeometry = DEFAULT_TAG) {
+  const points = scalePoints(moduleOutline(tag), size);
   ctx.beginPath();
   ctx.moveTo(x + points[0][0], y + points[0][1]);
   for (const [px, py] of points.slice(1)) ctx.lineTo(x + px, y + py);

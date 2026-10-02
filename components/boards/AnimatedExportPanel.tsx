@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { NumberSlider } from "@/components/shared/NumberSlider";
+import { Section } from "@/components/shared/Section";
+import { Segmented } from "@/components/shared/Segmented";
 import { downloadBlob, createBoardAnimation } from "@/lib/boards/exportBoard";
 import { encodeGif } from "@/lib/boards/gifExport";
 import { encodeMp4, mp4Supported } from "@/lib/boards/mp4Export";
@@ -22,26 +24,7 @@ interface Result {
   summary: string;
 }
 
-function Segmented<T extends string | number>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
-  return (
-    <div className="inline-flex flex-wrap rounded-full border-hair p-0.5">
-      {options.map((o) => (
-        <button
-          key={String(o.value)}
-          type="button"
-          onClick={() => onChange(o.value)}
-          className={`rounded-full px-2.5 py-1 font-mono text-[11px] tracking-label uppercase transition-colors ${
-            value === o.value ? "bg-gradient-to-r from-magenta to-orange text-white" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-const formatMb = (bytes: number) => `${(bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 2 : 1)} MB`;
+export const formatMb = (bytes: number) => `${(bytes / 1_000_000).toFixed(bytes < 10_000_000 ? 2 : 1)} MB`;
 
 export function frameCountFor(a: AnimationSettings): number {
   return Math.max(2, Math.round(a.spinSeconds * a.fps));
@@ -156,8 +139,7 @@ export function AnimatedExportPanel({
       </p>
       {a.widthPx > 1600 && <p className="text-[10px] text-orange">Wide GIFs get very large (tens of MB). MP4 is usually much smaller at the same size.</p>}
 
-      <div className="space-y-1.5 border-t border-border pt-3">
-        <div className="text-xs text-muted-foreground">GIF colour</div>
+      <Section id="boards.gifcolour" variant="inline" title="GIF colour" defaultOpen={false} summary={a.colors === "auto" ? "auto" : `${a.paletteSize} colours`}>
         <Segmented
           value={a.colors}
           options={[
@@ -178,7 +160,7 @@ export function AnimatedExportPanel({
             </div>
           </>
         )}
-      </div>
+      </Section>
 
       <div className="flex flex-wrap gap-2 border-t border-border pt-3">
         <Button size="sm" disabled={!config.slots.length || !pages.length || !!busy} onClick={() => void run("gif")}>

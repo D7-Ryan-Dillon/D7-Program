@@ -251,6 +251,9 @@ const DEFS: Def[] = [
   },
 ];
 
+/** Every descriptor's key and label, in canonical order (no tile needed). */
+export const DESCRIPTOR_META: { key: DescriptorKey; label: string }[] = DEFS.map(({ key, label }) => ({ key, label }));
+
 export function scoreTile(tile: ParsedTile): DescriptorResult[] {
   const primitives = computePrimitives(tile);
   return DEFS.map((def) => {

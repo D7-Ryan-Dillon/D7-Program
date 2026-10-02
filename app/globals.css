@@ -121,6 +121,110 @@
     @apply font-sans;
     color-scheme: dark;
   }
+
+  /* Native controls that slip through (anything not using components/ui) still read as part of the app. */
+  select,
+  option {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
+  input[type="range"] {
+    accent-color: var(--magenta);
+    cursor: pointer;
+  }
+  input[type="color"] {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 2px;
+    border: 1px solid var(--input);
+    border-radius: 6px;
+  }
+  input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+  input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: 4px;
+  }
+  input[type="color"]::-moz-color-swatch {
+    border: none;
+    border-radius: 4px;
+  }
+  input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-grid;
+    place-content: center;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    border: 1px solid oklch(1 0 0 / 28%);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    transition: background-color 120ms, border-color 120ms;
+  }
+  input[type="checkbox"]:hover:not(:disabled) {
+    border-color: oklch(1 0 0 / 50%);
+  }
+  input[type="checkbox"]:checked {
+    background: var(--magenta);
+    border-color: var(--magenta);
+  }
+  input[type="checkbox"]:checked::after {
+    content: "";
+    width: 8px;
+    height: 4px;
+    margin-top: -1px;
+    border-left: 2px solid white;
+    border-bottom: 2px solid white;
+    transform: rotate(-45deg);
+  }
+  input[type="checkbox"]:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    opacity: 0.35;
+  }
+  summary {
+    cursor: pointer;
+    list-style: none;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  summary::before {
+    content: "▸";
+    display: inline-block;
+    margin-right: 0.4em;
+    color: var(--muted-foreground);
+    transition: transform 120ms;
+  }
+  details[open] > summary::before {
+    transform: rotate(90deg);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(1 0 0 / 22%) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(1 0 0 / 20%);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(1 0 0 / 34%);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 @layer utilities {

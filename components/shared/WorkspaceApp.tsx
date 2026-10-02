@@ -1,11 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { ProjectProvider, useProject } from "@/lib/project-store";
+import { ProjectProvider, useProject, useProjectUi } from "@/lib/project-store";
 import { ErosionBackdrop } from "@/components/shared/ErosionBackdrop";
 import { ProjectGate } from "@/components/shared/ProjectGate";
 import { Header } from "@/components/shared/Header";
-import type { WorkspaceTabKey } from "@/components/shared/TabNav";
+import { defaultWorkspaceUi, type WorkspaceUi } from "@/lib/workspaceUi";
 import { ViewerTab } from "@/components/viewer/ViewerTab";
 import { AnalysisTab } from "@/components/analysis/AnalysisTab";
 import { ArrangeTab } from "@/components/arrange/ArrangeTab";
@@ -14,7 +13,9 @@ import { BoardsTab } from "@/components/boards/BoardsTab";
 
 function Workspace() {
   const { projectCode } = useProject();
-  const [tab, setTab] = useState<WorkspaceTabKey>("viewer");
+  // The tab you were on is remembered with the project.
+  const [{ tab }, setWorkspaceUi] = useProjectUi<WorkspaceUi>("workspace", defaultWorkspaceUi);
+  const setTab = (next: WorkspaceUi["tab"]) => setWorkspaceUi((prev) => ({ ...prev, tab: next }));
 
   if (!projectCode) return <ProjectGate />;
 

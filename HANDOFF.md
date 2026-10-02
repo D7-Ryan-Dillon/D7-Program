@@ -126,15 +126,135 @@ field's tile span is nodes 2..n-3, and `voxelize.ts` remaps its sampling to
 match (the original code was off by one node, a 2.4% squash). Builder GLBs
 carry `userData.tileShape` ("cube" | "hex-prism") as a node extra.
 
+**Floor plates** (`lib/sections/plates.ts`; pipeline is loft -> swap -> plates
+-> cleanup, so a plate's foam/void side always means the FINAL foam/void and has
+its own switch, independent of Swap). A plate is a slab (top surface at an
+elevation, thickness below) times a plan footprint (full / inset / L / T / plus,
+all signed distances in ft), unioned into the field with `max` (or cut out, on
+the void side), scaled by the loft's own per-cell field slope so marching cubes
+interpolates sensibly. A plate that reaches a wall runs one cell past it so the
+slab meets the tile face exactly. Erosion: per column, the clear void run above
+AND below the plate is measured on the pre-plate field; where both exceed a
+threshold (set by "recede from surroundings") the plate recedes (soft edge);
+plus an explicit staggered opening, value-noise holes, and "keep a vertical
+connection" (guarantees one opening per plate, placed where the most void runs
+through). Anything within 1.5 ft of a wall is never eroded. `suggestPlatesFromTraces`
+reads the horizontal layers already in the wall traces. Min thickness 1 ft (the
+grid is ~0.5 ft/cell). Settings live in `SavedCube.plates` and
+`sectionRecipe.plates`; the same `PlateSettings` shape is meant to be what the
+Grasshopper rework can emit.
+
 **Saved objects:** every Generate in the builder auto-saves a `SavedCube`
 (`lib/sections/savedCubes.ts`: recipe + the actual traces + cleanup + swap +
 a thumbnail) into the project's `state.cubes` jsonb (see section 6), updated
 as cleanup/swap/name change, deduped per recipe, deletable from the list. No
 GLB is stored -- opening one re-lofts from the stored traces.
 
+### Cross-cutting: saved UI state, presets, shared viewports (added 2026-10-02)
+- **Round 2 polish (same day).** The Sections tab is now labelled **Builder**
+  (the internal key is still `sections`, so saved state is unaffected).
+  Viewport controls moved OUT of the canvas: `TilePane` has a header (number
+  badge + tile picker) above and a strip of `PaneMenu` icon buttons below, each
+  opening a base-ui popover for one setting (View, Display, Visibility+opacity,
+  Clip, Rotate; Export is its own dialog). `PaneState` now carries `displayMode`,
+  `visibility`, `colors`, `opacity`, `clip` per viewport (`normalizePane` fills
+  older saves). `SyncAllMenu` copies chosen groups from one viewport to the rest;
+  each popup also has "Apply to all viewports". `MetricsTable` is the multi-tile
+  specs table. All native `<select>`s are `components/ui/select.tsx` (base-ui
+  Select behind a `<select>`-shaped API: same `value`/`onChange(e.target.value)`/
+  `<option>` children), and `app/globals.css` styles the generic controls (range,
+  colour, checkbox, details, scrollbars).
+- **Collapsible sections.** Long side panels are made of `components/shared/Section.tsx`:
+  chevron + title (optional `summary` shown while shut, optional `action` slot for a
+  switch / Reset), body folds away. `variant="panel"` pads it directly inside a
+  `GlowPanel`; `"inline"` is a hairline-separated group inside a longer panel;
+  `bodyClassName` overrides the body spacing. Open/closed state lives in the project's
+  `ui.workspace.sections` (`lib/workspaceUi.ts`: `WorkspaceUi`, `useSectionOpen(id,
+  defaultOpen)`, `useSectionGroup(ids)` for Expand/Collapse all), so give every
+  Section a unique `id` (`boards.*`, `builder.*`, `arrange.*`, `viewer.*`,
+  `analysis.*`, `tileedit.*`, `export.*`). Anything holding a live ref that must exist
+  while shut (the export dialog's first-frame preview canvas, the Boards animated-export
+  panel that keeps an export running) is deliberately NOT a Section / stays mounted.
+  When adding a long panel, use a Section rather than another always-open block.
+- **Wide-screen layout rule.** Tabs with side panels (Viewer, Builder, Arrange,
+  Boards) are height-bounded on `lg+` (`flex flex-col lg:h-full lg:min-h-0` root,
+  columns `lg:overflow-y-auto`) so the viewport/board stays put and only the menus
+  scroll. Analysis is the exception: it page-scrolls and its viewport(s) are
+  `sticky`, so its root must NOT have `lg:h-full` (that bounds the sticky
+  containing block and the viewport unpins after one screen).
+- **Builder changes.** The loft seed and seam-fit tolerance are no longer
+  user settings (fixed 1 / 50; saved pieces keep the values they were made
+  with); "suggest plates from wall sections" was removed. Faces can be turned in
+  quarter turns: `lib/sections/rotateTrace.ts` rotates the trace BEFORE it reaches
+  `buildVolumeField` (SVG path rewrite; `volumeField.ts` untouched), the turns are
+  saved as `SavedCube.rotations` / `sectionRecipe.rotations` (the stored traces are
+  already turned). `lib/sections/autoFill.ts`: edges shared by faces are found from
+  the face mapping inverted at depth 0 (`faceLinks`; 12 edges for a cube, 6
+  side-to-side for a hex, none to top/bottom), each candidate (tile x 4 turns) is
+  scored by solid/void agreement with already-placed neighbours minus a tile-reuse
+  penalty, then picked by weighted random so every press is a new plausible set;
+  locked faces (`BuilderUi.locks`) are kept.
+- **WebGL context gotcha (was the "viewport crashed" bug).** Browsers cap live
+  WebGL contexts; `renderer.dispose()` does not release one. Every headless
+  `WebGLRenderer` must also call `forceContextLoss()` (`lib/renderTile.ts`,
+  `lib/viewportCapture.ts`, `createBoardAnimation` do). The builder's saved-object
+  thumbnail waits 1.8 s for edits to settle for the same reason.
+- **Saved UI state.** `projects.state` is now `{ tiles, cubes, ui }`. `ui` is
+  a bag of per-feature JSON blobs (keys: `workspace` (active tab), `boards`,
+  `viewer`, `analysis`, `arrange`, `builder`, `criteria`, `presets`,
+  `viewportExport`). Read/write with `useProjectUi(key, defaults)` in
+  `lib/project-store.tsx` (`defaults` must be a stable module-level function;
+  saved copies are filled in from it by `lib/mergeDefaults.ts`, so older
+  projects open cleanly). `lib/useUiField.ts` turns one field of such an object
+  into a `useState`-style pair (used by the cube builder and Arrange).
+  `lib/persistence.ts` skips re-uploading a tile's GLB/voxels once uploaded in a
+  session (`uploadedTiles`), so frequent settings autosaves are one small upsert.
+- **Presets** (`lib/presets.ts`, `components/shared/PresetBar.tsx`): named,
+  per-project snapshots of Boards settings, Viewer viewport layout, and Analysis
+  compare layout.
+- **Shared viewports.** `components/shared/TilePane.tsx` = `ThreeViewport` +
+  a toolbar (tile picker, view, reset, auto-rotate + speed, Export);
+  `ViewportTools.tsx` is the same without the tile/view parts, for Arrange and
+  the builder. `ThreeViewport` takes `autoRotate`, a `handleRef` and a camera
+  `link` (`lib/cameraLink.ts`: "match cameras" -- the pane being orbited, or the
+  leader while auto-rotating, publishes its camera relative to its own model
+  centre; the others copy it each frame). `CameraRig` frames the whole model for
+  the pane's own aspect (narrow multi-viewer panes were cropping before).
+- **Exports from any viewport.** `CaptureBridge` (inside a `<Canvas>`) exposes
+  scene/camera/target/centre through a `handleRef`; `lib/viewportCapture.ts`
+  re-renders that same scene with a second offscreen `WebGLRenderer` from a
+  copy of the camera (the live canvas is never resized; `scene.environment` is
+  nulled for the instant of each draw because it belongs to the live GL
+  context). `ViewportExport.tsx` is the Export dialog (PNG or turntable, then
+  that choice's settings). Turntables reuse the Boards encoders: the single
+  viewport is wrapped as a `BoardAnimation` (`createViewportAnimation`), then
+  `encodeGif` / `encodeMp4`. The turntable rotates the camera rig about the
+  vertical (Y) axis through the model, from "Current camera" or a chosen axo
+  corner. PNGs get a `pHYs` chunk when a DPI is set.
+- **Sticky viewports.** Below `lg` the viewport column (or the board preview) is
+  `max-lg:sticky max-lg:top-0` inside the tab's scroll container, with heights
+  capped around 30-38vh; from `lg` up nothing changes.
+
 ### Analysis (`components/analysis/`, `lib/scoring/`)
 Scores the active tile against the 12 studio descriptors, works identically
-regardless of which tab produced the tile. `lib/scoring/primitives.ts`
+regardless of which tab produced the tile. The tab has a Single view (an
+auto-rotating axo viewport beside the cards) and a Compare view (2 columns, a
+3rd shown from `xl` up; per-descriptor rows are aligned and the highest/lowest
+tile is marked when the tiles differ by >= 25 points).
+
+**Criteria carry-forward** (`lib/scoring/selection.ts`, `lib/useCriteria.ts`,
+`CriteriaPanel.tsx`): for the project's own tiles, picks the 6-12 strongest
+descriptors -- spread across tiles (what separates them), measured not inferred
+(`approximate` is penalised), low overlap with ones already picked
+(correlation, only trusted with >= 6 tiles), greedy. Editable: swap/add/remove
+(never below 6), per-criterion pin (Always on / Auto / Always off), and a short
+generated reason per carried (and set-aside) descriptor that you can overwrite.
+Untouched selections re-pick themselves as tiles change; hand-edited ones stay
+(a "Refresh suggestion" button re-picks). The metric list is whatever
+`scoreTile` returns (`DESCRIPTOR_META`), so new architectural descriptors
+slot in without changing the selector. The Boards descriptor page lists only
+the carried criteria (`BoardConfig.descriptorKeys`, injected at render time,
+never stored in the board). `lib/scoring/primitives.ts`
 computes ~20 architectural measures (branching, porosity, compression,
 layering, floor levels, etc.) from the raw tile data; `lib/scoring/
 descriptors.ts` blends those into the 12 named scores.
@@ -159,7 +279,20 @@ have a weight in points (0.01-8, typeable), converted with `pxPerPt = dpi/72`.
 Clicking a tile opens `TileViewEditor.tsx` (live R3F view, 8 locked axo
 corners or free perspective, clipping, colour/opacity, the three line
 settings; per-slot overrides shadow the board-wide masters). Exports two PNGs: the board itself, and a second
-page listing each tile's scored descriptors with its top 3 highlighted.
+page listing each tile's scored descriptors (the carried criteria) with an
+optional top-N highlight (`config.highlight`).
+
+**Name tag + labels.** The tag's width and height are fractions of the module
+(`config.nameTag`; `TagGeometry` in `frameShape.ts`, `moduleOutline()`), the
+text wraps to a line limit then shrinks (`fitText`), and what it says comes from
+`lib/boards/tileLabel.ts` (parses `category_N_typology_Vk` from the tile name;
+a per-slot `tag` / `labelOverride` beats the parse). **Catalogue layout**
+(`config.catalogue`, `lib/boards/catalogue.ts`, `computeGeometry`): rows =
+gathering / office / lobby, columns = typology 1-5; same-typology tiles stack
+into extra rows, unparsed tiles get rows of their own; `PageGeometry` now has
+`slotCellIndex` / `placeholders` / `labels` / `tag` (always map a slot to its
+cell through `slotCellIndex`, never by array position). The board config, the
+active page and the animation panel's open state are saved with the project.
 
 **Animated export (looping GIF / MP4).** `AnimatedExportPanel.tsx` (settings
 live in `BoardConfig.animation`, `lib/boards/types.ts`). One revolution is
@@ -250,11 +383,13 @@ Provisioned 2026-09-30. Supabase project ref `rpzmpuyhudvdhxuehqit`.
   the tile bank (or the Sections builder's saved cubes) auto-saves
   (debounced 1.2s). The row's `state` is `{ tiles, cubes }`; `cubes` is the
   Sections builder's `SavedCube[]` (inline jsonb, no storage objects).
+- **UI state** (`state.ui`, see the cross-cutting section above): Boards
+  config, Viewer/Analysis layouts, Arrange bank + settings, builder settings,
+  criteria and presets now save with the project.
 - **Not yet synced to Supabase**: the Arrange tab's generated composition
-  (`ArrangeTab.tsx`'s own `assembly` state) and the Boards tab's board
-  config are both local-only per browser tab right now. Entering the same
-  project code elsewhere gets the same tiles, but Arrange needs
-  "Auto-generate" run again (cheap) and Boards needs reconfiguring.
+  (`ArrangeTab.tsx`'s own `assembly` state) -- entering the same project code
+  elsewhere gets the same tiles and settings, but Arrange needs
+  "Auto-generate" run again (cheap).
 
 **Env vars** (`.env.local`, gitignored -- this is a public repo, never
 commit real values): see `.env.example` for the three key names. Get actual
@@ -368,8 +503,12 @@ access to their filesystem. The Sections tab needs no external data at all
 
 ## 10. Suggested next steps (outside the off-limits areas in section 7)
 
-1. Sync the Arrange assembly and Boards config to Supabase, so they follow
-   a project across devices the same way the tile bank already does.
+1. Sync the Arrange assembly to Supabase (everything else now saves with
+   the project). Arrange's tile reading, the interlock test (2/4/8 copies by
+   repeat, mirror, shift, with scale/rotate allowed) and an arrangement
+   build-up GIF are all waiting on the new Grasshopper script (floor plates and
+   geometry inputs) -- then re-read tiles architecturally (clear height, plate
+   coverage, spans, circulation graph) as new metrics for the criteria selector.
 2. Persist Sections-tab corrections (currently `localStorage`-only) to
    Supabase if cross-device correction editing turns out to matter.
 3. Clipping planes in the Arrange tab, and a saved-objects history there

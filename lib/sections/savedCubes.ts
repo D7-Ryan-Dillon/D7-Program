@@ -10,6 +10,7 @@
 
 import type { SectionTrace, VolumeShape } from "./volumeField";
 import type { CleanupSettings } from "./cleanup";
+import type { PlateSettings } from "./plates";
 
 export interface SavedCube {
   id: string;
@@ -25,6 +26,10 @@ export interface SavedCube {
   cleanup: CleanupSettings;
   /** Foam and void roles swapped (foam = the cube minus the lofted shape). */
   swapped: boolean;
+  /** Quarter turns (0-3) given to each face's trace, for reopening in the builder. The stored traces are already turned. */
+  rotations?: Record<string, number>;
+  /** Floor plates (absent on pieces saved before they existed). */
+  plates?: PlateSettings;
   /** Small PNG data URL for the Saved objects list. */
   thumb?: string;
 }
@@ -32,5 +37,5 @@ export interface SavedCube {
 /** Everything about a cube that defines its shape -- compared to decide
  * whether an edit needs saving (thumbnail excluded: it follows from this). */
 export function cubeSignature(c: Omit<SavedCube, "thumb" | "createdAt" | "id">): string {
-  return JSON.stringify([c.name, c.shape, c.assignments, c.seed, c.fitTolerance, c.cleanup, c.swapped, Object.keys(c.traces).sort()]);
+  return JSON.stringify([c.name, c.shape, c.assignments, c.seed, c.fitTolerance, c.cleanup, c.swapped, c.plates ?? null, c.rotations ?? null, Object.keys(c.traces).sort()]);
 }

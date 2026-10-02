@@ -11,10 +11,12 @@
 import { scoreTile, type DescriptorResult } from "@/lib/scoring/descriptors";
 import type { ParsedTile } from "@/lib/types";
 import { createTileRenderer, createTileRig, renderTileToDataUrl, type TileRenderOptions, type TileRig } from "@/lib/renderTile";
-import { traceModuleOutline, traceSquareOnly, DIVIDER_X, TAG_HEIGHT_FRACTION, TOP_EDGE_FRACTION } from "./frameShape";
-import { squareGridLayout, squareGridCells, type GridCell } from "./grid";
+import { traceModuleOutline, traceSquareOnly, DIVIDER_X, TOP_EDGE_FRACTION, type TagGeometry } from "./frameShape";
+import { squareGridLayout, squareGridCells, fixedGridLayout, type GridCell } from "./grid";
 import { fitText, wrapToWidth } from "./textFit";
-import { DPI, shortTileLabel, type BoardConfig, type BoardSlot } from "./types";
+import { planCatalogue } from "./catalogue";
+import { resolveTag, tileLabelText } from "./tileLabel";
+import { CATALOGUE_COLUMNS, DPI, type BoardConfig, type BoardSlot } from "./types";
 
 export function ptToPx(pt: number, dpi: number = DPI): number {
   return (pt / 72) * dpi;
@@ -84,6 +86,14 @@ export interface PageGeometry {
   gapX: number;
   gapY: number;
   cells: GridCell[];
+  /** Index into `cells` of each slot's tile, in slot order. */
+  slotCellIndex: number[];
+  /** Catalogue cells with no tile yet, drawn as dashed placeholders. */
+  placeholders: GridCell[];
+  /** Catalogue row/column labels, already laid out. */
+  labels: { text: string; x: number; y: number; width: number; height: number; align: "left" | "center" }[];
+  /** The name tag's geometry (fractions of the module side). */
+  tag: TagGeometry;
   /** Index into `cells` the caption occupies, or null if disabled. */
   captionCellIndex: number | null;
   /** Null when the footer is off. Otherwise everything needed to draw it:
@@ -95,7 +105,11 @@ export interface PageGeometry {
 /** Everything about where things go, independent of what's actually drawn
  * in each cell -- shared by both pages and by the live preview, so a
  * setting change moves things identically everywhere. */
-export function computeGeometry(config: BoardConfig, dpi: number = DPI): PageGeometry {
+export function tagGeometry(config: BoardConfig): TagGeometry {
+  return { startX: 1 - config.nameTag.widthFraction, height: config.nameTag.heightFraction };
+}
+
+export function computeGeometry(config: BoardConfig, dpi: number = DPI, tileById?: Map<string, ParsedTile>): PageGeometry {
   const widthPx = Math.round(config.widthIn * dpi);
   const heightPx = Math.round(config.heightIn * dpi);
   const margin = dpi * 0.4;
@@ -117,23 +131,63 @@ export function computeGeometry(config: BoardConfig, dpi: number = DPI): PageGeo
     footer = { fontSizePx, lineY, textCenterY: lineY + gapBelowLine + fontSizePx / 2 };
   }
 
-  const totalCells = config.slots.length + (config.textBox.enabled ? 1 : 0);
+  const tag = tagGeometry(config);
   const availableWidth = widthPx - margin * 2;
   const availableHeight = gridBottom - titleBottom;
-  const layout = squareGridLayout(totalCells || 1, availableWidth, availableHeight, gapX, gapY);
+  const base = { widthPx, heightPx, margin, titleFontSizePx, titleBottom, gapX, gapY, footer, tag };
+
+  if (config.catalogue.enabled) {
+    const c = config.catalogue;
+    const tags = config.slots.map((slot) => resolveTag((slot.tileId ? tileById?.get(slot.tileId)?.name : undefined) ?? "", slot));
+    const rows = planCatalogue(tags, c.placeholders);
+    const rowBand = c.showRowLabels ? c.rowBandIn * dpi : 0;
+    const colBand = c.showColumnLabels ? c.columnBandIn * dpi : 0;
+    const layout = fixedGridLayout(CATALOGUE_COLUMNS, Math.max(1, rows.length), availableWidth - rowBand, availableHeight - colBand, gapX, gapY, tag.height);
+    if (layout) {
+      const cells = squareGridCells(layout, gapX, gapY).map((cell) => ({ x: cell.x + margin + rowBand, y: cell.y + titleBottom + colBand, size: cell.size }));
+      const slotCellIndex = config.slots.map(() => 0);
+      const placeholders: GridCell[] = [];
+      rows.forEach((row, r) =>
+        row.items.forEach((slotIndex, col) => {
+          const cell = cells[r * CATALOGUE_COLUMNS + col];
+          if (!cell) return;
+          if (slotIndex !== null) slotCellIndex[slotIndex] = r * CATALOGUE_COLUMNS + col;
+          else if (c.placeholders && row.category >= 0) placeholders.push(cell);
+        }),
+      );
+      const labels: PageGeometry["labels"] = [];
+      if (c.showRowLabels) {
+        let r = 0;
+        while (r < rows.length) {
+          const cat = rows[r].category;
+          let end = r;
+          while (end + 1 < rows.length && rows[end + 1].category === cat) end++;
+          if (cat >= 0) {
+            const count = end - r + 1;
+            labels.push({ text: c.rowLabels[cat] ?? "", x: margin, y: cells[r * CATALOGUE_COLUMNS].y, width: Math.max(0, rowBand - gapX / 2), height: count * layout.cellHeight + (count - 1) * gapY, align: "left" });
+          }
+          r = end + 1;
+        }
+      }
+      if (c.showColumnLabels) {
+        for (let col = 0; col < CATALOGUE_COLUMNS; col++) labels.push({ text: c.columnLabels[col] ?? "", x: cells[col].x, y: titleBottom, width: cells[col].size, height: colBand, align: "center" });
+      }
+      return { ...base, cells, slotCellIndex, placeholders, labels, captionCellIndex: null };
+    }
+  }
+
+  const captionOffset = config.textBox.enabled ? 1 : 0;
+  const totalCells = config.slots.length + captionOffset;
+  const layout = squareGridLayout(totalCells || 1, availableWidth, availableHeight, gapX, gapY, tag.height);
   const cells = squareGridCells(layout, gapX, gapY).map((cell) => ({ x: cell.x + margin, y: cell.y + titleBottom, size: cell.size }));
 
   return {
-    widthPx,
-    heightPx,
-    margin,
-    titleFontSizePx,
-    titleBottom,
-    gapX,
-    gapY,
+    ...base,
     cells,
+    slotCellIndex: config.slots.map((_, i) => i + captionOffset),
+    placeholders: [],
+    labels: [],
     captionCellIndex: config.textBox.enabled ? 0 : null,
-    footer,
   };
 }
 
@@ -207,25 +261,40 @@ async function drawFooter(ctx: CanvasRenderingContext2D, config: BoardConfig, ge
 }
 
 function drawNameTag(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardSlot, name: string, config: BoardConfig, dpi: number) {
+  const nt = config.nameTag;
   const tagTop = cell.y + cell.size;
-  const tagHeight = cell.size * TAG_HEIGHT_FRACTION;
-  const tagLeft = cell.x + cell.size * DIVIDER_X;
+  const tagHeight = cell.size * nt.heightFraction;
+  const tagLeft = cell.x + cell.size * (1 - nt.widthFraction);
   const tagWidth = cell.x + cell.size - tagLeft;
   const padding = cell.size * 0.015;
-  const text = shortTileLabel(name).toUpperCase();
+  const text = tileLabelText(name, slot, nt).toUpperCase();
+  const maxLines = Math.max(1, Math.round(nt.maxLines));
 
   let fontSize: number;
+  let lines: string[];
   if (slot.nameFontSizePt) {
     fontSize = ptToPx(slot.nameFontSizePt, dpi);
+    ctx.font = `${fontSize}px "${config.fontFamily}"`;
+    lines = maxLines > 1 ? wrapToWidth(ctx, text, tagWidth - padding * 2).slice(0, maxLines) : [text];
   } else {
-    fontSize = fitText(ctx, text, tagWidth - padding * 2, tagHeight * 0.8, { maxFontSize: tagHeight * 0.55, minFontSize: 6, maxLines: 1, fontFamily: config.fontFamily }).fontSize;
+    // Room for the tag's own slanted left side, so text never runs into it.
+    const fit = fitText(ctx, text, tagWidth - padding * 2 - tagHeight * 0.4, tagHeight * 0.86, {
+      maxFontSize: tagHeight * 0.55,
+      minFontSize: Math.max(2, ptToPx(nt.minFontPt, dpi)),
+      maxLines,
+      fontFamily: config.fontFamily,
+    });
+    fontSize = fit.fontSize;
+    lines = fit.lines;
   }
   ctx.save();
   ctx.fillStyle = config.highlightColor;
   ctx.font = `${fontSize}px "${config.fontFamily}"`;
   ctx.textBaseline = "middle";
   ctx.textAlign = "right";
-  ctx.fillText(text, cell.x + cell.size - padding, tagTop + tagHeight / 2);
+  const lineHeight = fontSize * 1.15;
+  const firstY = tagTop + tagHeight / 2 - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((line, i) => ctx.fillText(line, cell.x + cell.size - padding, firstY + i * lineHeight));
   ctx.restore();
 }
 
@@ -288,7 +357,7 @@ function drawModuleChrome(ctx: CanvasRenderingContext2D, cell: GridCell, slot: B
   ctx.save();
   ctx.strokeStyle = config.descriptorColor;
   ctx.lineWidth = lineWidth;
-  traceModuleOutline(ctx, cell.x, cell.y, cell.size);
+  traceModuleOutline(ctx, cell.x, cell.y, cell.size, tagGeometry(config));
   ctx.stroke();
   if (page === 2) {
     const descX = cell.x + cell.size * DIVIDER_X;
@@ -308,12 +377,17 @@ function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile:
   const descX = cell.x + imageWidth;
   const descWidth = cell.size - imageWidth;
 
-  const results: DescriptorResult[] = scoreTile(tile);
+  const all: DescriptorResult[] = scoreTile(tile);
+  const wanted = config.descriptorKeys;
+  const results = wanted ? wanted.map((k) => all.find((r) => r.key === k)).filter((r): r is DescriptorResult => !!r) : all;
+  if (!results.length) return;
   const topKeys = new Set(
-    [...results]
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3)
-      .map((r) => r.key),
+    config.highlight.enabled
+      ? [...results]
+          .sort((a, b) => b.score - a.score)
+          .slice(0, config.highlight.count)
+          .map((r) => r.key)
+      : [],
   );
 
   const padding = descWidth * 0.08;
@@ -372,13 +446,56 @@ interface Module {
  * are skipped), in drawing order. */
 function boardModules(config: BoardConfig, geo: PageGeometry, tileById: Map<string, ParsedTile>): Module[] {
   const out: Module[] = [];
-  for (let i = 0; i < geo.cells.length; i++) {
-    if (geo.captionCellIndex === i) continue;
-    const slot = config.slots[geo.captionCellIndex !== null ? i - 1 : i];
-    const tile = slot?.tileId ? tileById.get(slot.tileId) : undefined;
-    if (slot && tile) out.push({ cell: geo.cells[i], slot, tile });
-  }
+  config.slots.forEach((slot, i) => {
+    const tile = slot.tileId ? tileById.get(slot.tileId) : undefined;
+    const cell = geo.cells[geo.slotCellIndex[i]];
+    if (tile && cell) out.push({ cell, slot, tile });
+  });
   return out;
+}
+
+/** The catalogue's dashed placeholders and row/column labels (nothing when
+ * the catalogue layout is off). */
+function drawCatalogueFurniture(ctx: CanvasRenderingContext2D, config: BoardConfig, geo: PageGeometry, dpi: number) {
+  const c = config.catalogue;
+  if (!c.enabled) return;
+  const sample = geo.cells[0]?.size ?? 100;
+  ctx.save();
+  ctx.strokeStyle = config.descriptorColor;
+  ctx.globalAlpha = 0.4;
+  ctx.lineWidth = ptToPx(config.outlineWidthPt, dpi);
+  ctx.setLineDash([sample * 0.03, sample * 0.02]);
+  for (const cell of geo.placeholders) {
+    traceModuleOutline(ctx, cell.x, cell.y, cell.size, geo.tag);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = c.labelColor;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  for (const label of geo.labels) {
+    if (!label.text || label.width <= 0 || label.height <= 0) continue;
+    let fontSize: number;
+    let lines: string[];
+    if (c.labelFontPt) {
+      fontSize = ptToPx(c.labelFontPt, dpi);
+      ctx.font = `${fontSize}px "${config.fontFamily}"`;
+      lines = wrapToWidth(ctx, label.text, label.width * 0.95);
+    } else {
+      const fit = fitText(ctx, label.text, label.width * 0.92, label.height * 0.9, { maxFontSize: sample * 0.09, minFontSize: 6, maxLines: 3, fontFamily: config.fontFamily });
+      fontSize = fit.fontSize;
+      lines = fit.lines;
+    }
+    ctx.font = `${fontSize}px "${config.fontFamily}"`;
+    ctx.textAlign = label.align;
+    const x = label.align === "center" ? label.x + label.width / 2 : label.x;
+    const lineHeight = fontSize * 1.2;
+    const firstY = label.y + label.height / 2 - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, i) => ctx.fillText(line, x, firstY + i * lineHeight));
+  }
+  ctx.restore();
 }
 
 function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -400,8 +517,9 @@ export async function drawBoardPage(
   page: 1 | 2,
   dpi: number = DPI,
 ): Promise<PageGeometry> {
-  const geo = computeGeometry(config, dpi);
+  const geo = computeGeometry(config, dpi, tileById);
   drawBackgroundAndTitle(ctx, config, geo);
+  drawCatalogueFurniture(ctx, config, geo, dpi);
   if (page === 1 && geo.captionCellIndex !== null) drawCaptionCell(ctx, geo.cells[geo.captionCellIndex], config, dpi);
   for (const m of boardModules(config, geo, tileById)) await drawModule(ctx, m.cell, m.slot, m.tile, config, dpi, page);
   await drawFooter(ctx, config, geo);
@@ -474,7 +592,7 @@ export async function createBoardAnimation(
   signal?: AbortSignal,
 ): Promise<BoardAnimation> {
   const dpi = config.animation.widthPx / config.widthIn;
-  const geo = computeGeometry(config, dpi);
+  const geo = computeGeometry(config, dpi, tileById);
   const width = evenUp(geo.widthPx);
   const height = evenUp(geo.heightPx);
   const modules = boardModules(config, geo, tileById);
@@ -484,6 +602,7 @@ export async function createBoardAnimation(
   under.ctx.fillStyle = config.backgroundColor;
   under.ctx.fillRect(0, 0, width, height);
   drawBackgroundAndTitle(under.ctx, config, geo);
+  drawCatalogueFurniture(under.ctx, config, geo, dpi);
   if (page === 1 && geo.captionCellIndex !== null) drawCaptionCell(under.ctx, geo.cells[geo.captionCellIndex], config, dpi);
   await drawFooter(under.ctx, config, geo);
 

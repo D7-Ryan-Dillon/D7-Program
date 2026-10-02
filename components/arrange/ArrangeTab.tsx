@@ -1,12 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Download, FileText } from "lucide-react";
-import { useProject } from "@/lib/project-store";
+import { useProject, useProjectUi } from "@/lib/project-store";
+import { useUiField } from "@/lib/useUiField";
+import { ViewportTools } from "@/components/shared/ViewportTools";
+import type { ViewportHandle } from "@/lib/viewportCapture";
 import { GlowPanel } from "@/components/shared/GlowPanel";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Section } from "@/components/shared/Section";
 import { BankPanel } from "@/components/arrange/BankPanel";
 import { SettingsPanel } from "@/components/arrange/SettingsPanel";
 import { JointsPanel } from "@/components/arrange/JointsPanel";
@@ -18,20 +22,47 @@ import type { MeshColors, MeshVisibility } from "@/components/viewer/ThreeViewpo
 import { autoGenerate, regenerateMarked } from "@/lib/arrange/autoGenerate";
 import { aggregateScore } from "@/lib/arrange/joints";
 import { snapToNearest } from "@/lib/arrange/snap";
-import { DEFAULT_SETTINGS, type Assembly, type PlacedInstance } from "@/lib/arrange/types";
+import { DEFAULT_SETTINGS, type Assembly, type AutoGenerateSettings, type PlacedInstance } from "@/lib/arrange/types";
 import type { ParsedTile } from "@/lib/types";
 import { buildManifestText } from "@/lib/exporters/recipeManifest";
 import { downloadTextFile, groupToObjText } from "@/lib/exporters/objExport";
 import { fuseAssembly } from "@/lib/exporters/csgFuse";
 import * as THREE from "three";
 
+/** What the Arrange tab remembers per project (the generated arrangement itself is cheap to regrow and is not saved). */
+interface ArrangeUi {
+  selected: string[];
+  settings: AutoGenerateSettings;
+  visibility: MeshVisibility;
+  colors: MeshColors;
+  autoRotate: boolean;
+  rotateSecs: number;
+}
+const defaultArrangeUi = (): ArrangeUi => ({
+  selected: [],
+  settings: DEFAULT_SETTINGS,
+  visibility: { foam: true, void: true },
+  colors: { foam: "#e8a6c8", void: "#1c1c1f" },
+  autoRotate: false,
+  rotateSecs: 24,
+});
+
 export function ArrangeTab() {
   const { tiles } = useProject();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [aui, setAui] = useProjectUi<ArrangeUi>("arrange", defaultArrangeUi);
+  const selected = useMemo(() => new Set(aui.selected), [aui.selected]);
+  const setSelected = (next: Set<string> | ((prev: Set<string>) => Set<string>)) =>
+    setAui((prev) => {
+      const resolved = typeof next === "function" ? next(new Set(prev.selected)) : next;
+      return { ...prev, selected: [...resolved] };
+    });
+  const [settings, setSettings] = useUiField(aui, setAui, "settings");
+  const [visibility, setVisibility] = useUiField(aui, setAui, "visibility");
+  const [colors, setColors] = useUiField(aui, setAui, "colors");
+  const [autoRotate, setAutoRotate] = useUiField(aui, setAui, "autoRotate");
+  const [rotateSecs, setRotateSecs] = useUiField(aui, setAui, "rotateSecs");
+  const viewportHandle = useRef<ViewportHandle | null>(null);
   const [assembly, setAssembly] = useState<Assembly>({ instances: [], joints: [] });
-  const [visibility, setVisibility] = useState<MeshVisibility>({ foam: true, void: true });
-  const [colors, setColors] = useState<MeshColors>({ foam: "#e8a6c8", void: "#1c1c1f" });
   const [fused, setFused] = useState(false);
   const [fusedMesh, setFusedMesh] = useState<THREE.Mesh | null>(null);
   const [busy, setBusy] = useState(false);
@@ -202,20 +233,19 @@ export function ArrangeTab() {
       <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:grid-rows-[minmax(0,1fr)]">
         <div className="order-2 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
           <GlowPanel glow="magenta">
-            <div className="p-4">
-              <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Bank</div>
+            <Section id="arrange.bank" title="Bank" summary={`${selected.size} checked`}>
               <BankPanel selected={selected} onToggle={toggleBank} onSelectAll={selectAllBank} />
-            </div>
+            </Section>
           </GlowPanel>
           <GlowPanel glow="orange">
-            <div className="p-4">
-              <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Auto-generate</div>
+            <Section id="arrange.generate" title="Auto-generate">
               <SettingsPanel settings={settings} onChange={setSettings} onGenerate={generate} disabled={!bankTiles.length} />
-            </div>
+            </Section>
           </GlowPanel>
         </div>
 
-        <div className="order-1 flex min-w-0 flex-col gap-3 lg:order-none lg:min-h-0">
+        {/* Pinned to the top on phones / half-screen laptops while the controls scroll underneath. */}
+        <div className="order-1 flex min-w-0 flex-col gap-3 max-lg:sticky max-lg:top-0 max-lg:z-20 max-lg:self-start max-lg:bg-background/95 max-lg:pb-2 lg:order-none lg:min-h-0">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="font-mono text-xs text-muted-foreground">
               {assembly.instances.length} piece(s)
@@ -226,9 +256,13 @@ export function ArrangeTab() {
               <Switch checked={fused} disabled={busy || !assembly.instances.length} onCheckedChange={() => void toggleFuse()} />
             </div>
           </div>
-          <div className="h-[70vh] min-w-0 lg:h-auto lg:min-h-0 lg:flex-1">
+          <div className="flex h-[40vh] min-w-0 flex-col lg:h-auto lg:min-h-0 lg:flex-1">
+            <div className="relative min-h-0 flex-1">
             {assembly.instances.length ? (
               <ArrangeViewport
+                autoRotate={autoRotate}
+                autoRotateSpeed={60 / Math.max(rotateSecs, 1)}
+                handleRef={viewportHandle}
                 fitKey={regenNonce}
                 instances={assembly.instances}
                 tileById={tileById}
@@ -244,37 +278,34 @@ export function ArrangeTab() {
                 Check tiles in the Bank, set Amount, then Auto-generate.
               </div>
             )}
+            </div>
+            {assembly.instances.length > 0 && <ViewportTools handleRef={viewportHandle} name="arrangement" autoRotate={autoRotate} onAutoRotate={setAutoRotate} rotateSecs={rotateSecs} onRotateSecs={setRotateSecs} />}
           </div>
         </div>
 
         <div className="order-3 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
           <GlowPanel glow="magenta">
-            <div className="p-4">
-              <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>
+            <Section id="arrange.visibility" title="Visibility" defaultOpen={false}>
               <VisibilityPanel visibility={visibility} onVisibility={setVisibility} colors={colors} onColors={setColors} />
-            </div>
+            </Section>
           </GlowPanel>
           <GlowPanel glow="orange">
-            <div className="p-4">
-              <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Joints</div>
+            <Section id="arrange.joints" title="Joints" defaultOpen={false} summary={`${assembly.joints.length}`}>
               <JointsPanel joints={assembly.joints} selectedJointId={selectedJointId} onRate={rateJoint} onSelect={selectJoint} onRegenerate={regenerate} />
-            </div>
+            </Section>
           </GlowPanel>
           <GlowPanel glow="magenta">
-            <div className="p-4">
-              <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Selected piece</div>
+            <Section id="arrange.selected" title="Selected piece">
               <InstanceEditor instance={selectedInstance} tile={selectedInstance ? tileById.get(selectedInstance.tileId) : undefined} onUpdate={updateInstance} onRemove={removeInstance} onSnap={snapInstance} />
-            </div>
+            </Section>
           </GlowPanel>
           <GlowPanel glow="orange">
-            <div className="p-4">
-              <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Placed pieces</div>
+            <Section id="arrange.placed" title="Placed pieces" defaultOpen={false} summary={`${assembly.instances.length}`}>
               <InstanceList instances={assembly.instances} tileById={tileById} selectedId={selectedInstanceId} onSelect={selectInstance} />
-            </div>
+            </Section>
           </GlowPanel>
           <GlowPanel glow="magenta">
-            <div className="space-y-2 p-4">
-              <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Export</div>
+            <Section id="arrange.export" title="Export">
               <Button variant="outline" size="sm" className="w-full justify-start" disabled={!assembly.instances.length} onClick={exportManifest}>
                 <FileText className="mr-1.5 h-3.5 w-3.5" />
                 Recipe rebuild sheet
@@ -283,7 +314,7 @@ export function ArrangeTab() {
                 <Download className="mr-1.5 h-3.5 w-3.5" />
                 Download .obj
               </Button>
-            </div>
+            </Section>
           </GlowPanel>
         </div>
       </div>

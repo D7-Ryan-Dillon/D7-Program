@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/select";
 import { useEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, useGLTF } from "@react-three/drei";
@@ -8,12 +9,13 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ColorField } from "@/components/boards/ColorField";
+import { Section } from "@/components/shared/Section";
 import { NumberSlider } from "@/components/shared/NumberSlider";
 import { ClippingPlaneControl } from "@/components/shared/ClippingPlaneControl";
 import { applyClipToMesh, buildClipOutline, buildClipPlane, buildCutFaceCap, defaultClipState, type ClipState } from "@/lib/clipping";
 import { buildLineDecorations, type LineContext } from "@/lib/renderTile";
 import { computeGeometry } from "@/lib/boards/exportBoard";
-import { POPUP_VIEW_PRESETS } from "@/lib/faceViews";
+import { AXO_VIEWS, POPUP_VIEW_PRESETS } from "@/lib/faceViews";
 import type { BoardConfig, BoardSlot, BoardSlotOverrides, FacetLineSettings, OutlineSettings } from "@/lib/boards/types";
 import type { ParsedTile } from "@/lib/types";
 
@@ -194,7 +196,26 @@ function CameraCapture({ cameraStateRef, controlsRef }: { cameraStateRef: RefObj
   return null;
 }
 
-export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: ParsedTile; slot: BoardSlot; config: BoardConfig; onSave: (overrides: BoardSlotOverrides | undefined) => void; onClose: () => void }) {
+export function TileViewEditor({
+  tile,
+  slot,
+  config,
+  onSave,
+  onClose,
+  otherSlots,
+  onCopyTo,
+}: {
+  tile: ParsedTile;
+  slot: BoardSlot;
+  config: BoardConfig;
+  onSave: (overrides: BoardSlotOverrides | undefined) => void;
+  onClose: () => void;
+  /** The board's other tiles, for "copy these settings to...". */
+  otherSlots: { id: string; name: string }[];
+  onCopyTo: (targetIds: string[], overrides: BoardSlotOverrides | undefined, view?: BoardSlot["view"]) => void;
+}) {
+  const [copyIds, setCopyIds] = useState<string[]>([]);
+  const [copyView, setCopyView] = useState(false);
   const initial = slot.overrides ?? {};
   const [viewMode, setViewMode] = useState<string>(initial.customCamera ? "perspective" : slot.view);
   const [foamColor, setFoamColor] = useState(initial.foamColor ?? config.foamColor);
@@ -213,7 +234,7 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
   const cameraStateRef = useRef<{ position: [number, number, number]; target: [number, number, number] } | null>(null);
   const locked = viewMode !== "perspective";
 
-  const handleSave = () => {
+  const buildOverrides = (withCamera: boolean): BoardSlotOverrides | undefined => {
     const overrides: BoardSlotOverrides = {
       foamColor: foamColor === config.foamColor ? undefined : foamColor,
       voidColor: voidColor === config.voidColor ? undefined : voidColor,
@@ -223,11 +244,21 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
       foamOutline: foamOutline.enabled ? foamOutline : undefined,
       voidOutline: voidOutline.enabled ? voidOutline : undefined,
       facetLines: facetLines.enabled ? facetLines : undefined,
-      customCamera: viewMode === "perspective" ? (cameraStateRef.current ?? undefined) : undefined,
+      customCamera: withCamera && viewMode === "perspective" ? (cameraStateRef.current ?? undefined) : undefined,
     };
-    const hasAny = Object.values(overrides).some((v) => v !== undefined);
-    onSave(hasAny ? overrides : undefined);
+    return Object.values(overrides).some((v) => v !== undefined) ? overrides : undefined;
+  };
+
+  const handleSave = () => {
+    onSave(buildOverrides(true));
     onClose();
+  };
+
+  const handleCopy = () => {
+    if (!copyIds.length) return;
+    const isAxo = AXO_VIEWS.some((v) => v.key === viewMode);
+    onCopyTo(copyIds, buildOverrides(copyView), copyView && isAxo ? (viewMode as BoardSlot["view"]) : undefined);
+    setCopyIds([]);
   };
 
   const handleReset = () => {
@@ -284,33 +315,30 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
             </Canvas>
           </div>
           <div className="flex min-h-0 flex-col gap-4 overflow-y-auto border-t border-white/10 p-4 lg:border-l lg:border-t-0">
-            <div className="space-y-2">
-              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">View</div>
-              <select className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs" value={viewMode} onChange={(e) => setViewMode(e.target.value)}>
+            <Section id="tileedit.view" variant="inline" title="View">
+              <Select className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs" value={viewMode} onChange={(e) => setViewMode(e.target.value)}>
                 {POPUP_VIEW_PRESETS.map((v) => (
                   <option key={v.key} value={v.key}>
                     {v.label}
                   </option>
                 ))}
                 <option value="perspective">Perspective (free orbit)</option>
-              </select>
+              </Select>
               <p className="text-[10px] text-muted-foreground">{locked ? "Camera locked to this preset -- zoom only." : "Free orbit/pan/zoom -- the exact framing you leave it in gets captured."}</p>
-            </div>
+            </Section>
 
-            <div className="space-y-2 border-t border-border pt-3">
-              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Materials</div>
+            <Section id="tileedit.materials" variant="inline" title="Materials">
               <ColorField label="Foam" value={foamColor} onChange={setFoamColor} />
               <NumberSlider label="Foam opacity" value={Math.round(foamOpacity * 100)} min={10} max={100} suffix="%" onChange={(v) => setFoamOpacity(v / 100)} />
               <ColorField label="Void" value={voidColor} onChange={setVoidColor} />
               <NumberSlider label="Void opacity" value={Math.round(voidOpacity * 100)} min={10} max={100} suffix="%" onChange={(v) => setVoidOpacity(v / 100)} />
-            </div>
+            </Section>
 
             <div className="border-t border-border pt-3">
               <ClippingPlaneControl value={clip} onChange={setClip} />
             </div>
 
-            <div className="space-y-2 border-t border-border pt-3">
-              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Outlines</div>
+            <Section id="tileedit.outlines" variant="inline" title="Outlines" defaultOpen={false}>
               {([
                 ["Foam (outer shape)", foamOutline, setFoamOutline],
                 ["Void", voidOutline, setVoidOutline],
@@ -329,10 +357,9 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
                   )}
                 </div>
               ))}
-            </div>
+            </Section>
 
-            <div className="space-y-2 border-t border-border pt-3">
-              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Facet lines</div>
+            <Section id="tileedit.facets" variant="inline" title="Facet lines" defaultOpen={false}>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">Foam facet lines</span>
@@ -346,7 +373,42 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
                   </>
                 )}
               </div>
-            </div>
+            </Section>
+
+            {otherSlots.length > 0 && (
+              <Section id="tileedit.copy" variant="inline" title="Copy to other tiles" defaultOpen={false}>
+                <div className="space-y-1.5 text-xs">
+                  <div className="flex gap-2 text-[10px]">
+                    <button type="button" className="underline-offset-2 hover:underline" onClick={() => setCopyIds(otherSlots.map((o) => o.id))}>
+                      All
+                    </button>
+                    <button type="button" className="underline-offset-2 hover:underline" onClick={() => setCopyIds([])}>
+                      None
+                    </button>
+                  </div>
+                  <div className="max-h-32 space-y-1 overflow-y-auto">
+                    {otherSlots.map((o) => (
+                      <label key={o.id} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="accent-[var(--magenta)]"
+                          checked={copyIds.includes(o.id)}
+                          onChange={(e) => setCopyIds((ids) => (e.target.checked ? [...ids, o.id] : ids.filter((id) => id !== o.id)))}
+                        />
+                        <span className="truncate">{o.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <label className="flex items-center gap-2 text-muted-foreground">
+                    <input type="checkbox" className="accent-[var(--magenta)]" checked={copyView} onChange={(e) => setCopyView(e.target.checked)} />
+                    Also copy the view / camera
+                  </label>
+                  <Button size="sm" variant="outline" className="w-full" disabled={!copyIds.length} onClick={handleCopy}>
+                    Copy to {copyIds.length} tile{copyIds.length === 1 ? "" : "s"}
+                  </Button>
+                </div>
+              </Section>
+            )}
 
             <div className="mt-auto flex gap-1.5 border-t border-border pt-3">
               <Button variant="outline" size="sm" className="flex-1" onClick={handleReset}>

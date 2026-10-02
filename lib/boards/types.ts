@@ -18,6 +18,7 @@ export { DEFAULT_AXO_VIEW } from "@/lib/faceViews";
 export interface CustomCamera {
   position: [number, number, number];
   target: [number, number, number];
+  up?: [number, number, number];
 }
 
 /** `weightPt` is a print line weight in points (1pt = 1/72in) at the board's
@@ -60,6 +61,11 @@ export interface BoardSlotOverrides {
 export interface BoardSlot {
   id: string;
   tileId: string | null;
+  /** Category + typology number for the label and the catalogue layout,
+   * overriding what is parsed from the tile's name. */
+  tag?: { category: string; number: number | null };
+  /** Replaces the whole name-tag text for this tile when non-empty. */
+  labelOverride?: string;
   view: AxoViewKey;
   /** Manual override for this tile's name-tag text size, in points. Unset
    * (or null) means auto-fit. */
@@ -82,6 +88,49 @@ export interface BoardFooter {
   leftText: string;
   rightText: string;
   color: string;
+}
+
+/** The little name tag hanging off each module. Geometry is a fraction of the
+ * module's side, so it scales with the board. */
+export type LabelMode = "short" | "typology" | "full" | "custom";
+export interface NameTagSettings {
+  /** How much of the module's width the tag spans (measured from the right edge). */
+  widthFraction: number;
+  /** The tag's height as a fraction of the module's side. */
+  heightFraction: number;
+  /** Text wraps to at most this many lines before it starts to shrink. */
+  maxLines: number;
+  /** Auto-fit never shrinks the text below this, in points. */
+  minFontPt: number;
+  labelMode: LabelMode;
+  /** For "custom": {category} {n} {typology} {version} {name}. */
+  template: string;
+}
+
+/** The descriptor page's top-N highlight. */
+export interface HighlightSettings {
+  enabled: boolean;
+  count: number;
+}
+
+export const CATALOGUE_CATEGORIES = ["gathering", "office", "lobby"] as const;
+export const CATALOGUE_COLUMNS = 5;
+
+/** Optional 3x5 layout: a row per category, a column per typology number. */
+export interface CatalogueSettings {
+  enabled: boolean;
+  /** Dashed placeholders for typologies with no tile yet. */
+  placeholders: boolean;
+  showRowLabels: boolean;
+  showColumnLabels: boolean;
+  rowLabels: string[];
+  columnLabels: string[];
+  labelColor: string;
+  /** null = auto. */
+  labelFontPt: number | null;
+  /** Width of the row-label band (left) and height of the column-label band (top), inches. */
+  rowBandIn: number;
+  columnBandIn: number;
 }
 
 export type DitherMode = "none" | "ordered" | "diffusion";
@@ -152,6 +201,12 @@ export interface BoardConfig {
   textBox: BoardTextBox;
   footer: BoardFooter;
   animation: AnimationSettings;
+  nameTag: NameTagSettings;
+  highlight: HighlightSettings;
+  catalogue: CatalogueSettings;
+  /** Which descriptors page 2 lists, in order -- the project's carried-forward
+   * criteria. Not persisted with the board (set from the project); null = all. */
+  descriptorKeys?: string[] | null;
 }
 
 export const DPI = 300;
@@ -171,6 +226,25 @@ export function displayName(name: string): string {
 export function shortTileLabel(name: string): string {
   const match = name.match(/^([a-zA-Z]+)_(\d+)/);
   return match ? `${match[1]} ${match[2]}` : displayName(name);
+}
+
+export function defaultNameTag(): NameTagSettings {
+  return { widthFraction: 0.3136, heightFraction: 0.0716, maxLines: 2, minFontPt: 4, labelMode: "short", template: "{category} {n} - {typology}" };
+}
+
+export function defaultCatalogue(): CatalogueSettings {
+  return {
+    enabled: false,
+    placeholders: true,
+    showRowLabels: true,
+    showColumnLabels: true,
+    rowLabels: ["Gathering", "Office", "Lobby"],
+    columnLabels: ["1", "2", "3", "4", "5"],
+    labelColor: "#9aa0a6",
+    labelFontPt: null,
+    rowBandIn: 1.2,
+    columnBandIn: 0.4,
+  };
 }
 
 export function defaultBoardConfig(): BoardConfig {
@@ -200,5 +274,8 @@ export function defaultBoardConfig(): BoardConfig {
     textBox: { enabled: false, text: "", color: "#e6e6e6" },
     footer: { enabled: false, leftText: "DESIGN 7 | FALL 2026 | DUSTIN WHITE", rightText: "RYAN BURGESS, DILLON MITKO", color: "#ffffff" },
     animation: defaultAnimationSettings(),
+    nameTag: defaultNameTag(),
+    highlight: { enabled: true, count: 3 },
+    catalogue: defaultCatalogue(),
   };
 }

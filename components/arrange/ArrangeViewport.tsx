@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useMemo, useRef, type ComponentRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Bounds, OrbitControls, useGLTF } from "@react-three/drei";
+import { CaptureBridge } from "@/components/shared/CaptureBridge";
+import type { ViewportHandle } from "@/lib/viewportCapture";
 import * as THREE from "three";
 import type { ParsedTile } from "@/lib/types";
 import type { PlacedInstance } from "@/lib/arrange/types";
@@ -137,6 +139,9 @@ export function ArrangeViewport({
   highlightIds,
   onSelect,
   fitKey,
+  autoRotate = false,
+  autoRotateSpeed = 2,
+  handleRef,
 }: {
   instances: PlacedInstance[];
   tileById: Map<string, ParsedTile>;
@@ -152,7 +157,12 @@ export function ArrangeViewport({
    * `observe` to reliably notice (same pattern as CubeHexBuilder's
    * preview, keyed on the generated group's uuid instead). */
   fitKey?: number | string;
+  autoRotate?: boolean;
+  autoRotateSpeed?: number;
+  /** Receives what an offscreen PNG / turntable export needs. */
+  handleRef?: React.MutableRefObject<ViewportHandle | null>;
 }) {
+  const fallbackHandle = useRef<ViewportHandle | null>(null);
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
   useShiftToPan(controlsRef);
 
@@ -187,7 +197,8 @@ export function ArrangeViewport({
             )}
           </Bounds>
         </Suspense>
-        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} />
+        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} autoRotate={autoRotate} autoRotateSpeed={autoRotateSpeed} />
+        <CaptureBridge handleRef={handleRef ?? fallbackHandle} />
       </Canvas>
     </div>
   );

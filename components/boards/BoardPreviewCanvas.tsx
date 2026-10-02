@@ -1,11 +1,12 @@
 "use client";
 
+import { Select } from "@/components/ui/select";
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { AXO_VIEWS } from "@/lib/faceViews";
 import { computeGeometry, renderBoardPreview } from "@/lib/boards/exportBoard";
-import { DIVIDER_X, TAG_HEIGHT_FRACTION } from "@/lib/boards/frameShape";
-import type { AxoViewKey, BoardConfig } from "@/lib/boards/types";
+import { resolveTag } from "@/lib/boards/tileLabel";
+import { CATALOGUE_CATEGORIES, type AxoViewKey, type BoardConfig, type BoardSlot } from "@/lib/boards/types";
 import type { ParsedTile } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 
@@ -22,6 +23,7 @@ export function BoardPreviewCanvas({
   onRemoveSlot,
   onChangeSlotView,
   onChangeSlotNameSize,
+  onChangeSlot,
   onEditSlot,
 }: {
   config: BoardConfig;
@@ -30,6 +32,7 @@ export function BoardPreviewCanvas({
   onRemoveSlot: (slotId: string) => void;
   onChangeSlotView: (slotId: string, view: AxoViewKey) => void;
   onChangeSlotNameSize: (slotId: string, sizePt: number | null) => void;
+  onChangeSlot: (slotId: string, patch: Partial<BoardSlot>) => void;
   onEditSlot: (slotId: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -59,21 +62,21 @@ export function BoardPreviewCanvas({
   }, [config, tileById, page, containerWidth]);
 
   const dpi = containerWidth / config.widthIn;
-  const geo = computeGeometry(config, dpi);
+  const geo = computeGeometry(config, dpi, tileById);
 
   return (
     <div ref={containerRef} className="relative h-full w-full">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
       {page === 1 &&
         config.slots.map((slot, i) => {
-          const cellIndex = (geo.captionCellIndex !== null ? 1 : 0) + i;
-          const cell = geo.cells[cellIndex];
+          const cell = geo.cells[geo.slotCellIndex[i]];
           const tile = slot.tileId ? tileById.get(slot.tileId) : undefined;
           if (!cell || !tile) return null;
-          const tagX = cell.x + cell.size * DIVIDER_X;
+          const tagX = cell.x + cell.size * geo.tag.startX;
           const tagY = cell.y + cell.size;
           const tagW = cell.x + cell.size - tagX;
-          const tagH = cell.size * TAG_HEIGHT_FRACTION;
+          const tagH = cell.size * geo.tag.height;
+          const resolved = resolveTag(tile.name, slot);
 
           return (
             <div key={slot.id}>
@@ -98,7 +101,7 @@ export function BoardPreviewCanvas({
                     >
                       <X className="h-3 w-3 text-white" />
                     </button>
-                    <select
+                    <Select
                       className="absolute left-1.5 top-1.5 h-6 rounded border border-input bg-black/70 px-1 text-[10px] text-white"
                       value={slot.view}
                       onClick={(e) => e.stopPropagation()}
@@ -109,7 +112,7 @@ export function BoardPreviewCanvas({
                           {v.label}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </>
                 )}
               </div>
@@ -117,21 +120,60 @@ export function BoardPreviewCanvas({
                 className="absolute cursor-text"
                 style={{ left: tagX, top: tagY, width: Math.max(0, tagW), height: Math.max(0, tagH) }}
                 onClick={() => setEditingSlotId(slot.id)}
-                aria-label={`Edit ${tile.name} name text size`}
+                aria-label={`Edit ${tile.name} name tag`}
               />
               {editingSlotId === slot.id && (
-                <div className="absolute z-10 flex items-center gap-1 rounded-md border border-input bg-black/90 p-1 shadow-lg" style={{ left: tagX, top: Math.max(0, tagY - 34) }}>
+                <div className="absolute z-10 flex w-56 max-w-[90vw] flex-col gap-1.5 rounded-md border border-input bg-black/90 p-2 shadow-lg" style={{ left: Math.min(tagX, Math.max(0, geo.widthPx - 224)), top: Math.max(0, tagY - 124) }}>
+                  <label className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    Label text
+                    <Input
+                      value={slot.labelOverride ?? ""}
+                      placeholder="Auto"
+                      className="h-6 w-32 text-[10px]"
+                      onChange={(e) => onChangeSlot(slot.id, { labelOverride: e.target.value })}
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    Category
+                    <Select
+                      className="h-6 w-32 rounded border border-input bg-black px-1 text-[10px] text-white"
+                      value={slot.tag?.category ?? ""}
+                      onChange={(e) => onChangeSlot(slot.id, { tag: e.target.value ? { category: e.target.value, number: slot.tag?.number ?? resolved.number } : undefined })}
+                    >
+                      <option value="">Auto ({resolved.category || "none"})</option>
+                      {CATALOGUE_CATEGORIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    Number
+                    <Input
+                      type="number"
+                      min={1}
+                      max={5}
+                      disabled={!slot.tag}
+                      value={slot.tag?.number ?? ""}
+                      placeholder={resolved.number === null ? "-" : String(resolved.number)}
+                      className="h-6 w-32 text-[10px]"
+                      onChange={(e) => slot.tag && onChangeSlot(slot.id, { tag: { ...slot.tag, number: e.target.value ? Number(e.target.value) : null } })}
+                    />
+                  </label>
+                  <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    Text size
                   <Input
                     type="number"
                     min={4}
                     max={200}
                     value={slot.nameFontSizePt ?? ""}
                     placeholder="Auto"
-                    className="h-6 w-16 text-[10px]"
+                    className="h-6 w-32 text-[10px]"
                     onChange={(e) => onChangeSlotNameSize(slot.id, e.target.value ? Number(e.target.value) : null)}
                   />
-                  <span className="pr-1 text-[9px] text-muted-foreground">pt</span>
-                  <button className="pr-1 text-[10px] text-muted-foreground hover:text-foreground" onClick={() => setEditingSlotId(null)}>
+                  </div>
+                  <button className="self-end text-[10px] text-muted-foreground hover:text-foreground" onClick={() => setEditingSlotId(null)}>
                     done
                   </button>
                 </div>

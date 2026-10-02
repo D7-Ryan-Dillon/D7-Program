@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "@/components/ui/select";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -28,14 +29,14 @@ export function FontPicker({ value, onChange }: { value: string; onChange: (v: s
     <div className="space-y-1.5">
       {supported ? (
         fonts ? (
-          <select className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs" value={value} onChange={(e) => onChange(e.target.value)}>
+          <Select className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs" value={value} onChange={(e) => onChange(e.target.value)}>
             <option value={value}>{value}</option>
             {fonts.map((f) => (
               <option key={f.family} value={f.family}>
                 {f.family}
               </option>
             ))}
-          </select>
+          </Select>
         ) : (
           <Button variant="outline" size="sm" className="w-full" disabled={loading} onClick={() => void loadFonts()}>
             {loading ? "Reading fonts…" : "Choose from fonts on this device"}

@@ -11,6 +11,7 @@ import { buildVolumeField, facesForShape, type VolumeAssignments, type VolumeFac
 import { voxelizeVolumeField, SECTION_TILE_FT, SECTION_CELL_FT, SECTION_GRID, SECTION_HEX_APOTHEM_FT, SECTION_HEX_HEIGHT_FT } from "./voxelize";
 import { buildTileScene } from "./mesh";
 import { cleanupVolumeField, defaultCleanup, swapFoamVoid, type CleanupSettings } from "./cleanup";
+import { applyPlates, arePlatesActive, defaultPlates, type PlateSettings } from "./plates";
 import { computeFaceData } from "./faceData";
 import { computeSectionsData } from "./sectionsData";
 import { computeTileMetrics } from "./metrics";
@@ -33,6 +34,10 @@ export interface BuildSectionTileInput {
   cleanup?: CleanupSettings;
   /** Foam and void roles swapped (see cleanup.ts's swapFoamVoid). */
   swapped?: boolean;
+  /** Floor plates, applied after the swap and before cleanup. */
+  plates?: PlateSettings;
+  /** Quarter turns given to each face's trace -- recorded in the recipe only (`assignments` already holds the turned traces). */
+  rotations?: Record<string, number>;
   guessed?: GuessedIdentity;
 }
 
@@ -80,7 +85,9 @@ export async function buildSectionTile(input: BuildSectionTileInput): Promise<Pa
 
   const cleanup = input.cleanup ?? defaultCleanup;
   const lofted = buildVolumeField(input.assignments, input.shape, seed, fitTolerance, 46);
-  const volume = cleanupVolumeField(input.swapped ? swapFoamVoid(lofted) : lofted, cleanup).volume;
+  const swappedField = input.swapped ? swapFoamVoid(lofted) : lofted;
+  const plated = applyPlates(swappedField, input.plates ?? defaultPlates(), input.shape, SECTION_TILE_FT[0]).volume;
+  const volume = cleanupVolumeField(plated, cleanup).volume;
   const voxels = voxelizeVolumeField(volume);
   if (!voxels.void || !voxels.material || !voxels.voidSmooth) {
     throw new Error("Voxelization produced no data -- this is a bug in lib/sections/voxelize.ts, not a bad input.");
@@ -99,7 +106,7 @@ export async function buildSectionTile(input: BuildSectionTileInput): Promise<Pa
   const glbBuffer = (await exporter.parseAsync(scene, { binary: true })) as ArrayBuffer;
   const glbUrl = URL.createObjectURL(new Blob([glbBuffer], { type: "model/gltf-binary" }));
 
-  const id = await hashTileId(voxels.void, `section-field:${input.shape}:${seed}:${fitTolerance}:${input.swapped ? "swapped" : ""}`);
+  const id = await hashTileId(voxels.void, `section-field:${input.shape}:${seed}:${fitTolerance}:${input.swapped ? "swapped" : ""}:${arePlatesActive(input.plates) ? JSON.stringify(input.plates) : ""}`);
   const facesJson: FacesJson = { schema: "section-field-tile/1", cell_ft: SECTION_CELL_FT, faces: faceEntries };
   const config: TileConfig = { seed, cell: SECTION_CELL_FT, tile_w: SECTION_TILE_FT[0], tile_h: SECTION_TILE_FT[2] };
 
@@ -121,7 +128,7 @@ export async function buildSectionTile(input: BuildSectionTileInput): Promise<Pa
     shape: shapeDescriptor,
     faceNames,
     sectionRecipe: input.assignmentNames
-      ? { shape: input.shape, assignments: input.assignmentNames as Record<string, string>, seed, fitTolerance, cleanup, swapped: !!input.swapped }
+      ? { shape: input.shape, assignments: input.assignmentNames as Record<string, string>, seed, fitTolerance, cleanup, swapped: !!input.swapped, plates: arePlatesActive(input.plates) ? input.plates : undefined, rotations: input.rotations }
       : undefined,
   };
 }

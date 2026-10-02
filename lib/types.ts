@@ -257,6 +257,10 @@ export interface ParsedTile {
     cleanup?: { minPieceFt3: number; minBranchFt: number; minPocketFt3: number };
     /** Foam and void roles swapped in the builder. */
     swapped?: boolean;
+    /** Floor plates added in the builder (lib/sections/plates.ts) -- absent when none. */
+    plates?: import("@/lib/sections/plates").PlateSettings;
+    /** Quarter turns given to each face's trace (0-3). */
+    rotations?: Record<string, number>;
   };
 }
 

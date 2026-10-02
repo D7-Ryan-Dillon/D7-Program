@@ -1,39 +1,63 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ArrowDownAZ, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
-import { useProject } from "@/lib/project-store";
+import { useProject, useProjectUi } from "@/lib/project-store";
+import { usePresets } from "@/lib/presets";
+import { useCriteria } from "@/lib/useCriteria";
+import { mergeDefaults } from "@/lib/mergeDefaults";
 import { GlowPanel } from "@/components/shared/GlowPanel";
+import { PresetBar } from "@/components/shared/PresetBar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { TilePicker } from "./TilePicker";
 import { SlotOrderList } from "./SlotOrderList";
+import { Section } from "@/components/shared/Section";
 import { BoardSettingsPanel } from "./BoardSettingsPanel";
 import { AnimatedExportPanel } from "./AnimatedExportPanel";
 import { BoardPreviewCanvas } from "./BoardPreviewCanvas";
 import { TileViewEditor } from "./TileViewEditor";
 import { downloadBlob, exportBoardPage1, exportBoardPage2 } from "@/lib/boards/exportBoard";
-import { DEFAULT_AXO_VIEW, defaultBoardConfig, type AnimationSettings, type AxoViewKey, type BoardSlot, type BoardSlotOverrides } from "@/lib/boards/types";
+import { tileSortKey } from "@/lib/boards/tileLabel";
+import { DEFAULT_AXO_VIEW, defaultBoardConfig, displayName, type AnimationSettings, type AxoViewKey, type BoardConfig, type BoardSlot, type BoardSlotOverrides } from "@/lib/boards/types";
 
-let slotCounter = 0;
+/** Everything about the Boards tab that is remembered per project. */
+interface BoardsUi {
+  config: BoardConfig;
+  previewPage: 1 | 2;
+  animOpen: boolean;
+}
+const defaultBoardsUi = (): BoardsUi => ({ config: defaultBoardConfig(), previewPage: 1, animOpen: false });
+
+interface BoardPresetData {
+  config: BoardConfig;
+  withTiles: boolean;
+}
+
 function newSlotId() {
-  slotCounter += 1;
-  return `slot-${slotCounter}`;
+  return `slot-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 }
 
 export function BoardsTab() {
   const { tiles } = useProject();
-  const [config, setConfig] = useState(defaultBoardConfig);
-  const [previewPage, setPreviewPage] = useState<1 | 2>(1);
+  const [ui, setUi] = useProjectUi<BoardsUi>("boards", defaultBoardsUi);
+  const { config, previewPage, animOpen } = ui;
+  const criteria = useCriteria();
+  const boardPresets = usePresets<BoardPresetData>("boards");
+  const [presetWithTiles, setPresetWithTiles] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
-  const [animOpen, setAnimOpen] = useState(false);
   const [animBusy, setAnimBusy] = useState(false);
+  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const previewAreaRef = useRef<HTMLDivElement>(null);
   const [previewAreaSize, setPreviewAreaSize] = useState({ width: 800, height: 600 });
 
   const tileById = useMemo(() => new Map(tiles.map((t) => [t.id, t])), [tiles]);
+
+  // What gets drawn: the saved board plus the project's carried-forward
+  // criteria (which the descriptor page lists) -- the criteria belong to the
+  // project, not to any one board, so they are never stored in `config`.
+  const renderConfig = useMemo<BoardConfig>(() => ({ ...config, descriptorKeys: criteria.keys }), [config, criteria.keys]);
 
   useEffect(() => {
     const el = previewAreaRef.current;
@@ -57,9 +81,10 @@ export function BoardsTab() {
   const fitWidth = Math.min(previewAreaSize.width, previewAreaSize.height * boardRatio);
   const fitHeight = fitWidth / boardRatio;
 
-  const patchConfig = (patch: Partial<typeof config>) => setConfig((prev) => ({ ...prev, ...patch }));
-
+  const setConfig = (update: (prev: BoardConfig) => BoardConfig) => setUi((prev) => ({ ...prev, config: update(prev.config) }));
+  const patchConfig = (patch: Partial<BoardConfig>) => setConfig((prev) => ({ ...prev, ...patch }));
   const patchAnimation = (patch: Partial<AnimationSettings>) => setConfig((prev) => ({ ...prev, animation: { ...prev.animation, ...patch } }));
+  const patchSlot = (slotId: string, patch: Partial<BoardSlot>) => setConfig((prev) => ({ ...prev, slots: prev.slots.map((s) => (s.id === slotId ? { ...s, ...patch } : s)) }));
 
   const toggleTile = (tileId: string) => {
     setConfig((prev) => {
@@ -72,21 +97,10 @@ export function BoardsTab() {
     });
   };
 
-  const removeSlot = (slotId: string) => {
-    setConfig((prev) => ({ ...prev, slots: prev.slots.filter((s) => s.id !== slotId) }));
-  };
-
-  const changeSlotView = (slotId: string, view: AxoViewKey) => {
-    setConfig((prev) => ({ ...prev, slots: prev.slots.map((s) => (s.id === slotId ? { ...s, view } : s)) }));
-  };
-
-  const changeSlotNameSize = (slotId: string, nameFontSizePt: number | null) => {
-    setConfig((prev) => ({ ...prev, slots: prev.slots.map((s) => (s.id === slotId ? { ...s, nameFontSizePt } : s)) }));
-  };
-
-  const changeSlotOverrides = (slotId: string, overrides: BoardSlotOverrides | undefined) => {
-    setConfig((prev) => ({ ...prev, slots: prev.slots.map((s) => (s.id === slotId ? { ...s, overrides } : s)) }));
-  };
+  const removeSlot = (slotId: string) => setConfig((prev) => ({ ...prev, slots: prev.slots.filter((s) => s.id !== slotId) }));
+  const changeSlotView = (slotId: string, view: AxoViewKey) => patchSlot(slotId, { view });
+  const changeSlotNameSize = (slotId: string, nameFontSizePt: number | null) => patchSlot(slotId, { nameFontSizePt });
+  const changeSlotOverrides = (slotId: string, overrides: BoardSlotOverrides | undefined) => patchSlot(slotId, { overrides });
 
   const moveSlot = (slotId: string, direction: "up" | "down") => {
     setConfig((prev) => {
@@ -99,10 +113,42 @@ export function BoardsTab() {
     });
   };
 
+  /** Category (gathering, office, lobby), then typology number, then name. */
+  const autoSort = () =>
+    setConfig((prev) => {
+      const keyOf = (s: BoardSlot) => tileSortKey(s.tileId ? (tileById.get(s.tileId)?.name ?? "") : "", s);
+      const slots = [...prev.slots].sort((a, b) => {
+        const ka = keyOf(a);
+        const kb = keyOf(b);
+        return ka[0] - kb[0] || ka[1] - kb[1] || ka[2].localeCompare(kb[2]);
+      });
+      return { ...prev, slots };
+    });
+
+  /** Copies the popup's settings onto the chosen tiles (replacing their own overrides). */
+  const copyOverrides = (targetIds: string[], overrides: BoardSlotOverrides | undefined, view?: AxoViewKey) =>
+    setConfig((prev) => ({
+      ...prev,
+      slots: prev.slots.map((s) => {
+        if (!targetIds.includes(s.id)) return s;
+        const next: BoardSlot = { ...s, overrides: overrides ? { ...overrides } : undefined };
+        if (view) next.view = view;
+        return next;
+      }),
+    }));
+
+  const applyPreset = (data: BoardPresetData) =>
+    setConfig((prev) => {
+      const merged = mergeDefaults(defaultBoardConfig(), data.config);
+      return { ...merged, slots: data.withTiles ? merged.slots : prev.slots };
+    });
+
+  const presetData = (): BoardPresetData => ({ config: presetWithTiles ? config : { ...config, slots: [] }, withTiles: presetWithTiles });
+
   const exportPngs = async () => {
     setExporting(true);
     try {
-      const [page1, page2] = await Promise.all([exportBoardPage1(config, tileById), exportBoardPage2(config, tileById)]);
+      const [page1, page2] = await Promise.all([exportBoardPage1(renderConfig, tileById), exportBoardPage2(renderConfig, tileById)]);
       const base = config.name.trim().replace(/[^\w.-]+/g, "_") || "board";
       downloadBlob(`${base}-board.png`, page1);
       downloadBlob(`${base}-descriptors.png`, page2);
@@ -115,31 +161,52 @@ export function BoardsTab() {
   };
 
   return (
+    // Height-bounded on wide screens (like the Viewer) so the board stays put and only the side menus scroll.
+    <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
     <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:grid-rows-[minmax(0,1fr)]">
       <div className="order-2 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
         <GlowPanel glow="magenta">
-          <div className="p-4">
-            <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Board order</div>
-            <SlotOrderList slots={config.slots} tileById={tileById} onMove={moveSlot} onRemove={removeSlot} />
-            <Separator className="my-4" />
-            <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Tiles</div>
-            <TilePicker slots={config.slots} onToggle={toggleTile} />
+          <div className="space-y-4 p-4">
+            <Section
+              id="boards.order"
+              variant="inline"
+              title="Board order"
+              summary={`${config.slots.length}`}
+              action={
+                <button
+                  type="button"
+                  disabled={config.slots.length < 2}
+                  onClick={autoSort}
+                  className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-label text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                  title="Sort by category (gathering, office, lobby), then typology number"
+                >
+                  <ArrowDownAZ className="h-3 w-3" />
+                  Auto-sort
+                </button>
+              }
+            >
+              <SlotOrderList slots={config.slots} tileById={tileById} onMove={moveSlot} onRemove={removeSlot} />
+            </Section>
+            <Section id="boards.tiles" variant="inline" title="Tiles">
+              <TilePicker slots={config.slots} onToggle={toggleTile} />
+            </Section>
           </div>
         </GlowPanel>
       </div>
 
-      <div className="order-1 flex min-w-0 flex-col gap-3 lg:order-none lg:min-h-0">
+      {/* On phones / half-screen laptops the board stays pinned to the top of the tab so settings changes show live while you scroll the controls. */}
+      <div className="order-1 flex min-w-0 flex-col gap-3 max-lg:sticky max-lg:top-0 max-lg:z-20 max-lg:self-start max-lg:bg-background/95 max-lg:pb-2 lg:order-none lg:min-h-0">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <div className="font-mono text-xs text-muted-foreground">
               {config.slots.length} tile(s)
-              {config.textBox.enabled ? " + caption" : ""}
+              {config.textBox.enabled && !config.catalogue.enabled ? " + caption" : ""}
             </div>
             <div className="inline-flex rounded-full border-hair p-0.5">
               {([1, 2] as const).map((p) => (
                 <button
                   key={p}
-                  onClick={() => setPreviewPage(p)}
+                  onClick={() => setUi((prev) => ({ ...prev, previewPage: p }))}
                   className={`rounded-full px-3 py-1 font-mono text-[11px] tracking-label uppercase transition-colors ${
                     previewPage === p ? "bg-gradient-to-r from-magenta to-orange text-white" : "text-muted-foreground hover:text-foreground"
                   }`}
@@ -153,18 +220,19 @@ export function BoardsTab() {
             {exporting ? "Exporting…" : "Export PNGs"}
           </Button>
         </div>
-        <div ref={previewAreaRef} className="flex h-[70vh] items-center justify-center overflow-auto rounded-lg border-hair bg-black/40 p-2 sm:p-4 lg:h-auto lg:min-h-0 lg:flex-1">
+        <div ref={previewAreaRef} className="flex h-[30vh] items-center justify-center overflow-auto rounded-lg border-hair bg-black/40 p-2 sm:p-4 lg:h-auto lg:min-h-0 lg:flex-1">
           {config.slots.length ? (
             // Visible only here on screen (never baked into the exported PNG) so an
             // all-black board doesn't disappear into the app's own dark background.
             <div className="rounded-sm border border-white/15" style={{ width: fitWidth, height: fitHeight }}>
               <BoardPreviewCanvas
-                config={config}
+                config={renderConfig}
                 tileById={tileById}
                 page={previewPage}
                 onRemoveSlot={removeSlot}
                 onChangeSlotView={changeSlotView}
                 onChangeSlotNameSize={changeSlotNameSize}
+                onChangeSlot={patchSlot}
                 onEditSlot={setEditingSlotId}
               />
             </div>
@@ -180,7 +248,7 @@ export function BoardsTab() {
             <button
               type="button"
               aria-expanded={animOpen}
-              onClick={() => setAnimOpen((o) => !o)}
+              onClick={() => setUi((prev) => ({ ...prev, animOpen: !prev.animOpen }))}
               className="flex w-full items-center justify-between font-mono text-[11px] tracking-label uppercase text-muted-foreground hover:text-foreground"
             >
               <span>Animated export (GIF / MP4){animBusy ? " — running…" : ""}</span>
@@ -188,18 +256,31 @@ export function BoardsTab() {
             </button>
             {/* Kept mounted while closed so an export in progress is not lost. */}
             <div className={animOpen ? "mt-3" : "hidden"}>
-              <AnimatedExportPanel config={config} tileById={tileById} onChange={patchAnimation} onBusyChange={setAnimBusy} />
+              <AnimatedExportPanel config={renderConfig} tileById={tileById} onChange={patchAnimation} onBusyChange={setAnimBusy} />
             </div>
           </div>
         </GlowPanel>
         <GlowPanel glow="orange" className="flex-1">
           <div className="p-4">
-            <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Board settings</div>
-            <BoardSettingsPanel config={config} onChange={patchConfig} />
+            <PresetBar<BoardPresetData>
+              label="Board presets"
+              presets={boardPresets.presets}
+              onSave={(name) => boardPresets.save(name, presetData())}
+              onUpdate={(id) => boardPresets.update(id, presetData())}
+              onRename={boardPresets.rename}
+              onRemove={boardPresets.remove}
+              onApply={(p) => applyPreset(p.data)}
+            />
+            <label className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <input type="checkbox" className="accent-[var(--magenta)]" checked={presetWithTiles} onChange={(e) => setPresetWithTiles(e.target.checked)} />
+              Include the tile selection when saving
+            </label>
+            <Separator className="my-4" />
+            <div className="mb-3 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Board settings</div>
+            <BoardSettingsPanel config={config} onChange={patchConfig} criteriaCount={criteria.keys.length} />
             <Separator className="my-4" />
             <p className="text-[11px] text-muted-foreground">
-              Exports two PNGs: the board itself, and a second page showing each tile&rsquo;s scored descriptors with its top 3 highlighted. Click a tile&rsquo;s
-              name on the board to set its own text size.
+              Exports two PNGs: the board itself, and a second page showing each tile&rsquo;s scored descriptors (the criteria carried forward in the Analysis tab). Settings save with the project automatically.
             </p>
           </div>
         </GlowPanel>
@@ -217,9 +298,14 @@ export function BoardsTab() {
               config={config}
               onSave={(overrides) => changeSlotOverrides(slot.id, overrides)}
               onClose={() => setEditingSlotId(null)}
+              otherSlots={config.slots
+                .filter((s) => s.id !== slot.id)
+                .map((s) => ({ id: s.id, name: displayName((s.tileId ? tileById.get(s.tileId)?.name : undefined) ?? "tile") }))}
+              onCopyTo={copyOverrides}
             />
           );
         })()}
+    </div>
     </div>
   );
 }

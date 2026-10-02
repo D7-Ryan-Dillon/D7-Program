@@ -464,7 +464,12 @@ async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> 
     rig.dispose();
     return dataUrl;
   } finally {
+    // dispose() alone leaves the GL context alive until garbage collection;
+    // a burst of renders (every builder edit makes a thumbnail) then hits the
+    // browser's context cap and the oldest context -- the live viewport -- is
+    // evicted. Release it explicitly.
     renderer.dispose();
+    renderer.forceContextLoss();
   }
 }
 

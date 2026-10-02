@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ParsedTile } from "@/lib/types";
 import { loadProject, saveProject } from "@/lib/persistence";
 import type { SavedCube } from "@/lib/sections/savedCubes";
+import { mergeDefaults } from "@/lib/mergeDefaults";
 
 const LAST_CODE_KEY = "erosion-workspace:last-project-code";
 
@@ -41,6 +42,11 @@ type ProjectState = {
   /** Pieces made in the Sections cube/hex builder -- kept with the project
    * whether or not they were ever added to the tile bank. */
   cubes: SavedCube[];
+  /** Everything about how the workspace was left (board settings, viewport
+   * layouts, presets, criteria...) -- one JSON bag per feature, saved with the
+   * project so reopening a code resumes exactly where you stopped. */
+  ui: Record<string, unknown>;
+  setUi: (key: string, update: (prev: unknown) => unknown) => void;
   activeTileId: string | null;
   saveStatus: SaveStatus;
   saveError: string | null;
@@ -68,6 +74,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [projectCode, setProjectCode] = useState<string | null>(null);
   const [tiles, setTiles] = useState<ParsedTile[]>([]);
   const [cubes, setCubes] = useState<SavedCube[]>([]);
+  const [ui, setUiState] = useState<Record<string, unknown>>({});
   const [activeTileId, setActiveTileId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -85,6 +92,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setProjectCode(code);
     setTiles([]);
     setCubes([]);
+    setUiState({});
     setActiveTileId(null);
     setPinnedTileIds([]);
     setSaveStatus("loading");
@@ -95,6 +103,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         if (loaded) {
           setTiles(loaded.tiles);
           setCubes(loaded.cubes);
+          setUiState(loaded.ui);
         }
         setSaveStatus("idle");
         setSaveError(null);
@@ -114,6 +123,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setProjectCode(null);
     setTiles([]);
     setCubes([]);
+    setUiState({});
     setActiveTileId(null);
     setPinnedTileIds([]);
     setSaveStatus("idle");
@@ -123,7 +133,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (!projectCode || readyForCode.current !== projectCode) return;
     setSaveStatus("saving");
     const timer = setTimeout(() => {
-      saveProject(projectCode, tiles, cubes)
+      saveProject(projectCode, tiles, cubes, ui)
         .then(() => {
           setSaveStatus("saved");
           setSaveError(null);
@@ -135,7 +145,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         });
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [tiles, cubes, projectCode]);
+  }, [tiles, cubes, ui, projectCode]);
 
   const addTile = useCallback((tile: ParsedTile) => {
     setTiles((prev) => {
@@ -159,6 +169,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setCubes((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
+  const setUi = useCallback((key: string, update: (prev: unknown) => unknown) => {
+    setUiState((prev) => ({ ...prev, [key]: update(prev[key]) }));
+  }, []);
+
   const togglePinned = useCallback((id: string) => {
     setPinnedTileIds((prev) => (prev.includes(id) ? prev.filter((pinnedId) => pinnedId !== id) : [...prev, id]));
   }, []);
@@ -172,6 +186,8 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       projectCode,
       tiles,
       cubes,
+      ui,
+      setUi,
       activeTileId,
       saveStatus,
       saveError,
@@ -187,7 +203,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       pinnedTileIds,
       togglePinned,
     }),
-    [projectCode, tiles, cubes, activeTileId, saveStatus, saveError, enterProject, leaveProject, addTile, removeTile, saveCube, removeCube, updateTile, lastUsedCode, pinnedTileIds, togglePinned],
+    [projectCode, tiles, cubes, ui, setUi, activeTileId, saveStatus, saveError, enterProject, leaveProject, addTile, removeTile, saveCube, removeCube, updateTile, lastUsedCode, pinnedTileIds, togglePinned],
   );
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;
@@ -197,4 +213,23 @@ export function useProject() {
   const ctx = useContext(ProjectContext);
   if (!ctx) throw new Error("useProject must be used inside a ProjectProvider");
   return ctx;
+}
+
+/** A persisted settings object for one feature: `defaults` (a stable,
+ * module-level function) fills in anything the saved copy lacks, and the
+ * setter takes a value or an updater like useState. Writes autosave with the
+ * project. */
+export function useProjectUi<T extends object>(key: string, defaults: () => T) {
+  const { ui, setUi } = useProject();
+  const raw = ui[key];
+  const value = useMemo(() => mergeDefaults(defaults(), raw), [raw, defaults]);
+  const set = useCallback(
+    (next: T | ((prev: T) => T)) =>
+      setUi(key, (prevRaw) => {
+        const prev = mergeDefaults(defaults(), prevRaw);
+        return typeof next === "function" ? (next as (p: T) => T)(prev) : next;
+      }),
+    [key, setUi, defaults],
+  );
+  return [value, set] as const;
 }
