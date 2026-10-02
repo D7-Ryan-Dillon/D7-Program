@@ -7,13 +7,16 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { BankTile } from "@/lib/sections/tileLibrary";
 
-function TileThumb({ tile, selected, onClick }: { tile: BankTile; selected: boolean; onClick: () => void }) {
+/** A tile photo with its vector trace laid over it -- shared with the cube/hex
+ * builder's per-face picker so a tile looks the same in both places. */
+export function TileThumb({ tile, selected, onClick, className }: { tile: BankTile; selected: boolean; onClick: () => void; className?: string }) {
   return (
     <button
       onClick={onClick}
       className={cn(
         "group relative block aspect-square w-full overflow-hidden rounded-lg border-hair transition-colors",
         selected ? "border-magenta/60" : "hover:border-white/25",
+        className,
       )}
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- a user-supplied/local photo, not an optimizable remote asset */}

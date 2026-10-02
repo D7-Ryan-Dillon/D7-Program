@@ -77,18 +77,18 @@ export function SectionsTab() {
   const bankForBuilder = tiles.filter((t) => selectedNames.has(t.name));
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
+    <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
       <div className="flex items-center gap-2">
         <Button size="sm" variant={view === "bank" ? "default" : "outline"} onClick={() => setView("bank")}>
           Bank &amp; cleanup
         </Button>
-        <Button size="sm" variant={view === "builder" ? "default" : "outline"} disabled={!bankForBuilder.length} onClick={() => setView("builder")}>
-          Cube / hex builder ({bankForBuilder.length} selected)
+        <Button size="sm" variant={view === "builder" ? "default" : "outline"} onClick={() => setView("builder")}>
+          Cube / hex builder{bankForBuilder.length ? ` (${bankForBuilder.length} selected)` : ""}
         </Button>
       </div>
 
       {view === "bank" ? (
-        <GlowPanel glow="magenta" className="min-h-0 flex-1 overflow-y-auto">
+        <GlowPanel glow="magenta" className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
           <div className="p-4">
             <TileBank
               tiles={tiles}
@@ -103,7 +103,7 @@ export function SectionsTab() {
           </div>
         </GlowPanel>
       ) : (
-        <CubeHexBuilder bankTiles={bankForBuilder} onSaved={() => {}} />
+        <CubeHexBuilder bankTiles={bankForBuilder} allTiles={tiles} onSaved={() => {}} />
       )}
 
       {editingTile && (

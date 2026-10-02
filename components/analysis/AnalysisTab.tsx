@@ -23,7 +23,7 @@ export function AnalysisTab() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex flex-col gap-4 lg:h-full">
       <TileSwitcher />
       <div>
         <div className="text-base font-medium">{activeTile.name}</div>

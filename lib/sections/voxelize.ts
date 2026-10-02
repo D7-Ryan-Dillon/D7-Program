@@ -37,14 +37,22 @@ export function voxelizeVolumeField(volume: VolumeField): TileVoxels {
   const material = new Uint8Array(count);
   const voidSmooth = new Uint8Array(count);
 
+  // buildVolumeField places its real nodes at p = (node - 2) / (n - 5), i.e.
+  // the tile's [0,1] span covers nodes 2 .. n-3, while sampleVolumeField's
+  // [-1,1] world coordinate maps onto nodes 2 .. n-2 (one node further).
+  // Remapping here lands each voxel on the same field position the mesh
+  // (lib/sections/mesh.ts) uses, so a tile's voxels and its GLB agree.
+  const n = volume.resolution;
+  const remap = (w: number) => ((n - 5) * w - 1) / (n - 4);
+
   for (let x = 0; x < nx; x++) {
-    const worldX = (2 * (x + 0.5)) / nx - 1;
+    const worldX = remap((2 * (x + 0.5)) / nx - 1);
     for (let y = 0; y < ny; y++) {
       // Our horizontal Y -> the field's local Z.
-      const worldZLocal = (2 * (y + 0.5)) / ny - 1;
+      const worldZLocal = remap((2 * (y + 0.5)) / ny - 1);
       for (let z = 0; z < nz; z++) {
         // Our vertical Z -> the field's local (up) Y.
-        const worldYLocal = (2 * (z + 0.5)) / nz - 1;
+        const worldYLocal = remap((2 * (z + 0.5)) / nz - 1);
         const value = sampleVolumeField(volume.field, volume.resolution, worldX, worldYLocal, worldZLocal);
         const i = (x * ny + y) * nz + z;
         voidChannel[i] = value < 0 ? 1 : 0;

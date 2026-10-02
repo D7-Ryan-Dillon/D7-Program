@@ -21,7 +21,7 @@ function Workspace() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header activeTab={tab} onTabChange={setTab} />
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-4 lg:px-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-6 pt-4 sm:px-4 lg:px-6">
         {tab === "viewer" && <ViewerTab />}
         {tab === "analysis" && <AnalysisTab />}
         {tab === "arrange" && <ArrangeTab />}

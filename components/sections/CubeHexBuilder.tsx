@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Bounds, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -15,12 +15,15 @@ import type { DisplayMode, MeshColors, MeshVisibility } from "@/components/viewe
 import { ClippingPlaneControl } from "@/components/shared/ClippingPlaneControl";
 import { ShuffleSeedButton } from "@/components/shared/ShuffleSeedButton";
 import { ColorField } from "@/components/boards/ColorField";
+import { FaceTilePicker } from "@/components/sections/FaceTilePicker";
+import { TileThumbnail } from "@/components/shared/TileThumbnail";
 import { NumberSlider } from "@/components/shared/NumberSlider";
 import { applyClipToMesh, buildClipOutline, buildClipPlane, buildCutFaceCap, defaultClipState, type ClipState } from "@/lib/clipping";
 import { useProject } from "@/lib/project-store";
 import type { BankTile } from "@/lib/sections/tileLibrary";
 import { cubeFaces, facesForShape, hexSidePose, HEX_APOTHEM, prismFaces, type VolumeAssignments, type VolumeFaceName, type VolumeShape } from "@/lib/sections/volumeField";
-import { buildVolumeField } from "@/lib/sections/volumeField";
+import { buildVolumeField, type VolumeField } from "@/lib/sections/volumeField";
+import { cleanupVolumeField, defaultCleanup, isCleanupActive, type CleanupSettings } from "@/lib/sections/cleanup";
 import { buildTileScene } from "@/lib/sections/mesh";
 import { buildSectionTile, type BuildSectionTileInput } from "@/lib/sections/buildTile";
 import { buildAnalysisZip } from "@/lib/sections/exportAnalysis";
@@ -45,7 +48,7 @@ function defaultFaceOverlay(index: number): FaceOverlaySettings {
 // Same material convention as ThreeViewport's applyMaterial: always
 // double-sided (a lofted/blended field can fold into thin branching sheets,
 // not just chunky solids), transparent+dim when ghosted.
-function applyPreviewMaterial(mesh: THREE.Object3D | null | undefined, color: string, visible: boolean, ghosted: boolean) {
+function applyPreviewMaterial(mesh: THREE.Object3D | null | undefined, color: string, visible: boolean, ghosted: boolean, kind: "foam" | "void") {
   if (!(mesh instanceof THREE.Mesh)) return;
   mesh.visible = visible;
   mesh.material = new THREE.MeshStandardMaterial({
@@ -56,15 +59,18 @@ function applyPreviewMaterial(mesh: THREE.Object3D | null | undefined, color: st
     opacity: ghosted ? 0.22 : 1,
     depthWrite: !ghosted,
     side: THREE.DoubleSide,
+    // Foam and void share their interface surface -- keep the void a hair behind.
+    polygonOffset: true,
+    polygonOffsetFactor: kind === "void" ? 2 : 1,
+    polygonOffsetUnits: kind === "void" ? 2 : 1,
   });
 }
 
 /** A face's center position + outward normal + size, in the preview
  * mesh's own final (baked) local space -- i.e. plain [0, tileFt] world
  * coordinates, the same space buildTileScene's own vertices land in (see
- * mesh.ts's marchSignedField -- the scale compensation already puts real
- * geometry at exactly this range, so overlay markers need no extra
- * transform of their own). Used only for the "Faces" display mode's
+ * mesh.ts -- the tile's cube / hex prism spans exactly this range, so
+ * overlay markers need no extra transform of their own). Used only for the "Faces" display mode's
  * translucent per-face markers -- never the solid mesh itself. */
 function faceOverlayTransform(
   face: VolumeFaceName,
@@ -147,8 +153,8 @@ function PreviewScene({
 }) {
   useEffect(() => {
     const ghosted = displayMode === "ghosted";
-    applyPreviewMaterial(group.getObjectByName("foam"), colors.foam, visibility.foam, ghosted);
-    applyPreviewMaterial(group.getObjectByName("void"), colors.void, visibility.void, ghosted);
+    applyPreviewMaterial(group.getObjectByName("foam"), colors.foam, visibility.foam, ghosted, "foam");
+    applyPreviewMaterial(group.getObjectByName("void"), colors.void, visibility.void, ghosted, "void");
   }, [group, displayMode, visibility, colors]);
 
   useEffect(() => {
@@ -196,31 +202,51 @@ function PreviewScene({
   return <primitive object={group} />;
 }
 
-export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; onSaved: (tile: ParsedTile) => void }) {
+const TILE_FT: [number, number, number] = [20, 20, 20];
+
+/** The raw lofted field for the current face assignments -- cleanup and
+ * meshing happen downstream of it so the cleanup sliders can re-run without
+ * re-lofting. `id` changes only on a fresh Generate, which is what re-fits
+ * the preview camera (a slider drag must not). */
+interface RawPreview {
+  id: number;
+  volume: VolumeField;
+  shape: VolumeShape;
+}
+
+export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: BankTile[]; allTiles: BankTile[]; onSaved: (tile: ParsedTile) => void }) {
   const { addTile, tiles } = useProject();
   const [shape, setShape] = useState<VolumeShape>("cube");
   const [assignments, setAssignments] = useState<Partial<Record<VolumeFaceName, string>>>({});
   const [seed, setSeed] = useState(1);
   const [fitTolerance, setFitTolerance] = useState(50);
+  const [cleanup, setCleanup] = useState<CleanupSettings>(defaultCleanup);
   const [name, setName] = useState("");
   const [category, setCategory] = useState<(typeof CATEGORY_OPTIONS)[number] | "">("");
   const [typology, setTypology] = useState("");
-  const [previewGroup, setPreviewGroup] = useState<THREE.Group | null>(null);
+  const [raw, setRaw] = useState<RawPreview | null>(null);
   const [faceFit, setFaceFit] = useState<number | null>(null);
   const [assignedFaceCount, setAssignedFaceCount] = useState<number | null>(null);
   const [displayMode, setDisplayMode] = useState<DisplayMode | "faces">("rendered");
-  const [visibility, setVisibility] = useState<MeshVisibility>({ foam: true, void: true });
+  const [visibility, setVisibility] = useState<MeshVisibility>({ foam: true, void: false });
   const [colors, setColors] = useState<MeshColors>({ foam: "#e8a6c8", void: "#1c1c1f" });
   const [clip, setClip] = useState<ClipState>(defaultClipState());
   const [faceOverlays, setFaceOverlays] = useState<Partial<Record<VolumeFaceName, FaceOverlaySettings>>>({});
+  const [openFace, setOpenFace] = useState<string | null>(null);
+  const [pool, setPool] = useState<"checked" | "all">("checked");
+  const rawCounter = useRef(0);
   const [busy, setBusy] = useState(false);
   const [exportingAnalysis, setExportingAnalysis] = useState(false);
 
   const faceNames = facesForShape(shape);
-  const tileByName = useMemo(() => new Map(bankTiles.map((t) => [t.name, t])), [bankTiles]);
+  const tileByName = useMemo(() => new Map(allTiles.map((t) => [t.name, t])), [allTiles]);
   const savedSectionTiles = useMemo(() => tiles.filter((t) => t.sectionRecipe), [tiles]);
+  // With nothing checked in the bank the builder falls back to the whole
+  // bank, so it's usable on its own (e.g. just to revisit saved objects).
+  const effectivePool = bankTiles.length ? pool : "all";
+  const poolTiles = effectivePool === "all" ? allTiles : bankTiles;
 
-  const buildAssignments = (): VolumeAssignments => {
+  const volAssignments = useMemo((): VolumeAssignments => {
     const out: VolumeAssignments = {};
     for (const face of faceNames) {
       const tileName = assignments[face];
@@ -228,22 +254,38 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
       if (tile) (out as Record<string, typeof tile.proposal>)[face] = tile.proposal;
     }
     return out;
-  };
+  }, [assignments, faceNames, tileByName]);
 
-  const generatePreview = () => {
-    const volAssignments = buildAssignments();
-    if (!Object.keys(volAssignments).length) {
-      toast.error("Assign at least one tile to a face first.");
-      return;
-    }
-    const volume = buildVolumeField(volAssignments, shape, seed, fitTolerance, 46);
+  // Cleanup runs on the already-lofted field, deferred so dragging a slider
+  // stays smooth while the (heavier) clean + remesh catches up behind it.
+  const deferredCleanup = useDeferredValue(cleanup);
+  const built = useMemo(() => {
+    if (!raw) return null;
+    const { volume, stats } = cleanupVolumeField(raw.volume, deferredCleanup, TILE_FT[0]);
+    return { group: buildTileScene(volume.field, volume.resolution, TILE_FT, raw.shape), stats };
+  }, [raw, deferredCleanup]);
+  const previewGroup = built?.group ?? null;
+  const cleanupStats = built && isCleanupActive(deferredCleanup) ? built.stats : null;
+
+  useEffect(() => {
+    if (!previewGroup) return;
+    return () => {
+      previewGroup.traverse((o) => {
+        if (o instanceof THREE.Mesh) o.geometry.dispose();
+      });
+    };
+  }, [previewGroup]);
+
+  const generateFrom = (shapeNow: VolumeShape, traces: VolumeAssignments, seedNow: number, fitNow: number) => {
+    const volume = buildVolumeField(traces, shapeNow, seedNow, fitNow, 46);
     setFaceFit(volume.faceFit);
-    setAssignedFaceCount(Object.keys(volAssignments).length);
-    setPreviewGroup(buildTileScene(volume.field, volume.resolution));
+    setAssignedFaceCount(Object.keys(traces).length);
+    rawCounter.current += 1;
+    setRaw({ id: rawCounter.current, volume, shape: shapeNow });
     setFaceOverlays((prev) => {
       const next = { ...prev };
       let i = 0;
-      for (const face of Object.keys(volAssignments) as VolumeFaceName[]) {
+      for (const face of Object.keys(traces) as VolumeFaceName[]) {
         if (!next[face]) next[face] = defaultFaceOverlay(i);
         i++;
       }
@@ -251,16 +293,24 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
     });
   };
 
+  const generatePreview = () => {
+    if (!Object.keys(volAssignments).length) {
+      toast.error("Assign at least one tile to a face first.");
+      return;
+    }
+    generateFrom(shape, volAssignments, seed, fitTolerance);
+  };
+
   const autoFillEmptyFaces = () => {
-    if (!bankTiles.length) {
-      toast.error("No bank tiles checked to pick from.");
+    if (!poolTiles.length) {
+      toast.error("No tiles to pick from.");
       return;
     }
     setAssignments((prev) => {
       const next = { ...prev };
       for (const face of faceNames) {
         if (next[face]) continue;
-        next[face] = bankTiles[Math.floor(Math.random() * bankTiles.length)].name;
+        next[face] = poolTiles[Math.floor(Math.random() * poolTiles.length)].name;
       }
       return next;
     });
@@ -269,15 +319,44 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
   const loadRecipe = (tile: ParsedTile) => {
     const recipe = tile.sectionRecipe;
     if (!recipe) return;
+    const traces: VolumeAssignments = {};
+    let missing = 0;
+    for (const [face, tileName] of Object.entries(recipe.assignments)) {
+      const source = tileByName.get(tileName);
+      if (source) (traces as Record<string, typeof source.proposal>)[face] = source.proposal;
+      else missing++;
+    }
     setShape(recipe.shape);
     setAssignments(recipe.assignments);
     setSeed(recipe.seed);
     setFitTolerance(recipe.fitTolerance);
-    toast.success(`Loaded "${tile.name}" back into the builder -- adjust and Generate preview to continue.`);
+    setCleanup(recipe.cleanup ?? defaultCleanup);
+    setName(tile.name);
+    setClip(defaultClipState());
+    setOpenFace(null);
+    setFaceOverlays({});
+    if (!Object.keys(traces).length) {
+      toast.error(`Couldn't find any of "${tile.name}"'s source tiles in the bank.`);
+      return;
+    }
+    // Lofted straight away from the recipe's own values (not the state the
+    // setters above haven't flushed yet), so opening a saved object shows it.
+    generateFrom(recipe.shape, traces, recipe.seed, recipe.fitTolerance);
+    toast.success(missing ? `Loaded "${tile.name}" (${missing} source tile${missing === 1 ? "" : "s"} no longer in the bank).` : `Loaded "${tile.name}".`);
   };
 
+  const buildInput = (): BuildSectionTileInput => ({
+    name: name.trim(),
+    shape,
+    assignments: volAssignments,
+    assignmentNames: assignments,
+    seed,
+    fitTolerance,
+    cleanup,
+    guessed: category ? { category, typology: typology.trim() || undefined } : {},
+  });
+
   const saveAsTile = async () => {
-    const volAssignments = buildAssignments();
     if (!Object.keys(volAssignments).length) {
       toast.error("Assign at least one tile to a face first.");
       return;
@@ -288,16 +367,7 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
     }
     setBusy(true);
     try {
-      const input: BuildSectionTileInput = {
-        name: name.trim(),
-        shape,
-        assignments: volAssignments,
-        assignmentNames: assignments,
-        seed,
-        fitTolerance,
-        guessed: category ? { category, typology: typology.trim() || undefined } : {},
-      };
-      const tile = await buildSectionTile(input);
+      const tile = await buildSectionTile(buildInput());
       addTile(tile);
       onSaved(tile);
       toast.success(`Saved "${tile.name}" to the tile bank`);
@@ -317,7 +387,6 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
   };
 
   const exportAnalysisBundle = async () => {
-    const volAssignments = buildAssignments();
     if (!Object.keys(volAssignments).length) {
       toast.error("Assign at least one tile to a face first.");
       return;
@@ -328,15 +397,7 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
     }
     setExportingAnalysis(true);
     try {
-      const tile = await buildSectionTile({
-        name: name.trim(),
-        shape,
-        assignments: volAssignments,
-        assignmentNames: assignments,
-        seed,
-        fitTolerance,
-        guessed: category ? { category, typology: typology.trim() || undefined } : {},
-      });
+      const tile = await buildSectionTile(buildInput());
       const { blob, fileCount } = await buildAnalysisZip(tile);
       downloadBlob(`${tile.name}_analysis.zip`, blob);
       toast.success(`Exported ${fileCount} files to ${tile.name}_analysis.zip`);
@@ -348,14 +409,26 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
   };
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)_280px] grid-rows-[minmax(0,1fr)] gap-4">
-      <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
+    <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:grid-rows-[minmax(0,1fr)]">
+      <div className="order-2 flex min-w-0 flex-col gap-4 lg:order-1 lg:min-h-0 lg:overflow-y-auto">
         <GlowPanel glow="magenta">
           <div className="space-y-3 p-4">
             <div className="mb-1 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Shape</div>
             <div className="flex gap-1.5">
               {(["cube", "hex-prism"] as const).map((s) => (
-                <Button key={s} size="sm" variant={shape === s ? "default" : "outline"} className="flex-1" onClick={() => { setShape(s); setAssignments({}); setPreviewGroup(null); setFaceOverlays({}); }}>
+                <Button
+                  key={s}
+                  size="sm"
+                  variant={shape === s ? "default" : "outline"}
+                  className="flex-1"
+                  onClick={() => {
+                    setShape(s);
+                    setAssignments({});
+                    setRaw(null);
+                    setFaceOverlays({});
+                    setOpenFace(null);
+                  }}
+                >
                   {s === "cube" ? "Cube" : "Hex prism"}
                 </Button>
               ))}
@@ -364,31 +437,48 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
         </GlowPanel>
         <GlowPanel glow="orange">
           <div className="space-y-3 p-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Faces</div>
               <Button size="sm" variant="outline" onClick={autoFillEmptyFaces}>
                 Auto-fill empty
               </Button>
             </div>
-            {faceNames.map((face) => (
-              <label key={face} className="flex items-center justify-between gap-2 text-xs">
-                <span className="w-16 shrink-0 font-mono uppercase text-muted-foreground">{face}</span>
-                <select
-                  className="h-8 flex-1 rounded-md border border-input bg-transparent px-2 text-xs"
-                  value={assignments[face] ?? ""}
-                  onChange={(e) => setAssignments((prev) => ({ ...prev, [face]: e.target.value || undefined }))}
-                >
-                  <option value="">—</option>
-                  {bankTiles.map((t) => (
-                    <option key={t.name} value={t.name}>
-                      {t.displayName}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
+            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <span>Pick from</span>
+              <div className="inline-flex rounded-full border-hair p-0.5">
+                {(["checked", "all"] as const).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    disabled={p === "checked" && !bankTiles.length}
+                    onClick={() => setPool(p)}
+                    className={`rounded-full px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-label transition-colors disabled:opacity-40 ${
+                      effectivePool === p ? "bg-gradient-to-r from-magenta to-orange text-white" : "hover:text-foreground"
+                    }`}
+                  >
+                    {p === "checked" ? `Checked (${bankTiles.length})` : `Whole bank (${allTiles.length})`}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              {faceNames.map((face) => (
+                <FaceTilePicker
+                  key={face}
+                  face={face}
+                  assigned={assignments[face] ? tileByName.get(assignments[face]!) : undefined}
+                  options={poolTiles}
+                  open={openFace === face}
+                  onToggle={() => setOpenFace((prev) => (prev === face ? null : face))}
+                  onChange={(tileName) => {
+                    setAssignments((prev) => ({ ...prev, [face]: tileName }));
+                    setOpenFace(null);
+                  }}
+                />
+              ))}
+            </div>
             <p className="text-[11px] text-muted-foreground">
-              {shape === "cube" ? `${cubeFaces.length} faces` : `${prismFaces.length} faces (6 sides + top/bottom)`} · pick from tiles checked in the bank, or any tile below.
+              {shape === "cube" ? `${cubeFaces.length} faces` : `${prismFaces.length} faces (6 sides + top/bottom)`} · tap a face to pick its tile.
             </p>
           </div>
         </GlowPanel>
@@ -422,6 +512,30 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
             )}
           </div>
         </GlowPanel>
+        <GlowPanel glow="magenta">
+          <div className="space-y-3 p-4">
+            <div className="flex items-center justify-between">
+              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Cleanup</div>
+              <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" disabled={!isCleanupActive(cleanup)} onClick={() => setCleanup(defaultCleanup)}>
+                Reset
+              </Button>
+            </div>
+            <NumberSlider label="Delete floating pieces under" value={cleanup.minPieceFt3} min={0} max={800} step={1} decimals={0} suffix=" ft³" exact onChange={(minPieceFt3) => setCleanup((c) => ({ ...c, minPieceFt3 }))} />
+            <NumberSlider label="Shave branches thinner than" value={cleanup.minBranchFt} min={0} max={4} step={0.05} decimals={2} suffix=" ft" exact onChange={(minBranchFt) => setCleanup((c) => ({ ...c, minBranchFt }))} />
+            <NumberSlider label="Fill sealed void pockets under" value={cleanup.minPocketFt3} min={0} max={800} step={1} decimals={0} suffix=" ft³" exact onChange={(minPocketFt3) => setCleanup((c) => ({ ...c, minPocketFt3 }))} />
+            <p className="text-[11px] text-muted-foreground">
+              {cleanupStats
+                ? [
+                    cleanupStats.pieces ? `removed ${cleanupStats.pieces} floating piece${cleanupStats.pieces === 1 ? "" : "s"} (${cleanupStats.piecesFt3.toFixed(1)} ft³)` : null,
+                    cleanupStats.branchFt3 > 0 ? `shaved ${cleanupStats.branchFt3.toFixed(1)} ft³ of thin branches` : null,
+                    cleanupStats.pockets ? `filled ${cleanupStats.pockets} void pocket${cleanupStats.pockets === 1 ? "" : "s"} (${cleanupStats.pocketsFt3.toFixed(1)} ft³)` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "nothing met those thresholds yet"
+                : "Off at 0. Anything touching a tile face is never treated as floating -- it may carry on into the next tile."}
+            </p>
+          </div>
+        </GlowPanel>
         {savedSectionTiles.length > 0 && (
           <GlowPanel glow="orange">
             <div className="space-y-2 p-4">
@@ -431,11 +545,14 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
                   <button
                     key={t.id}
                     onClick={() => loadRecipe(t)}
-                    className="block w-full rounded-md border border-input px-2 py-1.5 text-left text-xs transition-colors hover:border-magenta/50"
+                    className="flex w-full items-center gap-2 rounded-md border border-input px-2 py-1.5 text-left text-xs transition-colors hover:border-magenta/50"
                   >
-                    <span className="block truncate font-medium">{t.name}</span>
-                    <span className="block text-[10px] text-muted-foreground">
-                      {t.sectionRecipe?.shape} · seed {t.sectionRecipe?.seed}
+                    <TileThumbnail glbUrl={t.glbUrl} size={36} />
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium">{t.name}</span>
+                      <span className="block text-[10px] text-muted-foreground">
+                        {t.sectionRecipe?.shape} · seed {t.sectionRecipe?.seed}
+                      </span>
                     </span>
                   </button>
                 ))}
@@ -445,46 +562,48 @@ export function CubeHexBuilder({ bankTiles, onSaved }: { bankTiles: BankTile[]; 
         )}
       </div>
 
-      <div className="min-h-0 min-w-0">
-        <SquareFrame className="relative">
-          {previewGroup ? (
-            <div className="relative h-full w-full overflow-hidden rounded-lg bg-black/40">
-              <Canvas
-                dpr={[1, 2]}
-                camera={{ fov: 45, position: [15, 12, 15] }}
-                gl={{ antialias: true }}
-                onCreated={(state) => {
-                  state.gl.localClippingEnabled = true;
-                }}
-              >
-                <color attach="background" args={["#0a0a0b"]} />
-                <ambientLight intensity={0.6} />
-                <directionalLight position={[10, 16, 8]} intensity={1.1} />
-                <directionalLight position={[-8, -6, -8]} intensity={0.25} />
-                <Bounds key={previewGroup.uuid} fit clip observe margin={1.3}>
-                  <PreviewScene
-                    group={previewGroup}
-                    displayMode={displayMode}
-                    visibility={visibility}
-                    colors={colors}
-                    clip={clip}
-                    assignments={buildAssignments()}
-                    faceOverlays={faceOverlays}
-                    shape={shape}
-                  />
-                </Bounds>
-                <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
-              </Canvas>
-            </div>
-          ) : (
-            <div className="glass-panel flex h-full items-center justify-center rounded-lg p-8 text-center text-sm text-muted-foreground">
-              Assign tiles to faces, then Generate preview.
-            </div>
-          )}
-        </SquareFrame>
+      <div className="order-1 min-w-0 lg:order-2 lg:min-h-0">
+        <div className="h-[min(100vw,70vh)] lg:h-full">
+          <SquareFrame className="relative">
+            {previewGroup && raw ? (
+              <div className="relative h-full w-full overflow-hidden rounded-lg bg-black/40">
+                <Canvas
+                  dpr={[1, 2]}
+                  camera={{ fov: 45, position: [15, 12, 15] }}
+                  gl={{ antialias: true, stencil: true }}
+                  onCreated={(state) => {
+                    state.gl.localClippingEnabled = true;
+                  }}
+                >
+                  <color attach="background" args={["#0a0a0b"]} />
+                  <ambientLight intensity={0.6} />
+                  <directionalLight position={[10, 16, 8]} intensity={1.1} />
+                  <directionalLight position={[-8, -6, -8]} intensity={0.25} />
+                  <Bounds key={raw.id} fit clip observe margin={1.3}>
+                    <PreviewScene
+                      group={previewGroup}
+                      displayMode={displayMode}
+                      visibility={visibility}
+                      colors={colors}
+                      clip={clip}
+                      assignments={volAssignments}
+                      faceOverlays={faceOverlays}
+                      shape={raw.shape}
+                    />
+                  </Bounds>
+                  <OrbitControls makeDefault enableDamping dampingFactor={0.08} />
+                </Canvas>
+              </div>
+            ) : (
+              <div className="glass-panel flex h-full items-center justify-center rounded-lg p-8 text-center text-sm text-muted-foreground">
+                Assign tiles to faces, then Generate preview{savedSectionTiles.length ? " -- or open one of your saved objects." : "."}
+              </div>
+            )}
+          </SquareFrame>
+        </div>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
+      <div className="order-3 flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto">
         <GlowPanel glow="orange">
           <div className="p-4">
             <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>

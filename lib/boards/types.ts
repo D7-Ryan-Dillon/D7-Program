@@ -20,11 +20,15 @@ export interface CustomCamera {
   target: [number, number, number];
 }
 
+/** `weightPt` is a print line weight in points (1pt = 1/72in) at the board's
+ * own size -- so 0.25pt is a hairline on the printed board whatever DPI it
+ * is exported at, and the on-screen preview shows it at its true relative
+ * thickness. */
 export interface OutlineSettings {
   enabled: boolean;
   color: string;
   opacity: number;
-  weightPx: number;
+  weightPt: number;
 }
 
 export interface FacetLineSettings {
@@ -45,8 +49,7 @@ export interface BoardSlotOverrides {
   clip?: ClipState;
   foamOutline?: OutlineSettings;
   voidOutline?: OutlineSettings;
-  foamFacetLines?: FacetLineSettings;
-  voidFacetLines?: FacetLineSettings;
+  facetLines?: FacetLineSettings;
   /** Only set when the popup was left in free Perspective rotation rather
    * than a locked axo preset -- takes priority over `view` when present. */
   customCamera?: CustomCamera;
@@ -92,14 +95,15 @@ export interface BoardConfig {
   voidColor: string;
   foamOpacity: number;
   voidOpacity: number;
-  /** Board-wide master silhouette-outline and facet-line settings for
-   * every tile's own render (not the module's print frame -- see
-   * `outlineWidthPt` below for that) -- a per-slot popup override can
-   * shadow these for one specific tile. Default off everywhere. */
+  /** Board-wide master line settings for every tile's own render (not the
+   * module's print frame -- see `outlineWidthPt` below for that) -- a
+   * per-slot popup override can shadow these for one specific tile.
+   * `foamOutline` traces the tile's outer shape (cube / hex prism edges),
+   * `voidOutline` the void's silhouette, `facetLines` the foam's facet
+   * edges. Default off everywhere. */
   foamOutline: OutlineSettings;
   voidOutline: OutlineSettings;
-  foamFacetLines: FacetLineSettings;
-  voidFacetLines: FacetLineSettings;
+  facetLines: FacetLineSettings;
   /** Frame stroke weight, in points (1pt = 1/72in, same convention as
    * print/vector tools -- independent of the board's own DPI). */
   outlineWidthPt: number;
@@ -150,10 +154,9 @@ export function defaultBoardConfig(): BoardConfig {
     voidColor: "#c43383",
     foamOpacity: 0.1,
     voidOpacity: 1,
-    foamOutline: { enabled: false, color: "#ffffff", opacity: 1, weightPx: 2 },
-    voidOutline: { enabled: false, color: "#ffffff", opacity: 1, weightPx: 2 },
-    foamFacetLines: { enabled: false, color: "#ffffff", opacity: 0.4 },
-    voidFacetLines: { enabled: false, color: "#ffffff", opacity: 0.4 },
+    foamOutline: { enabled: false, color: "#ffffff", opacity: 1, weightPt: 0.75 },
+    voidOutline: { enabled: false, color: "#ffffff", opacity: 1, weightPt: 0.75 },
+    facetLines: { enabled: false, color: "#ffffff", opacity: 0.4 },
     outlineWidthPt: 1.5,
     gapXIn: 0.5,
     gapYIn: 0.5,

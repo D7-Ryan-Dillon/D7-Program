@@ -14,13 +14,13 @@ const TABS: { key: WorkspaceTabKey; label: string }[] = [
 
 export function TabNav({ active, onChange }: { active: WorkspaceTabKey; onChange: (key: WorkspaceTabKey) => void }) {
   return (
-    <div className="inline-flex gap-1 rounded-full border-hair bg-surface/60 p-1">
+    <div className="inline-flex max-w-full gap-1 overflow-x-auto rounded-full border-hair bg-surface/60 p-1">
       {TABS.map((tab) => (
         <button
           key={tab.key}
           onClick={() => onChange(tab.key)}
           className={cn(
-            "rounded-full px-4 py-1.5 font-mono text-[11px] tracking-label uppercase transition-colors",
+            "shrink-0 rounded-full px-3 py-1.5 font-mono text-[11px] tracking-label uppercase transition-colors sm:px-4",
             active === tab.key
               ? "bg-gradient-to-r from-magenta to-orange text-white shadow-[0_0_16px_-4px_rgba(196,51,131,0.6)]"
               : "text-muted-foreground hover:text-foreground",

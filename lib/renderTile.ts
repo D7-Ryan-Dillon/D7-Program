@@ -7,8 +7,13 @@
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
+import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { AXO_VIEWS, POPUP_VIEW_PRESETS, type AxoViewKey } from "@/lib/faceViews";
 import { applyClipToMesh, buildClipOutline, buildClipPlane, buildCutFaceCap, type ClipState } from "@/lib/clipping";
+import { HEX_APOTHEM } from "@/lib/sections/volumeField";
 import type { CustomCamera, FacetLineSettings, OutlineSettings } from "@/lib/boards/types";
 
 const loader = new GLTFLoader();
@@ -46,47 +51,196 @@ export interface TileRenderOptions {
   clip?: ClipState;
   foamOutline?: OutlineSettings;
   voidOutline?: OutlineSettings;
-  foamFacetLines?: FacetLineSettings;
-  voidFacetLines?: FacetLineSettings;
+  facetLines?: FacetLineSettings;
+  /** Render pixels per printed point (1pt = 1/72in) -- turns the outline
+   * weights (stored in points) into real pixel widths at this render's
+   * size. Boards passes `dpi / 72`; only matters when an outline is on. */
+  pxPerPt?: number;
+  /** Identifying-thumbnail mode: on a tile built in the Sections cube/hex
+   * builder, whose void is a solid cube shell that would hide the foam
+   * entirely, the void is left out. */
+  thumbnail?: boolean;
 }
 
-/** The silhouette-outline technique (Boards tab only, a separate feature
- * from the interior clipping-plane system's own cut-boundary outline): a
- * slightly scale-inflated, back-face-only duplicate of the mesh, drawn
- * behind the real front-facing surface -- the classic cheap "toon outline"
- * trick, chosen because it traces only each mesh's outer silhouette from
- * the current view, not every internal facet edge (that's the separate
- * facet-lines feature below). `weightPx` is approximate -- it's converted
- * to a scale-inflation fraction relative to the mesh's own bounding sphere,
- * not a literal screen-space pixel width (this is a 3D technique, not a
- * post-process line pass). */
-export function buildSilhouetteOutline(mesh: THREE.Mesh, settings: OutlineSettings, boundingRadius: number): THREE.Mesh {
-  // A floor of ~1% plus up to ~3% more from weightPx -- too thin (anything
-  // near 0.1%) z-fights against the real mesh's own surface instead of
-  // reading as a clean rim, since both surfaces sit almost exactly on top
-  // of each other at normal viewing distances.
-  void boundingRadius;
-  const inflate = 1.01 + (settings.weightPx / 10) * 0.03;
+// ---------------------------------------------------------------------------
+// Line decorations (Boards tab): outer-shape outline, void silhouette
+// outline, facet lines. Shared by the headless renderer below and the
+// per-tile popup editor's live R3F canvas so both draw identically.
+// ---------------------------------------------------------------------------
+
+/** What a decoration needs to know about the render it lands in. */
+export interface LineContext {
+  /** Drawing-buffer pixels per printed point. */
+  pxPerPt: number;
+  /** Drawing-buffer size -- fat lines are laid out in screen space. */
+  resolution: THREE.Vector2;
+  /** World units covered by one drawing-buffer pixel at the model's depth. */
+  worldPerPx: number;
+}
+
+export type TileOuterShape = "cube" | "hex-prism";
+
+/** Whether a tile's outer shape is a box or a hex prism: stamped into
+ * `userData.tileShape` by lib/sections/mesh.ts (survives the GLB round trip
+ * as a node extra), with a bounding-box proportion check as the fallback
+ * for tiles from before that stamp (a hex prism is 0.866 as wide as it is
+ * deep -- see volumeField.ts's HEX_APOTHEM). */
+function readShapeStamp(root: THREE.Object3D): TileOuterShape | undefined {
+  let stamped: unknown;
+  root.traverse((o) => {
+    if (stamped === undefined && o.userData && typeof o.userData.tileShape === "string") stamped = o.userData.tileShape;
+  });
+  return stamped === "hex-prism" || stamped === "cube" ? stamped : undefined;
+}
+
+export function detectTileShape(root: THREE.Object3D, box: THREE.Box3): TileOuterShape {
+  const stamped = readShapeStamp(root);
+  if (stamped) return stamped;
+  const size = box.getSize(new THREE.Vector3());
+  if (size.z > 0 && Math.abs(size.x / size.z - HEX_APOTHEM) < 0.03) return "hex-prism";
+  return "cube";
+}
+
+function outerShapeSegments(box: THREE.Box3, shape: TileOuterShape): number[] {
+  const { min, max } = box;
+  const seg: number[] = [];
+  const push = (a: number[], b: number[]) => seg.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+  if (shape === "hex-prism") {
+    const cx = (min.x + max.x) / 2;
+    const cz = (min.z + max.z) / 2;
+    const hx = (max.x - min.x) / 2;
+    const hz = (max.z - min.z) / 2;
+    // Corners at 30deg + k*60deg, flats facing +-x (volumeField.ts): the
+    // bounding box's x half-extent is the corner x at 30deg, so scale by it.
+    const corners = Array.from({ length: 6 }, (_, k) => {
+      const a = Math.PI / 6 + (k * Math.PI) / 3;
+      return [cx + (hx * Math.cos(a)) / Math.cos(Math.PI / 6), cz + hz * Math.sin(a)] as const;
+    });
+    for (let k = 0; k < 6; k++) {
+      const [x0, z0] = corners[k];
+      const [x1, z1] = corners[(k + 1) % 6];
+      push([x0, min.y, z0], [x1, min.y, z1]);
+      push([x0, max.y, z0], [x1, max.y, z1]);
+      push([x0, min.y, z0], [x0, max.y, z0]);
+    }
+    return seg;
+  }
+  const xs = [min.x, max.x];
+  const ys = [min.y, max.y];
+  const zs = [min.z, max.z];
+  for (const y of ys) for (const z of zs) push([min.x, y, z], [max.x, y, z]);
+  for (const x of xs) for (const z of zs) push([x, min.y, z], [x, max.y, z]);
+  for (const x of xs) for (const y of ys) push([x, y, min.z], [x, y, max.z]);
+  return seg;
+}
+
+/** The foam outline: a screen-space-width line along the tile's outer shape
+ * -- the cube's 12 edges, or the hex prism's 18 -- rather than tracing the
+ * foam mesh itself. Real fat lines (LineSegments2), because plain WebGL
+ * lines are stuck at 1px no matter what width you ask for. */
+export function buildOuterShapeOutline(root: THREE.Object3D, box: THREE.Box3, settings: OutlineSettings, ctx: LineContext): LineSegments2 {
+  const geometry = new LineSegmentsGeometry();
+  geometry.setPositions(outerShapeSegments(box, detectTileShape(root, box)));
+  const material = new LineMaterial({
+    color: new THREE.Color(settings.color),
+    linewidth: Math.max(settings.weightPt * ctx.pxPerPt, 0.01),
+    worldUnits: false,
+    transparent: settings.opacity < 1,
+    opacity: settings.opacity,
+    resolution: ctx.resolution.clone(),
+  });
+  const lines = new LineSegments2(geometry, material);
+  lines.name = "outer-shape-outline";
+  return lines;
+}
+
+// A welded, smooth-normal copy of a mesh's geometry, used only to push the
+// silhouette hull outward. Marching-cubes output is non-indexed (every
+// triangle owns its vertices), so this welds first -- otherwise each corner
+// would be pushed along its own face's normal and the hull would crack open.
+const smoothHullBase = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>();
+function hullBase(geometry: THREE.BufferGeometry): THREE.BufferGeometry {
+  let base = smoothHullBase.get(geometry);
+  if (!base) {
+    const stripped = geometry.clone();
+    for (const name of Object.keys(stripped.attributes)) if (name !== "position") stripped.deleteAttribute(name);
+    base = mergeVertices(stripped, 1e-3);
+    base.computeVertexNormals();
+    smoothHullBase.set(geometry, base);
+  }
+  return base;
+}
+
+/** The void outline: a back-face-only duplicate of the void mesh, pushed out
+ * along its smoothed normals by exactly the requested line weight (in
+ * screen pixels at this render's scale), drawn behind the real surface so
+ * only a rim of it peeks out around the silhouette. Pushing along normals
+ * (rather than scaling the whole mesh about the origin, which is what an
+ * earlier version did) gives every part of the silhouette the same
+ * thickness. */
+export function buildSilhouetteOutline(mesh: THREE.Mesh, settings: OutlineSettings, ctx: LineContext): THREE.Mesh {
+  const base = hullBase(mesh.geometry);
+  const distance = Math.max(settings.weightPt * ctx.pxPerPt, 0) * ctx.worldPerPx;
+  const src = base.attributes.position.array as Float32Array;
+  const normals = base.attributes.normal.array as Float32Array;
+  const pushed = new Float32Array(src.length);
+  for (let i = 0; i < src.length; i++) pushed[i] = src[i] + normals[i] * distance;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(pushed, 3));
+  geometry.setIndex(base.index);
   const outline = new THREE.Mesh(
-    mesh.geometry,
-    new THREE.MeshBasicMaterial({ color: settings.color, opacity: settings.opacity, transparent: settings.opacity < 1, side: THREE.BackSide }),
+    geometry,
+    new THREE.MeshBasicMaterial({
+      color: settings.color,
+      opacity: settings.opacity,
+      transparent: settings.opacity < 1,
+      side: THREE.BackSide,
+      // Behind the real surface wherever the two nearly coincide -- only the
+      // rim that actually clears the silhouette should show.
+      polygonOffset: true,
+      polygonOffsetFactor: 4,
+      polygonOffsetUnits: 4,
+    }),
   );
+  outline.name = "void-silhouette-outline";
   outline.position.copy(mesh.position);
   outline.rotation.copy(mesh.rotation);
-  outline.scale.copy(mesh.scale).multiplyScalar(inflate);
+  outline.scale.copy(mesh.scale);
   return outline;
 }
 
 export function buildFacetLines(mesh: THREE.Mesh, settings: FacetLineSettings): THREE.LineSegments {
   const edges = new THREE.EdgesGeometry(mesh.geometry, 1);
   const lines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: settings.color, opacity: settings.opacity, transparent: settings.opacity < 1 }));
+  lines.name = "foam-facet-lines";
   lines.position.copy(mesh.position);
   lines.rotation.copy(mesh.rotation);
   lines.scale.copy(mesh.scale);
   return lines;
 }
 
-function applyMaterial(mesh: THREE.Object3D | undefined, color: string, opacity: number, visible: boolean) {
+export interface LineDecorSettings {
+  foamOutline?: OutlineSettings;
+  voidOutline?: OutlineSettings;
+  facetLines?: FacetLineSettings;
+}
+
+/** Builds whichever of the three decorations are switched on for a tile
+ * scene and returns them (not yet added anywhere) so the caller can parent
+ * them and remove them again later. */
+export function buildLineDecorations(root: THREE.Object3D, foam: THREE.Mesh | undefined, voidMesh: THREE.Mesh | undefined, box: THREE.Box3, settings: LineDecorSettings, ctx: LineContext): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  if (settings.foamOutline?.enabled) out.push(buildOuterShapeOutline(root, box, settings.foamOutline, ctx));
+  if (settings.voidOutline?.enabled && voidMesh) out.push(buildSilhouetteOutline(voidMesh, settings.voidOutline, ctx));
+  if (settings.facetLines?.enabled && foam) out.push(buildFacetLines(foam, settings.facetLines));
+  return out;
+}
+
+/** Foam and void share their whole interface surface (the void is the cube
+ * minus the foam), so drawing both lands two coincident surfaces on top of
+ * each other -- a classic z-fight. These offsets push the void a hair behind
+ * the foam, and both a hair behind any line drawn on them. */
+function applyMaterial(mesh: THREE.Object3D | undefined, color: string, opacity: number, visible: boolean, kind: "foam" | "void") {
   if (!(mesh instanceof THREE.Mesh)) return;
   mesh.visible = visible;
   mesh.material = new THREE.MeshStandardMaterial({
@@ -97,6 +251,9 @@ function applyMaterial(mesh: THREE.Object3D | undefined, color: string, opacity:
     opacity,
     depthWrite: opacity >= 1,
     side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: kind === "void" ? 2 : 1,
+    polygonOffsetUnits: kind === "void" ? 2 : 1,
   });
 }
 
@@ -129,8 +286,8 @@ async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> 
   const original = await loadScene(opts.glbUrl);
   const scene = original.clone(true);
 
-  applyMaterial(scene.getObjectByName("foam") ?? undefined, opts.foamColor, opts.foamOpacity, opts.foamVisible);
-  applyMaterial(scene.getObjectByName("void") ?? undefined, opts.voidColor, opts.voidOpacity, opts.voidVisible);
+  applyMaterial(scene.getObjectByName("foam") ?? undefined, opts.foamColor, opts.foamOpacity, opts.foamVisible, "foam");
+  applyMaterial(scene.getObjectByName("void") ?? undefined, opts.voidColor, opts.voidOpacity, opts.voidVisible && !(opts.thumbnail && readShapeStamp(scene)), "void");
 
   const box = new THREE.Box3().setFromObject(scene);
   const sphere = new THREE.Sphere();
@@ -139,36 +296,19 @@ async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> 
 
   const foamMesh = scene.getObjectByName("foam");
   const voidMesh = scene.getObjectByName("void");
-  const meshPairs: [THREE.Mesh | undefined, OutlineSettings | undefined, FacetLineSettings | undefined][] = [
-    [foamMesh instanceof THREE.Mesh ? foamMesh : undefined, opts.foamOutline, opts.foamFacetLines],
-    [voidMesh instanceof THREE.Mesh ? voidMesh : undefined, opts.voidOutline, opts.voidFacetLines],
-  ];
+  const foam = foamMesh instanceof THREE.Mesh ? foamMesh : undefined;
+  const voidM = voidMesh instanceof THREE.Mesh ? voidMesh : undefined;
 
-  let clipPlane: THREE.Plane | null = null;
-  if (opts.clip?.enabled) {
-    clipPlane = buildClipPlane(opts.clip, box);
-    for (const [mesh] of meshPairs) if (mesh) applyClipToMesh(mesh, clipPlane);
-  }
-
-  for (const [mesh, outline, facetLines] of meshPairs) {
-    if (!mesh) continue;
-    if (outline?.enabled) scene.add(buildSilhouetteOutline(mesh, outline, radius));
-    if (facetLines?.enabled) scene.add(buildFacetLines(mesh, facetLines));
-  }
-  if (clipPlane) {
-    scene.add(buildClipOutline(opts.clip!, box));
-    if (opts.clip!.cutFace?.enabled) {
-      if (foamMesh instanceof THREE.Mesh) scene.add(buildCutFaceCap(foamMesh, clipPlane, box, opts.clip!, opts.clip!.cutFace.foamColor, opts.clip!.cutFace.foamOpacity));
-      if (voidMesh instanceof THREE.Mesh) scene.add(buildCutFaceCap(voidMesh, clipPlane, box, opts.clip!, opts.clip!.cutFace.voidColor, opts.clip!.cutFace.voidOpacity));
-    }
-  }
-
+  // Camera first: the outline widths need to know how far away it sits.
   const aspect = opts.width / opts.height;
   const vFov = 42;
   const camera = new THREE.PerspectiveCamera(vFov, aspect, 0.05, 500);
+  let distance: number;
   if (opts.customCamera) {
     camera.position.set(...opts.customCamera.position);
-    camera.lookAt(new THREE.Vector3(...opts.customCamera.target));
+    const target = new THREE.Vector3(...opts.customCamera.target);
+    camera.lookAt(target);
+    distance = camera.position.distanceTo(target);
   } else {
     const preset = POPUP_VIEW_PRESETS.find((v) => v.key === opts.view) ?? AXO_VIEWS.find((v) => v.key === opts.view) ?? AXO_VIEWS[0];
     const dir = new THREE.Vector3(...preset.dir).normalize();
@@ -179,10 +319,37 @@ async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> 
     const vHalf = (vFov * Math.PI) / 360;
     const hHalf = Math.atan(Math.tan(vHalf) * aspect);
     const constrainingHalf = Math.min(vHalf, hHalf);
-    const distance = (radius / Math.sin(constrainingHalf)) * 1.08;
+    distance = (radius / Math.sin(constrainingHalf)) * 1.08;
     camera.position.copy(sphere.center).addScaledVector(dir, distance);
     camera.up.set(...preset.up);
     camera.lookAt(sphere.center);
+  }
+  // A tight depth range keeps the depth buffer's precision where the model
+  // actually is -- needed for the outline hull, which sits a fraction of a
+  // pixel behind the real surface.
+  camera.near = Math.max(0.05, distance - radius * 2);
+  camera.far = distance + radius * 3;
+  camera.updateProjectionMatrix();
+
+  let clipPlane: THREE.Plane | null = null;
+  if (opts.clip?.enabled) {
+    clipPlane = buildClipPlane(opts.clip, box);
+    for (const mesh of [foam, voidM]) if (mesh) applyClipToMesh(mesh, clipPlane);
+  }
+
+  const lineCtx: LineContext = {
+    pxPerPt: opts.pxPerPt ?? 300 / 72,
+    resolution: new THREE.Vector2(opts.width, opts.height),
+    worldPerPx: (2 * distance * Math.tan((vFov * Math.PI) / 360)) / opts.height,
+  };
+  for (const obj of buildLineDecorations(scene, foam, voidM, box, { foamOutline: opts.foamOutline, voidOutline: opts.voidOutline, facetLines: opts.facetLines }, lineCtx)) scene.add(obj);
+
+  if (clipPlane) {
+    scene.add(buildClipOutline(opts.clip!, box));
+    if (opts.clip!.cutFace?.enabled) {
+      if (foam) scene.add(buildCutFaceCap(foam, clipPlane, box, opts.clip!, opts.clip!.cutFace.foamColor, opts.clip!.cutFace.foamOpacity));
+      if (voidM) scene.add(buildCutFaceCap(voidM, clipPlane, box, opts.clip!, opts.clip!.cutFace.voidColor, opts.clip!.cutFace.voidOpacity));
+    }
   }
 
   const threeScene = new THREE.Scene();
@@ -235,6 +402,7 @@ export function renderTileThumbnail(glbUrl: string, size: number): Promise<strin
       voidOpacity: 1,
       foamVisible: true,
       voidVisible: true,
+      thumbnail: true,
     });
     thumbnailCache.set(key, cached);
     cached.catch(() => thumbnailCache.delete(key));

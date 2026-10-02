@@ -93,7 +93,7 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
 
       <div className="space-y-2 border-t border-border pt-3">
         <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Layout</div>
-        <NumberSlider label="Outline weight" value={config.outlineWidthPt} min={0.5} max={8} step={0.25} decimals={2} suffix="pt" onChange={(outlineWidthPt) => onChange({ outlineWidthPt })} />
+        <NumberSlider label="Outline weight" value={config.outlineWidthPt} min={0.01} max={8} step={0.01} decimals={2} suffix="pt" exact onChange={(outlineWidthPt) => onChange({ outlineWidthPt })} />
         <NumberSlider label="Gap X (columns)" value={config.gapXIn} min={0} max={3} step={0.05} decimals={2} suffix="in" onChange={(gapXIn) => onChange({ gapXIn })} />
         <NumberSlider label="Gap Y (rows)" value={config.gapYIn} min={0} max={3} step={0.05} decimals={2} suffix="in" onChange={(gapYIn) => onChange({ gapYIn })} />
       </div>
@@ -116,10 +116,10 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
       </div>
 
       <div className="space-y-2 border-t border-border pt-3">
-        <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Outline (whole board, per tile render)</div>
+        <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Outlines (whole board, per tile render)</div>
         <p className="text-[10px] text-muted-foreground">Default for every tile -- override one tile&rsquo;s own in its popup editor.</p>
         {(["foamOutline", "voidOutline"] as const).map((key) => {
-          const label = key === "foamOutline" ? "Foam" : "Void";
+          const label = key === "foamOutline" ? "Foam (outer shape)" : "Void";
           const setting = config[key];
           return (
             <div key={key} className="space-y-1.5">
@@ -131,7 +131,7 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
                 <>
                   <ColorField label="Color" value={setting.color} onChange={(color) => onChange({ [key]: { ...setting, color } })} />
                   <NumberSlider label="Opacity" value={Math.round(setting.opacity * 100)} min={5} max={100} suffix="%" onChange={(v) => onChange({ [key]: { ...setting, opacity: v / 100 } })} />
-                  <NumberSlider label="Weight" value={setting.weightPx} min={1} max={10} suffix="px" onChange={(weightPx) => onChange({ [key]: { ...setting, weightPx } })} />
+                  <NumberSlider label="Weight" value={setting.weightPt} min={0.01} max={8} step={0.01} decimals={2} suffix="pt" exact onChange={(weightPt) => onChange({ [key]: { ...setting, weightPt } })} />
                 </>
               )}
             </div>
@@ -141,24 +141,18 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
 
       <div className="space-y-2 border-t border-border pt-3">
         <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Facet lines (whole board, per tile render)</div>
-        {(["foamFacetLines", "voidFacetLines"] as const).map((key) => {
-          const label = key === "foamFacetLines" ? "Foam" : "Void";
-          const setting = config[key];
-          return (
-            <div key={key} className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">{label} facet lines</span>
-                <Switch checked={setting.enabled} onCheckedChange={(enabled) => onChange({ [key]: { ...setting, enabled } })} />
-              </div>
-              {setting.enabled && (
-                <>
-                  <ColorField label="Color" value={setting.color} onChange={(color) => onChange({ [key]: { ...setting, color } })} />
-                  <NumberSlider label="Opacity" value={Math.round(setting.opacity * 100)} min={5} max={100} suffix="%" onChange={(v) => onChange({ [key]: { ...setting, opacity: v / 100 } })} />
-                </>
-              )}
-            </div>
-          );
-        })}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Foam facet lines</span>
+            <Switch checked={config.facetLines.enabled} onCheckedChange={(enabled) => onChange({ facetLines: { ...config.facetLines, enabled } })} />
+          </div>
+          {config.facetLines.enabled && (
+            <>
+              <ColorField label="Color" value={config.facetLines.color} onChange={(color) => onChange({ facetLines: { ...config.facetLines, color } })} />
+              <NumberSlider label="Opacity" value={Math.round(config.facetLines.opacity * 100)} min={5} max={100} suffix="%" onChange={(v) => onChange({ facetLines: { ...config.facetLines, opacity: v / 100 } })} />
+            </>
+          )}
+        </div>
       </div>
 
       <div className="space-y-2 border-t border-border pt-3">

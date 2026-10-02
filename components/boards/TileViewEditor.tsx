@@ -11,15 +11,30 @@ import { ColorField } from "@/components/boards/ColorField";
 import { NumberSlider } from "@/components/shared/NumberSlider";
 import { ClippingPlaneControl } from "@/components/shared/ClippingPlaneControl";
 import { applyClipToMesh, buildClipOutline, buildClipPlane, buildCutFaceCap, defaultClipState, type ClipState } from "@/lib/clipping";
-import { buildFacetLines, buildSilhouetteOutline } from "@/lib/renderTile";
+import { buildLineDecorations, type LineContext } from "@/lib/renderTile";
+import { computeGeometry } from "@/lib/boards/exportBoard";
 import { POPUP_VIEW_PRESETS } from "@/lib/faceViews";
 import type { BoardConfig, BoardSlot, BoardSlotOverrides, FacetLineSettings, OutlineSettings } from "@/lib/boards/types";
 import type { ParsedTile } from "@/lib/types";
 
-function applyMaterial(mesh: THREE.Object3D | null | undefined, color: string, opacity: number, visible: boolean) {
+function applyMaterial(mesh: THREE.Object3D | null | undefined, color: string, opacity: number, visible: boolean, kind: "foam" | "void") {
   if (!(mesh instanceof THREE.Mesh)) return;
   mesh.visible = visible;
-  mesh.material = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05, transparent: opacity < 1, opacity, depthWrite: opacity >= 1, side: THREE.DoubleSide });
+  // The void is the cube minus the foam, so the two share their whole
+  // interface surface -- offset the void a hair behind (and both behind any
+  // line drawn on them) so the coincident surfaces don't z-fight.
+  mesh.material = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.85,
+    metalness: 0.05,
+    transparent: opacity < 1,
+    opacity,
+    depthWrite: opacity >= 1,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: kind === "void" ? 2 : 1,
+    polygonOffsetUnits: kind === "void" ? 2 : 1,
+  });
 }
 
 function PopupModel({
@@ -31,8 +46,8 @@ function PopupModel({
   clip,
   foamOutline,
   voidOutline,
-  foamFacetLines,
-  voidFacetLines,
+  facetLines,
+  cellIn,
   onBounds,
 }: {
   glbUrl: string;
@@ -43,17 +58,22 @@ function PopupModel({
   clip: ClipState;
   foamOutline: OutlineSettings;
   voidOutline: OutlineSettings;
-  foamFacetLines: FacetLineSettings;
-  voidFacetLines: FacetLineSettings;
+  facetLines: FacetLineSettings;
+  /** Edge length of one board cell in inches -- with the canvas size this
+   * fixes how many pixels a printed point is, so line weights read the same
+   * here as on the board. */
+  cellIn: number;
   onBounds: (center: THREE.Vector3, radius: number) => void;
 }) {
+  const gl = useThree((s) => s.gl);
+  const size = useThree((s) => s.size);
   const gltf = useGLTF(glbUrl);
   const scene = useMemo(() => gltf.scene.clone(true), [gltf]);
   const extrasRef = useRef<THREE.Object3D[]>([]);
 
   useEffect(() => {
-    applyMaterial(scene.getObjectByName("foam"), foamColor, foamOpacity, true);
-    applyMaterial(scene.getObjectByName("void"), voidColor, voidOpacity, true);
+    applyMaterial(scene.getObjectByName("foam"), foamColor, foamOpacity, true, "foam");
+    applyMaterial(scene.getObjectByName("void"), voidColor, voidOpacity, true, "void");
   }, [scene, foamColor, voidColor, foamOpacity, voidOpacity]);
 
   useEffect(() => {
@@ -89,32 +109,27 @@ function PopupModel({
       }
     }
 
-    if (foam instanceof THREE.Mesh) {
-      if (foamOutline.enabled) {
-        const o = buildSilhouetteOutline(foam, foamOutline, sphere.radius || 1);
-        scene.add(o);
-        extrasRef.current.push(o);
-      }
-      if (foamFacetLines.enabled) {
-        const f = buildFacetLines(foam, foamFacetLines);
-        scene.add(f);
-        extrasRef.current.push(f);
-      }
-    }
-    if (voidMesh instanceof THREE.Mesh) {
-      if (voidOutline.enabled) {
-        const o = buildSilhouetteOutline(voidMesh, voidOutline, sphere.radius || 1);
-        scene.add(o);
-        extrasRef.current.push(o);
-      }
-      if (voidFacetLines.enabled) {
-        const f = buildFacetLines(voidMesh, voidFacetLines);
-        scene.add(f);
-        extrasRef.current.push(f);
-      }
+    // Same unit conversion the board's own render uses (lib/renderTile.ts):
+    // a printed point is (cell pixels / cell inches) / 72 buffer pixels, and
+    // the model is framed the way the export frames it, so a given weight
+    // looks here the way it will on the board.
+    const dpr = gl.getPixelRatio();
+    const bufW = size.width * dpr;
+    const bufH = size.height * dpr;
+    const cellPx = Math.min(bufW, bufH);
+    const vFov = 42;
+    const fitDistance = ((sphere.radius || 1) / Math.sin((vFov * Math.PI) / 360)) * 1.08;
+    const ctx: LineContext = {
+      pxPerPt: cellPx / Math.max(cellIn, 0.1) / 72,
+      resolution: new THREE.Vector2(bufW, bufH),
+      worldPerPx: (2 * fitDistance * Math.tan((vFov * Math.PI) / 360)) / cellPx,
+    };
+    for (const obj of buildLineDecorations(scene, foam instanceof THREE.Mesh ? foam : undefined, voidMesh instanceof THREE.Mesh ? voidMesh : undefined, box, { foamOutline, voidOutline, facetLines }, ctx)) {
+      scene.add(obj);
+      extrasRef.current.push(obj);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene, clip, foamOutline, voidOutline, foamFacetLines, voidFacetLines]);
+  }, [scene, clip, foamOutline, voidOutline, facetLines, cellIn, size.width, size.height]);
 
   return <primitive object={scene} />;
 }
@@ -189,8 +204,9 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
   const [clip, setClip] = useState<ClipState>(initial.clip ?? defaultClipState());
   const [foamOutline, setFoamOutline] = useState<OutlineSettings>(initial.foamOutline ?? config.foamOutline);
   const [voidOutline, setVoidOutline] = useState<OutlineSettings>(initial.voidOutline ?? config.voidOutline);
-  const [foamFacetLines, setFoamFacetLines] = useState<FacetLineSettings>(initial.foamFacetLines ?? config.foamFacetLines);
-  const [voidFacetLines, setVoidFacetLines] = useState<FacetLineSettings>(initial.voidFacetLines ?? config.voidFacetLines);
+  const [facetLines, setFacetLines] = useState<FacetLineSettings>(initial.facetLines ?? config.facetLines);
+  // One board cell's edge in inches (the layout is solved at 300dpi, so /300).
+  const cellIn = useMemo(() => (computeGeometry(config, 300).cells[0]?.size ?? 900) / 300, [config]);
   const [bounds, setBounds] = useState({ center: new THREE.Vector3(), radius: 5 });
 
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
@@ -206,8 +222,7 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
       clip: clip.enabled ? clip : undefined,
       foamOutline: foamOutline.enabled ? foamOutline : undefined,
       voidOutline: voidOutline.enabled ? voidOutline : undefined,
-      foamFacetLines: foamFacetLines.enabled ? foamFacetLines : undefined,
-      voidFacetLines: voidFacetLines.enabled ? voidFacetLines : undefined,
+      facetLines: facetLines.enabled ? facetLines : undefined,
       customCamera: viewMode === "perspective" ? (cameraStateRef.current ?? undefined) : undefined,
     };
     const hasAny = Object.values(overrides).some((v) => v !== undefined);
@@ -223,26 +238,25 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
     setClip(defaultClipState());
     setFoamOutline(config.foamOutline);
     setVoidOutline(config.voidOutline);
-    setFoamFacetLines(config.foamFacetLines);
-    setVoidFacetLines(config.voidFacetLines);
+    setFacetLines(config.facetLines);
     setViewMode(slot.view);
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-6">
-      <div className="flex h-full max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-white/15 bg-background">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-2 sm:p-6">
+      <div className="flex h-full max-h-[96vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-white/15 bg-background sm:max-h-[90vh]">
         <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
           <span className="font-mono text-xs uppercase tracking-label text-muted-foreground">Edit tile view · {tile.name}</span>
           <Button size="icon" variant="ghost" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
         </div>
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,2fr)_minmax(0,3fr)] lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-1">
           <div className="relative min-h-0 bg-black/40">
             <Canvas
               dpr={[1, 2]}
               camera={{ fov: 42, near: 0.05, far: 500, position: [8, 6, 8] }}
-              gl={{ antialias: true }}
+              gl={{ antialias: true, stencil: true }}
               onCreated={(state) => {
                 state.gl.localClippingEnabled = true;
               }}
@@ -260,8 +274,8 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
                 clip={clip}
                 foamOutline={foamOutline}
                 voidOutline={voidOutline}
-                foamFacetLines={foamFacetLines}
-                voidFacetLines={voidFacetLines}
+                facetLines={facetLines}
+                cellIn={cellIn}
                 onBounds={(center, radius) => setBounds({ center, radius })}
               />
               <AxoLockRig presetKey={viewMode} center={bounds.center} radius={bounds.radius} controlsRef={controlsRef} />
@@ -269,7 +283,7 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
               <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} enableRotate={!locked} enablePan={!locked} enableZoom />
             </Canvas>
           </div>
-          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto border-l border-white/10 p-4">
+          <div className="flex min-h-0 flex-col gap-4 overflow-y-auto border-t border-white/10 p-4 lg:border-l lg:border-t-0">
             <div className="space-y-2">
               <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">View</div>
               <select className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs" value={viewMode} onChange={(e) => setViewMode(e.target.value)}>
@@ -296,9 +310,9 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
             </div>
 
             <div className="space-y-2 border-t border-border pt-3">
-              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Outline</div>
+              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Outlines</div>
               {([
-                ["Foam", foamOutline, setFoamOutline],
+                ["Foam (outer shape)", foamOutline, setFoamOutline],
                 ["Void", voidOutline, setVoidOutline],
               ] as const).map(([label, setting, setSetting]) => (
                 <div key={label} className="space-y-1.5">
@@ -310,7 +324,7 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
                     <>
                       <ColorField label="Color" value={setting.color} onChange={(color) => setSetting({ ...setting, color })} />
                       <NumberSlider label="Opacity" value={Math.round(setting.opacity * 100)} min={5} max={100} suffix="%" onChange={(v) => setSetting({ ...setting, opacity: v / 100 })} />
-                      <NumberSlider label="Weight" value={setting.weightPx} min={1} max={10} suffix="px" onChange={(weightPx) => setSetting({ ...setting, weightPx })} />
+                      <NumberSlider label="Weight" value={setting.weightPt} min={0.01} max={8} step={0.01} decimals={2} suffix="pt" exact onChange={(weightPt) => setSetting({ ...setting, weightPt })} />
                     </>
                   )}
                 </div>
@@ -319,23 +333,18 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
 
             <div className="space-y-2 border-t border-border pt-3">
               <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Facet lines</div>
-              {([
-                ["Foam", foamFacetLines, setFoamFacetLines],
-                ["Void", voidFacetLines, setVoidFacetLines],
-              ] as const).map(([label, setting, setSetting]) => (
-                <div key={label} className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">{label} facet lines</span>
-                    <Switch checked={setting.enabled} onCheckedChange={(enabled) => setSetting({ ...setting, enabled })} />
-                  </div>
-                  {setting.enabled && (
-                    <>
-                      <ColorField label="Color" value={setting.color} onChange={(color) => setSetting({ ...setting, color })} />
-                      <NumberSlider label="Opacity" value={Math.round(setting.opacity * 100)} min={5} max={100} suffix="%" onChange={(v) => setSetting({ ...setting, opacity: v / 100 })} />
-                    </>
-                  )}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">Foam facet lines</span>
+                  <Switch checked={facetLines.enabled} onCheckedChange={(enabled) => setFacetLines({ ...facetLines, enabled })} />
                 </div>
-              ))}
+                {facetLines.enabled && (
+                  <>
+                    <ColorField label="Color" value={facetLines.color} onChange={(color) => setFacetLines({ ...facetLines, color })} />
+                    <NumberSlider label="Opacity" value={Math.round(facetLines.opacity * 100)} min={5} max={100} suffix="%" onChange={(v) => setFacetLines({ ...facetLines, opacity: v / 100 })} />
+                  </>
+                )}
+              </div>
             </div>
 
             <div className="mt-auto flex gap-1.5 border-t border-border pt-3">

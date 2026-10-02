@@ -18,7 +18,7 @@ export function Header({ activeTab, onTabChange }: { activeTab: WorkspaceTabKey;
   const { projectCode, leaveProject, saveStatus, saveError } = useProject();
 
   return (
-    <header className="glass-panel-strong sticky top-4 z-20 mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 lg:mx-6">
+    <header className="glass-panel-strong relative z-20 sm:sticky sm:top-4 mx-2 mt-2 flex flex-wrap items-center justify-between gap-3 rounded-xl px-3 py-3 sm:mx-4 sm:mt-4 sm:px-4 lg:mx-6">
       <div className="flex items-center gap-4">
         <Logo />
         {projectCode && (
@@ -39,9 +39,11 @@ export function Header({ activeTab, onTabChange }: { activeTab: WorkspaceTabKey;
         )}
       </div>
 
-      <TabNav active={activeTab} onChange={onTabChange} />
+      <div className="order-last flex w-full min-w-0 justify-center lg:order-none lg:w-auto">
+        <TabNav active={activeTab} onChange={onTabChange} />
+      </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <AddTilesButtons />
         <Button variant="ghost" size="sm" onClick={leaveProject} className="text-muted-foreground">
           <LogOut className="mr-1.5 h-3.5 w-3.5" />

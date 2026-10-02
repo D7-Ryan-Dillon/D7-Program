@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Download, FileText, Layers } from "lucide-react";
+import { Download, FileText } from "lucide-react";
 import { useProject } from "@/lib/project-store";
 import { GlowPanel } from "@/components/shared/GlowPanel";
 import { Button } from "@/components/ui/button";
@@ -198,9 +198,9 @@ export function ArrangeTab() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)_280px] grid-rows-[minmax(0,1fr)] gap-4">
-        <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
+    <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
+      <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:grid-rows-[minmax(0,1fr)]">
+        <div className="order-2 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
           <GlowPanel glow="magenta">
             <div className="p-4">
               <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Bank</div>
@@ -215,7 +215,7 @@ export function ArrangeTab() {
           </GlowPanel>
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-col gap-3">
+        <div className="order-1 flex min-w-0 flex-col gap-3 lg:order-none lg:min-h-0">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="font-mono text-xs text-muted-foreground">
               {assembly.instances.length} piece(s)
@@ -226,7 +226,7 @@ export function ArrangeTab() {
               <Switch checked={fused} disabled={busy || !assembly.instances.length} onCheckedChange={() => void toggleFuse()} />
             </div>
           </div>
-          <div className="min-h-0 min-w-0 flex-1">
+          <div className="h-[70vh] min-w-0 lg:h-auto lg:min-h-0 lg:flex-1">
             {assembly.instances.length ? (
               <ArrangeViewport
                 fitKey={regenNonce}
@@ -247,7 +247,7 @@ export function ArrangeTab() {
           </div>
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
+        <div className="order-3 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
           <GlowPanel glow="magenta">
             <div className="p-4">
               <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Visibility</div>
@@ -282,10 +282,6 @@ export function ArrangeTab() {
               <Button variant="outline" size="sm" className="w-full justify-start" disabled={!assembly.instances.length || busy} onClick={() => void exportObj()}>
                 <Download className="mr-1.5 h-3.5 w-3.5" />
                 Download .obj
-              </Button>
-              <Button variant="ghost" size="sm" className="w-full justify-start text-muted-foreground" disabled>
-                <Layers className="mr-1.5 h-3.5 w-3.5" />
-                .3dm — via Grasshopper
               </Button>
             </div>
           </GlowPanel>

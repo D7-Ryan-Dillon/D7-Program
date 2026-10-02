@@ -34,7 +34,7 @@ export function BoardsTab() {
   useEffect(() => {
     const el = previewAreaRef.current;
     if (!el) return;
-    const PADDING = 32; // p-4 on both sides
+    const PADDING = 16; // p-2 on both sides on phones (p-4 / 32 from sm up -- close enough for a fit calculation)
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
       if (!rect) return;
@@ -109,8 +109,8 @@ export function BoardsTab() {
   };
 
   return (
-    <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)_280px] grid-rows-[minmax(0,1fr)] gap-4">
-      <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
+    <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:grid-rows-[minmax(0,1fr)]">
+      <div className="order-2 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
         <GlowPanel glow="magenta">
           <div className="p-4">
             <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Board order</div>
@@ -122,8 +122,8 @@ export function BoardsTab() {
         </GlowPanel>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-col gap-3">
-        <div className="flex items-center justify-between">
+      <div className="order-1 flex min-w-0 flex-col gap-3 lg:order-none lg:min-h-0">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
             <div className="font-mono text-xs text-muted-foreground">
               {config.slots.length} tile(s)
@@ -147,7 +147,7 @@ export function BoardsTab() {
             {exporting ? "Exporting…" : "Export PNGs"}
           </Button>
         </div>
-        <div ref={previewAreaRef} className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border-hair bg-black/40 p-4">
+        <div ref={previewAreaRef} className="flex h-[70vh] items-center justify-center overflow-auto rounded-lg border-hair bg-black/40 p-2 sm:p-4 lg:h-auto lg:min-h-0 lg:flex-1">
           {config.slots.length ? (
             // Visible only here on screen (never baked into the exported PNG) so an
             // all-black board doesn't disappear into the app's own dark background.
@@ -168,7 +168,7 @@ export function BoardsTab() {
         </div>
       </div>
 
-      <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
+      <div className="order-3 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
         <GlowPanel glow="orange" className="flex-1">
           <div className="p-4">
             <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Board settings</div>

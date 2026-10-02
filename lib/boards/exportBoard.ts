@@ -252,8 +252,8 @@ async function drawImageModule(ctx: CanvasRenderingContext2D, cell: GridCell, sl
     clip: o?.clip,
     foamOutline: o?.foamOutline ?? config.foamOutline,
     voidOutline: o?.voidOutline ?? config.voidOutline,
-    foamFacetLines: o?.foamFacetLines ?? config.foamFacetLines,
-    voidFacetLines: o?.voidFacetLines ?? config.voidFacetLines,
+    facetLines: o?.facetLines ?? config.facetLines,
+    pxPerPt: dpi / 72,
   });
   const img = await loadImage(dataUrl);
 
@@ -299,8 +299,8 @@ async function drawDescriptorModule(ctx: CanvasRenderingContext2D, cell: GridCel
     clip: o?.clip,
     foamOutline: o?.foamOutline ?? config.foamOutline,
     voidOutline: o?.voidOutline ?? config.voidOutline,
-    foamFacetLines: o?.foamFacetLines ?? config.foamFacetLines,
-    voidFacetLines: o?.voidFacetLines ?? config.voidFacetLines,
+    facetLines: o?.facetLines ?? config.facetLines,
+    pxPerPt: dpi / 72,
   });
   const img = await loadImage(dataUrl);
 

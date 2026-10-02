@@ -253,6 +253,8 @@ export interface ParsedTile {
     assignments: Record<string, string>;
     seed: number;
     fitTolerance: number;
+    /** The builder's speck-cleanup sliders (lib/sections/cleanup.ts) -- absent on tiles saved before they existed. */
+    cleanup?: { minPieceFt3: number; minBranchFt: number; minPocketFt3: number };
   };
 }
 

@@ -2,10 +2,9 @@
 
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { Copy, Download, FileUp, Info } from "lucide-react";
+import { Copy, Download, FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { downloadTextFile, tileToObjText } from "@/lib/exporters/objExport";
 import { useProject } from "@/lib/project-store";
 import type { ParsedTile } from "@/lib/types";
@@ -107,23 +106,6 @@ export function ExportPanel({ tile, visibility }: { tile: ParsedTile; visibility
           <Download className="mr-1.5 h-3.5 w-3.5" />
           Download .obj
         </Button>
-      </div>
-
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-xs">.3dm</span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span>
-                <Button variant="outline" size="sm" disabled className="gap-1.5">
-                  <Info className="h-3.5 w-3.5" />
-                  Via Grasshopper
-                </Button>
-              </span>
-            }
-          />
-          <TooltipContent>Not produced in-browser yet — paste this tile&apos;s recipe into Grasshopper and export the .3dm from there.</TooltipContent>
-        </Tooltip>
       </div>
     </div>
   );

@@ -36,7 +36,7 @@ interface ModelProps {
   onBounds: (bounds: Bounds) => void;
 }
 
-function applyMaterial(mesh: THREE.Mesh, color: string, visible: boolean, ghosted: boolean) {
+function applyMaterial(mesh: THREE.Mesh, color: string, visible: boolean, ghosted: boolean, kind: "foam" | "void") {
   mesh.visible = visible;
   mesh.material = new THREE.MeshStandardMaterial({
     color,
@@ -51,6 +51,11 @@ function applyMaterial(mesh: THREE.Mesh, color: string, visible: boolean, ghoste
     // ArrangeViewport's own InstanceMesh, which never conditions this on
     // display mode either.
     side: THREE.DoubleSide,
+    // Foam and void can share their whole interface surface (a builder tile's
+    // void is the cube minus the foam); nudge the void behind so they don't z-fight.
+    polygonOffset: true,
+    polygonOffsetFactor: kind === "void" ? 2 : 1,
+    polygonOffsetUnits: kind === "void" ? 2 : 1,
   });
 }
 
@@ -62,8 +67,8 @@ function Model({ tile, displayMode, visibility, colors, clip, onBounds }: ModelP
   useEffect(() => {
     const foam = scene.getObjectByName("foam");
     const voidMesh = scene.getObjectByName("void");
-    if (foam instanceof THREE.Mesh) applyMaterial(foam, colors.foam, visibility.foam, displayMode === "ghosted");
-    if (voidMesh instanceof THREE.Mesh) applyMaterial(voidMesh, colors.void, visibility.void, displayMode === "ghosted");
+    if (foam instanceof THREE.Mesh) applyMaterial(foam, colors.foam, visibility.foam, displayMode === "ghosted", "foam");
+    if (voidMesh instanceof THREE.Mesh) applyMaterial(voidMesh, colors.void, visibility.void, displayMode === "ghosted", "void");
   }, [scene, displayMode, visibility, colors]);
 
   useEffect(() => {
@@ -181,7 +186,7 @@ export function ThreeViewport({
       <Canvas
         dpr={[1, 2]}
         camera={{ fov: 42, near: 0.05, far: 500, position: [8, 6, 8] }}
-        gl={{ antialias: true }}
+        gl={{ antialias: true, stencil: true }}
         onCreated={(state) => {
           state.gl.localClippingEnabled = true;
         }}

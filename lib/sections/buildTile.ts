@@ -10,6 +10,7 @@ import type { FaceName, FacesJson, GuessedIdentity, ParsedTile, TileConfig, Tile
 import { buildVolumeField, facesForShape, type VolumeAssignments, type VolumeFaceName, type VolumeShape } from "./volumeField";
 import { voxelizeVolumeField, SECTION_TILE_FT, SECTION_CELL_FT, SECTION_GRID, SECTION_HEX_APOTHEM_FT, SECTION_HEX_HEIGHT_FT } from "./voxelize";
 import { buildTileScene } from "./mesh";
+import { cleanupVolumeField, defaultCleanup, type CleanupSettings } from "./cleanup";
 import { computeFaceData } from "./faceData";
 import { computeSectionsData } from "./sectionsData";
 import { computeTileMetrics } from "./metrics";
@@ -28,6 +29,8 @@ export interface BuildSectionTileInput {
   assignmentNames?: Partial<Record<VolumeFaceName, string>>;
   seed?: number;
   fitTolerance?: number;
+  /** Speck cleanup applied to the lofted field before meshing/voxelizing -- see lib/sections/cleanup.ts. */
+  cleanup?: CleanupSettings;
   guessed?: GuessedIdentity;
 }
 
@@ -73,7 +76,8 @@ export async function buildSectionTile(input: BuildSectionTileInput): Promise<Pa
   const fitTolerance = input.fitTolerance ?? 50;
   const isHex = input.shape === "hex-prism";
 
-  const volume = buildVolumeField(input.assignments, input.shape, seed, fitTolerance, 46);
+  const cleanup = input.cleanup ?? defaultCleanup;
+  const volume = cleanupVolumeField(buildVolumeField(input.assignments, input.shape, seed, fitTolerance, 46), cleanup).volume;
   const voxels = voxelizeVolumeField(volume);
   if (!voxels.void || !voxels.material || !voxels.voidSmooth) {
     throw new Error("Voxelization produced no data -- this is a bug in lib/sections/voxelize.ts, not a bad input.");
@@ -87,7 +91,7 @@ export async function buildSectionTile(input: BuildSectionTileInput): Promise<Pa
   const sections = computeSectionsData(voxels.void, SECTION_GRID, SECTION_TILE_FT);
   const metrics = computeTileMetrics(voxels.void, SECTION_GRID, SECTION_TILE_FT, faceMetrics);
 
-  const scene = buildTileScene(volume.field, volume.resolution, SECTION_TILE_FT);
+  const scene = buildTileScene(volume.field, volume.resolution, SECTION_TILE_FT, input.shape);
   const exporter = new GLTFExporter();
   const glbBuffer = (await exporter.parseAsync(scene, { binary: true })) as ArrayBuffer;
   const glbUrl = URL.createObjectURL(new Blob([glbBuffer], { type: "model/gltf-binary" }));
@@ -114,7 +118,7 @@ export async function buildSectionTile(input: BuildSectionTileInput): Promise<Pa
     shape: shapeDescriptor,
     faceNames,
     sectionRecipe: input.assignmentNames
-      ? { shape: input.shape, assignments: input.assignmentNames as Record<string, string>, seed, fitTolerance }
+      ? { shape: input.shape, assignments: input.assignmentNames as Record<string, string>, seed, fitTolerance, cleanup }
       : undefined,
   };
 }

@@ -104,6 +104,16 @@ export function buildClipOutline(clip: ClipState, box: THREE.Box3, color = "#fff
 
 let stencilGroupCounter = 1;
 
+/** Gives a stencil pass-mesh the exact world transform of the mesh it
+ * re-draws -- GLB nodes can carry their own transform, and the pass must
+ * land on the same triangles the visible mesh does. (Callers add the cap
+ * group at the scene root, so world matrix == local matrix there.) */
+function followMesh(pass: THREE.Mesh, source: THREE.Mesh) {
+  source.updateWorldMatrix(true, false);
+  pass.matrixAutoUpdate = false;
+  pass.matrix.copy(source.matrixWorld);
+}
+
 /** A flat colored fill exactly at the clip plane for one mesh, via the
  * standard stencil-buffer "cap" technique (three.js's own
  * webgl_clipping_stencil example is the reference pattern): two invisible
@@ -139,6 +149,7 @@ export function buildCutFaceCap(mesh: THREE.Mesh, plane: THREE.Plane, box: THREE
     }),
   );
   backFaces.renderOrder = order;
+  followMesh(backFaces, mesh);
 
   const frontFaces = new THREE.Mesh(
     mesh.geometry,
@@ -151,6 +162,7 @@ export function buildCutFaceCap(mesh: THREE.Mesh, plane: THREE.Plane, box: THREE
     }),
   );
   frontFaces.renderOrder = order + 1;
+  followMesh(frontFaces, mesh);
 
   const axes: ClipAxis[] = ["x", "y", "z"];
   const [a, b] = axes.filter((ax) => ax !== clip.axis);
