@@ -150,6 +150,7 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
             <>
               <ColorField label="Color" value={config.facetLines.color} onChange={(color) => onChange({ facetLines: { ...config.facetLines, color } })} />
               <NumberSlider label="Opacity" value={Math.round(config.facetLines.opacity * 100)} min={5} max={100} suffix="%" onChange={(v) => onChange({ facetLines: { ...config.facetLines, opacity: v / 100 } })} />
+              <NumberSlider label="Weight" value={config.facetLines.weightPt} min={0.01} max={4} step={0.01} decimals={2} suffix="pt" exact onChange={(weightPt) => onChange({ facetLines: { ...config.facetLines, weightPt } })} />
             </>
           )}
         </div>

@@ -35,6 +35,8 @@ export interface FacetLineSettings {
   enabled: boolean;
   color: string;
   opacity: number;
+  /** Print line weight in points, like the outlines'. */
+  weightPt: number;
 }
 
 /** Per-tile overrides set from the Boards tab's per-slot popup editor --
@@ -156,7 +158,7 @@ export function defaultBoardConfig(): BoardConfig {
     voidOpacity: 1,
     foamOutline: { enabled: false, color: "#ffffff", opacity: 1, weightPt: 0.75 },
     voidOutline: { enabled: false, color: "#ffffff", opacity: 1, weightPt: 0.75 },
-    facetLines: { enabled: false, color: "#ffffff", opacity: 0.4 },
+    facetLines: { enabled: false, color: "#ffffff", opacity: 0.4, weightPt: 0.25 },
     outlineWidthPt: 1.5,
     gapXIn: 0.5,
     gapYIn: 0.5,

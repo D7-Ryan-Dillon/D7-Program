@@ -19,9 +19,13 @@ Five tabs, in order:
 
 1. **Viewer** -- load a tile from a Grasshopper export (drag-and-drop a
    folder, or a `.zip`), see it in 3D, read its metrics.
-2. **Sections** -- build a tile a different way: pick (or upload) six face
+2. **Sections** -- build a tile a different way: pick (or upload) face
    photos, assign one to each face of a cube or hexagonal prism, and
-   generate a tile entirely in the browser, no Grasshopper needed.
+   generate a tile entirely in the browser, no Grasshopper needed. The
+   builder shows a thumbnail on every face, swaps which side is foam and
+   which is void, cleans up floating specks and thin branches, and keeps
+   every piece you generate under the project code (the "Saved objects"
+   list), whether or not you add it to the tile bank.
 3. **Analysis** -- score any tile against the 12 studio descriptors
    (carved, stepped, porous, continuous, resistant, threaded, graduated,
    non-hierarchical circulation, force-driven, light-filled, monumental,
@@ -31,7 +35,13 @@ Five tabs, in order:
 5. **Boards** -- lay out a presentation board from the tiles on the bank
    (adaptive grid, axo/perspective renders, auto-fit labels) and export it
    as two print-resolution PNGs -- the board itself, and a second page of
-   each tile's scored descriptors.
+   each tile's scored descriptors. Click a tile for a popup editor: locked
+   axonometric corners or free perspective, clipping plane, per-tile
+   colours, outlines and facet lines (all line weights in points).
+
+Clipping planes (X/Y/Z, reversible, optional cut-face highlight) are in the
+Viewer, the Sections builder and the Boards popup. The layout works from a
+phone up to a desktop.
 
 ## First time using it
 
@@ -75,7 +85,7 @@ components/
   sections/               Tile bank, correction editor, cube/hex builder
   analysis/               Descriptor scoring UI
   arrange/                Bank, settings, joints, viewport, per-piece editing
-  boards/                 Tile picker, board settings, live preview canvas
+  boards/                 Tile picker, board settings, live preview canvas, per-tile popup editor
 lib/
   types.ts                Typed shapes for a tile (ParsedTile) and its faces/sections
   ingest.ts               Turns a dropped Grasshopper folder/.zip into a ParsedTile
@@ -84,7 +94,9 @@ lib/
   sections/               Photo -> trace -> lofted volume -> ParsedTile (Sections tab)
   boards/                 Grid layout, frame shape, text fitting, canvas export (Boards tab)
   exporters/              CSG fuse, OBJ export, recipe manifest
-  persistence.ts          Save/load a project by code, via Supabase
+  persistence.ts          Save/load a project (tiles + saved cube-builder pieces) by code, via Supabase
+  clipping.ts             Shared clipping-plane system (plane, outline, stencil cut-face caps)
+  renderTile.ts           Headless tile renderer + Boards line decorations (outlines, facet lines)
   supabase/               Supabase client setup (browser + server-only)
 supabase/setup.sql         Run once in the Supabase SQL Editor for a fresh project
 docs/DATA_FORMAT.md        Exact Grasshopper export data contract

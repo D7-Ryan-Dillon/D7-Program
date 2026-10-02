@@ -130,7 +130,16 @@ export function buildCutFaceCap(mesh: THREE.Mesh, plane: THREE.Plane, box: THREE
   const order = stencilGroupCounter * 10;
   stencilGroupCounter += 1;
 
+  // Every pass below -- the invisible stencil counters AND the cap itself --
+  // is flagged `transparent` even when the cap is fully opaque. three.js
+  // draws all opaque objects before any transparent ones regardless of
+  // renderOrder, so a translucent cap (<100% opacity) used to be deferred
+  // until after BOTH the foam's and the void's stencil passes had run; the
+  // two overlapping counts then made each cap fill the whole section as one
+  // big panel. In one list, renderOrder runs foam-count, foam-cap, void-count,
+  // void-cap strictly in turn, each cap clearing the stencil it used.
   const stencilBase = {
+    transparent: true,
     depthWrite: false,
     colorWrite: false,
     stencilWrite: true,
@@ -180,7 +189,7 @@ export function buildCutFaceCap(mesh: THREE.Mesh, plane: THREE.Plane, box: THREE
     new THREE.MeshBasicMaterial({
       color,
       opacity,
-      transparent: opacity < 1,
+      transparent: true,
       side: THREE.DoubleSide,
       stencilWrite: true,
       stencilRef: 0,

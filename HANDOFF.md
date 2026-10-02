@@ -93,18 +93,44 @@ active work themselves; read section 7 before touching its core algorithm.**
 - **`CorrectionEditor.tsx`** (`lib/sections/correctionGeometry.ts`) -- the
   Paper.js-based editor for manually fixing a trace.
 - **`CubeHexBuilder.tsx`** -- assign one trace to each face of a cube or
-  hexagonal prism, pick a seed and "seam fit tolerance", and generate a
-  tile. Under the hood: `lib/sections/volumeField.ts` lofts the six 2D
-  traces into one continuous 3D scalar field (positive = material,
-  negative = void, matching the Grasshopper engine's own convention);
+  hexagonal prism (`FaceTilePicker.tsx`: a thumbnail per face, pick from the
+  checked tiles or the whole bank -- the builder opens even with nothing
+  checked), pick a seed and "seam fit tolerance", and generate a tile.
+  Under the hood: `lib/sections/volumeField.ts` lofts the 2D traces into one
+  continuous 3D scalar field (positive = lofted shape, negative = the rest);
+  `lib/sections/cleanup.ts` post-processes that field (delete floating
+  pieces, shave thin branches, fill sealed void pockets -- mirrors the
+  engine's `min_foam`/`min_void`, anything touching a tile face is exempt)
+  and can **swap** foam and void (`swapFoamVoid`, just a sign flip);
   `lib/sections/voxelize.ts` samples that field onto the same 40x40x40 grid
-  Grasshopper tiles use; `lib/sections/mesh.ts` runs marching cubes to get a
-  GLB; `lib/sections/faceData.ts` / `sectionsData.ts` build the
+  Grasshopper tiles use; `lib/sections/mesh.ts` makes the meshes (see
+  below) for the GLB; `lib/sections/faceData.ts` / `sectionsData.ts` build the
   Analysis-scoring-ready face/section data; `lib/sections/buildTile.ts`
   assembles all of it into a `ParsedTile`, identical in shape to one the
   Viewer tab would ingest from a real Grasshopper export (minus a few
   image-only fields that nothing in this app's scoring reads -- see that
   file's header comment for exactly which).
+
+**Foam/void convention in the builder (owner's definition, 2026-10-02):**
+foam = the lofted shape, flush to the 20 ft cube (or hex prism); void = the
+whole cube/hex **minus** the foam, a closed solid with flat outer faces. This
+is the *reverse* of a Grasshopper GLB (there the foam is the block and the
+void is the carved space), so with both visible a builder tile's void hides
+its foam -- the builder starts with the void hidden, and
+`renderTileThumbnail` skips the void on builder tiles. `lib/sections/mesh.ts`
+gets both meshes from ONE marching-cubes grid whose nodes straddle the tile
+boundary, with every node outside the boundary set to the odd mirror
+`-|f|` of its inside neighbour -- so the surface crosses zero exactly on the
+boundary plane (watertight, planar faces; no mesh booleans). The lofted
+field's tile span is nodes 2..n-3, and `voxelize.ts` remaps its sampling to
+match (the original code was off by one node, a 2.4% squash). Builder GLBs
+carry `userData.tileShape` ("cube" | "hex-prism") as a node extra.
+
+**Saved objects:** every Generate in the builder auto-saves a `SavedCube`
+(`lib/sections/savedCubes.ts`: recipe + the actual traces + cleanup + swap +
+a thumbnail) into the project's `state.cubes` jsonb (see section 6), updated
+as cleanup/swap/name change, deduped per recipe, deletable from the list. No
+GLB is stored -- opening one re-lofts from the stored traces.
 
 ### Analysis (`components/analysis/`, `lib/scoring/`)
 Scores the active tile against the 12 studio descriptors, works identically
@@ -125,7 +151,14 @@ Composes a presentation-plate layout -- an adaptive grid of tile renders
 exact PDF-traced module frame (`lib/boards/frameShape.ts`), auto-fit text
 everywhere (`lib/boards/textFit.ts`), live preview and full-resolution PNG
 export sharing one drawing function (`lib/boards/exportBoard.ts`) so they
-can never drift apart. Exports two PNGs: the board itself, and a second
+can never drift apart. Per-tile line decorations live in `lib/renderTile.ts`
+(shared with the popup editor): **foam outline** = the tile's outer cube /
+hex edges (screen-space fat lines), **void outline** = a back-face hull
+pushed along welded normals, **facet lines** = foam edges only. All three
+have a weight in points (0.01-8, typeable), converted with `pxPerPt = dpi/72`.
+Clicking a tile opens `TileViewEditor.tsx` (live R3F view, 8 locked axo
+corners or free perspective, clipping, colour/opacity, the three line
+settings; per-slot overrides shadow the board-wide masters). Exports two PNGs: the board itself, and a second
 page listing each tile's scored descriptors with its top 3 highlighted.
 This tab is in good shape as of this handoff -- no known issues.
 
@@ -173,7 +206,9 @@ Provisioned 2026-09-30. Supabase project ref `rpzmpuyhudvdhxuehqit`.
   API route needs privileged access).
 - **Save/load**: `lib/persistence.ts` (`saveProject` / `loadProject`), wired
   into `lib/project-store.tsx` -- entering a project code loads it, editing
-  the tile bank auto-saves (debounced 1.2s).
+  the tile bank (or the Sections builder's saved cubes) auto-saves
+  (debounced 1.2s). The row's `state` is `{ tiles, cubes }`; `cubes` is the
+  Sections builder's `SavedCube[]` (inline jsonb, no storage objects).
 - **Not yet synced to Supabase**: the Arrange tab's generated composition
   (`ArrangeTab.tsx`'s own `assembly` state) and the Boards tab's board
   config are both local-only per browser tab right now. Entering the same
@@ -276,11 +311,27 @@ drop zone, or to share a zip of one if you're in a cloud session with no
 access to their filesystem. The Sections tab needs no external data at all
 -- its 48 starter photos are baked into the repo.
 
+### Gotchas worth knowing (hit while building the above)
+- **Stencil buffer:** `<Canvas>` needs `gl={{ stencil: true }}` for the
+  clipping cut-face caps (`lib/clipping.ts`); without it they fill the whole
+  plane. Every cap pass is also `transparent: true` so foam/void caps stay
+  in one draw list in renderOrder (translucent caps used to merge).
+- **Coincident surfaces:** foam and void share their interface, so materials
+  use `polygonOffset` (void behind foam, both behind lines) to avoid z-fights.
+- **The Sections lofting math (`volumeField.ts`) is untouched**; only its
+  consumers (mesh, voxelizer, cleanup) changed.
+- Corrections and newly uploaded face photos are still `localStorage`-only;
+  saved cubes carry their traces so they reopen anywhere, but a cube whose
+  source photo was only uploaded on another device shows no thumbnail tile
+  for that face in the picker.
+
 ## 10. Suggested next steps (outside the off-limits areas in section 7)
 
 1. Sync the Arrange assembly and Boards config to Supabase, so they follow
    a project across devices the same way the tile bank already does.
 2. Persist Sections-tab corrections (currently `localStorage`-only) to
    Supabase if cross-device correction editing turns out to matter.
-3. Ask the project owner what's still open before assuming the above is the
+3. Clipping planes in the Arrange tab, and a saved-objects history there
+   too (both planned, not built).
+4. Ask the project owner what's still open before assuming the above is the
    full list -- priorities shift session to session.

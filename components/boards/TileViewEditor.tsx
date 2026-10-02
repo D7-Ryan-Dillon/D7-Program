@@ -342,6 +342,7 @@ export function TileViewEditor({ tile, slot, config, onSave, onClose }: { tile: 
                   <>
                     <ColorField label="Color" value={facetLines.color} onChange={(color) => setFacetLines({ ...facetLines, color })} />
                     <NumberSlider label="Opacity" value={Math.round(facetLines.opacity * 100)} min={5} max={100} suffix="%" onChange={(v) => setFacetLines({ ...facetLines, opacity: v / 100 })} />
+                    <NumberSlider label="Weight" value={facetLines.weightPt} min={0.01} max={4} step={0.01} decimals={2} suffix="pt" exact onChange={(weightPt) => setFacetLines({ ...facetLines, weightPt })} />
                   </>
                 )}
               </div>

@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase/client";
 import type { ParsedTile, TileVoxels } from "@/lib/types";
+import type { SavedCube } from "@/lib/sections/savedCubes";
 
 const VOXEL_KEYS = ["void", "voidSmooth", "material", "softness"] as const;
 const BUCKET = "tile-assets";
@@ -62,19 +63,20 @@ async function hydrateTile(stored: StoredTile): Promise<ParsedTile> {
  * the Viewer's tile bank is persisted for now -- Arrange's generated
  * composition is cheap to regrow from the tiles and is still being reworked,
  * so it isn't synced yet (see HANDOFF.md). */
-export async function saveProject(code: string, tiles: ParsedTile[]): Promise<void> {
+export async function saveProject(code: string, tiles: ParsedTile[], cubes: SavedCube[] = []): Promise<void> {
   const storedTiles = await Promise.all(tiles.map((tile) => storeTile(code, tile)));
   const { error } = await supabase
     .from("projects")
-    .upsert({ code, state: { tiles: storedTiles }, updated_at: new Date().toISOString() }, { onConflict: "code" });
+    .upsert({ code, state: { tiles: storedTiles, cubes }, updated_at: new Date().toISOString() }, { onConflict: "code" });
   if (error) throw error;
 }
 
-/** Returns the tiles saved under `code`, or null if that code has never been saved. */
-export async function loadProject(code: string): Promise<ParsedTile[] | null> {
+/** Returns the tiles (and the cube builder's saved pieces) saved under `code`, or null if that code has never been saved. */
+export async function loadProject(code: string): Promise<{ tiles: ParsedTile[]; cubes: SavedCube[] } | null> {
   const { data, error } = await supabase.from("projects").select("state").eq("code", code).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const storedTiles = ((data.state as { tiles?: StoredTile[] } | null)?.tiles ?? []) as StoredTile[];
-  return Promise.all(storedTiles.map(hydrateTile));
+  const state = data.state as { tiles?: StoredTile[]; cubes?: SavedCube[] } | null;
+  const storedTiles = (state?.tiles ?? []) as StoredTile[];
+  return { tiles: await Promise.all(storedTiles.map(hydrateTile)), cubes: state?.cubes ?? [] };
 }

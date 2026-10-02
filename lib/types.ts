@@ -255,6 +255,8 @@ export interface ParsedTile {
     fitTolerance: number;
     /** The builder's speck-cleanup sliders (lib/sections/cleanup.ts) -- absent on tiles saved before they existed. */
     cleanup?: { minPieceFt3: number; minBranchFt: number; minPocketFt3: number };
+    /** Foam and void roles swapped in the builder. */
+    swapped?: boolean;
   };
 }
 

@@ -4,8 +4,11 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Bounds, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
+import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { toast } from "sonner";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { GlowPanel } from "@/components/shared/GlowPanel";
 import { SquareFrame } from "@/components/shared/SquareFrame";
@@ -16,14 +19,15 @@ import { ClippingPlaneControl } from "@/components/shared/ClippingPlaneControl";
 import { ShuffleSeedButton } from "@/components/shared/ShuffleSeedButton";
 import { ColorField } from "@/components/boards/ColorField";
 import { FaceTilePicker } from "@/components/sections/FaceTilePicker";
-import { TileThumbnail } from "@/components/shared/TileThumbnail";
 import { NumberSlider } from "@/components/shared/NumberSlider";
 import { applyClipToMesh, buildClipOutline, buildClipPlane, buildCutFaceCap, defaultClipState, type ClipState } from "@/lib/clipping";
 import { useProject } from "@/lib/project-store";
 import type { BankTile } from "@/lib/sections/tileLibrary";
-import { cubeFaces, facesForShape, hexSidePose, HEX_APOTHEM, prismFaces, type VolumeAssignments, type VolumeFaceName, type VolumeShape } from "@/lib/sections/volumeField";
+import { cubeFaces, facesForShape, hexSidePose, HEX_APOTHEM, prismFaces, type SectionTrace, type VolumeAssignments, type VolumeFaceName, type VolumeShape } from "@/lib/sections/volumeField";
 import { buildVolumeField, type VolumeField } from "@/lib/sections/volumeField";
-import { cleanupVolumeField, defaultCleanup, isCleanupActive, type CleanupSettings } from "@/lib/sections/cleanup";
+import { cleanupVolumeField, defaultCleanup, isCleanupActive, swapFoamVoid, type CleanupSettings } from "@/lib/sections/cleanup";
+import { cubeSignature, type SavedCube } from "@/lib/sections/savedCubes";
+import { evictTileRender, renderTileThumbnail } from "@/lib/renderTile";
 import { buildTileScene } from "@/lib/sections/mesh";
 import { buildSectionTile, type BuildSectionTileInput } from "@/lib/sections/buildTile";
 import { buildAnalysisZip } from "@/lib/sections/exportAnalysis";
@@ -212,15 +216,52 @@ interface RawPreview {
   id: number;
   volume: VolumeField;
   shape: VolumeShape;
+  /** The recipe this was lofted from -- what gets auto-saved. */
+  cubeId: string;
+  createdAt: number;
+  assignmentNames: Record<string, string>;
+  traces: Record<string, SectionTrace>;
+  seed: number;
+  fitTolerance: number;
+}
+
+function freshCubeStamp() {
+  return { id: `cube-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, createdAt: Date.now() };
+}
+
+/** The foam + void meshes only, on a fresh group. The live preview group
+ * also carries whatever the preview has parked on it (clip outline, cut-face
+ * caps, face markers) -- none of which belongs in an exported file or a
+ * thumbnail. */
+function cleanMeshGroup(group: THREE.Group): THREE.Group {
+  const out = new THREE.Group();
+  out.userData = { ...group.userData };
+  for (const name of ["foam", "void"]) {
+    const mesh = group.getObjectByName(name);
+    if (mesh instanceof THREE.Mesh) out.add(mesh.clone());
+  }
+  return out;
+}
+
+async function thumbnailFor(group: THREE.Group): Promise<string> {
+  const glb = (await new GLTFExporter().parseAsync(cleanMeshGroup(group), { binary: true })) as ArrayBuffer;
+  const url = URL.createObjectURL(new Blob([glb], { type: "model/gltf-binary" }));
+  try {
+    return await renderTileThumbnail(url, 96);
+  } finally {
+    evictTileRender(url);
+    URL.revokeObjectURL(url);
+  }
 }
 
 export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: BankTile[]; allTiles: BankTile[]; onSaved: (tile: ParsedTile) => void }) {
-  const { addTile, tiles } = useProject();
+  const { addTile, cubes, saveCube, removeCube } = useProject();
   const [shape, setShape] = useState<VolumeShape>("cube");
   const [assignments, setAssignments] = useState<Partial<Record<VolumeFaceName, string>>>({});
   const [seed, setSeed] = useState(1);
   const [fitTolerance, setFitTolerance] = useState(50);
   const [cleanup, setCleanup] = useState<CleanupSettings>(defaultCleanup);
+  const [swapped, setSwapped] = useState(false);
   const [name, setName] = useState("");
   const [category, setCategory] = useState<(typeof CATEGORY_OPTIONS)[number] | "">("");
   const [typology, setTypology] = useState("");
@@ -240,7 +281,11 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
 
   const faceNames = facesForShape(shape);
   const tileByName = useMemo(() => new Map(allTiles.map((t) => [t.name, t])), [allTiles]);
-  const savedSectionTiles = useMemo(() => tiles.filter((t) => t.sectionRecipe), [tiles]);
+  const savedCubes = useMemo(() => [...cubes].sort((a, b) => b.createdAt - a.createdAt), [cubes]);
+  const cubesRef = useRef(cubes);
+  useEffect(() => {
+    cubesRef.current = cubes;
+  }, [cubes]);
   // With nothing checked in the bank the builder falls back to the whole
   // bank, so it's usable on its own (e.g. just to revisit saved objects).
   const effectivePool = bankTiles.length ? pool : "all";
@@ -259,11 +304,13 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
   // Cleanup runs on the already-lofted field, deferred so dragging a slider
   // stays smooth while the (heavier) clean + remesh catches up behind it.
   const deferredCleanup = useDeferredValue(cleanup);
+  const deferredSwapped = useDeferredValue(swapped);
   const built = useMemo(() => {
     if (!raw) return null;
-    const { volume, stats } = cleanupVolumeField(raw.volume, deferredCleanup, TILE_FT[0]);
+    const lofted = deferredSwapped ? swapFoamVoid(raw.volume) : raw.volume;
+    const { volume, stats } = cleanupVolumeField(lofted, deferredCleanup, TILE_FT[0]);
     return { group: buildTileScene(volume.field, volume.resolution, TILE_FT, raw.shape), stats };
-  }, [raw, deferredCleanup]);
+  }, [raw, deferredCleanup, deferredSwapped]);
   const previewGroup = built?.group ?? null;
   const cleanupStats = built && isCleanupActive(deferredCleanup) ? built.stats : null;
 
@@ -276,12 +323,62 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
     };
   }, [previewGroup]);
 
-  const generateFrom = (shapeNow: VolumeShape, traces: VolumeAssignments, seedNow: number, fitNow: number) => {
+  // Every piece made here is kept with the project code automatically --
+  // saved on Generate and kept up to date as cleanup / swap / name change,
+  // whether or not it is ever added to the tile bank.
+  useEffect(() => {
+    if (!raw || !built) return;
+    const existing = cubesRef.current.find((c) => c.id === raw.cubeId);
+    const entry = {
+      name: name.trim() || existing?.name || `Cube ${cubesRef.current.length + 1}`,
+      shape: raw.shape,
+      assignments: raw.assignmentNames,
+      traces: raw.traces,
+      seed: raw.seed,
+      fitTolerance: raw.fitTolerance,
+      cleanup: deferredCleanup,
+      swapped: deferredSwapped,
+    };
+    if (existing && existing.thumb && cubeSignature(existing) === cubeSignature(entry)) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      const sameShape = existing && cubeSignature({ ...existing, name: "" }) === cubeSignature({ ...entry, name: "" });
+      let thumb = sameShape ? existing?.thumb : undefined;
+      if (!thumb) {
+        try {
+          thumb = await thumbnailFor(built.group);
+        } catch {
+          // A missing thumbnail only costs the list a picture.
+        }
+      }
+      if (!cancelled) saveCube({ id: raw.cubeId, createdAt: existing?.createdAt ?? raw.createdAt, thumb, ...entry });
+    }, 700);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [raw, built, deferredCleanup, deferredSwapped, name, saveCube]);
+
+  const generateFrom = (shapeNow: VolumeShape, traces: VolumeAssignments, names: Record<string, string>, seedNow: number, fitNow: number, reuse?: { id: string; createdAt: number }) => {
     const volume = buildVolumeField(traces, shapeNow, seedNow, fitNow, 46);
     setFaceFit(volume.faceFit);
     setAssignedFaceCount(Object.keys(traces).length);
     rawCounter.current += 1;
-    setRaw({ id: rawCounter.current, volume, shape: shapeNow });
+    // Pressing Generate again on a recipe that is already saved reuses that
+    // saved piece instead of adding a duplicate.
+    const fresh = freshCubeStamp();
+    const same = reuse ?? cubes.find((c) => c.shape === shapeNow && c.seed === seedNow && c.fitTolerance === fitNow && JSON.stringify(c.assignments) === JSON.stringify(names));
+    setRaw({
+      id: rawCounter.current,
+      volume,
+      shape: shapeNow,
+      cubeId: same?.id ?? fresh.id,
+      createdAt: same?.createdAt ?? fresh.createdAt,
+      assignmentNames: names,
+      traces: traces as Record<string, SectionTrace>,
+      seed: seedNow,
+      fitTolerance: fitNow,
+    });
     setFaceOverlays((prev) => {
       const next = { ...prev };
       let i = 0;
@@ -298,7 +395,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
       toast.error("Assign at least one tile to a face first.");
       return;
     }
-    generateFrom(shape, volAssignments, seed, fitTolerance);
+    generateFrom(shape, volAssignments, Object.fromEntries(Object.entries(assignments).filter(([, v]) => v)) as Record<string, string>, seed, fitTolerance);
   };
 
   const autoFillEmptyFaces = () => {
@@ -316,33 +413,21 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
     });
   };
 
-  const loadRecipe = (tile: ParsedTile) => {
-    const recipe = tile.sectionRecipe;
-    if (!recipe) return;
-    const traces: VolumeAssignments = {};
-    let missing = 0;
-    for (const [face, tileName] of Object.entries(recipe.assignments)) {
-      const source = tileByName.get(tileName);
-      if (source) (traces as Record<string, typeof source.proposal>)[face] = source.proposal;
-      else missing++;
-    }
-    setShape(recipe.shape);
-    setAssignments(recipe.assignments);
-    setSeed(recipe.seed);
-    setFitTolerance(recipe.fitTolerance);
-    setCleanup(recipe.cleanup ?? defaultCleanup);
-    setName(tile.name);
+  const loadCube = (cube: SavedCube) => {
+    setShape(cube.shape);
+    setAssignments(cube.assignments);
+    setSeed(cube.seed);
+    setFitTolerance(cube.fitTolerance);
+    setCleanup(cube.cleanup);
+    setSwapped(cube.swapped);
+    setName(cube.name);
     setClip(defaultClipState());
     setOpenFace(null);
     setFaceOverlays({});
-    if (!Object.keys(traces).length) {
-      toast.error(`Couldn't find any of "${tile.name}"'s source tiles in the bank.`);
-      return;
-    }
-    // Lofted straight away from the recipe's own values (not the state the
-    // setters above haven't flushed yet), so opening a saved object shows it.
-    generateFrom(recipe.shape, traces, recipe.seed, recipe.fitTolerance);
-    toast.success(missing ? `Loaded "${tile.name}" (${missing} source tile${missing === 1 ? "" : "s"} no longer in the bank).` : `Loaded "${tile.name}".`);
+    // Lofted straight from the traces stored with the piece, so it comes back
+    // exactly as it was made.
+    generateFrom(cube.shape, cube.traces, cube.assignments, cube.seed, cube.fitTolerance, { id: cube.id, createdAt: cube.createdAt });
+    toast.success(`Opened "${cube.name}".`);
   };
 
   const buildInput = (): BuildSectionTileInput => ({
@@ -353,6 +438,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
     seed,
     fitTolerance,
     cleanup,
+    swapped,
     guessed: category ? { category, typology: typology.trim() || undefined } : {},
   });
 
@@ -383,7 +469,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
       toast.error("Generate a preview first.");
       return;
     }
-    downloadTextFile(`${(name.trim() || "section_tile").replace(/\s+/g, "_")}.obj`, groupToObjText(previewGroup));
+    downloadTextFile(`${(name.trim() || "section_tile").replace(/\s+/g, "_")}.obj`, groupToObjText(cleanMeshGroup(previewGroup)));
   };
 
   const exportAnalysisBundle = async () => {
@@ -502,6 +588,13 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
               Seam fit tolerance ({fitTolerance})
               <input type="range" min={0} max={100} value={fitTolerance} onChange={(e) => setFitTolerance(Number(e.target.value))} className="mt-1 w-full" />
             </label>
+            <label className="flex items-center justify-between gap-2 text-xs">
+              <span>
+                Swap foam &amp; void
+                <span className="block text-[10px] text-muted-foreground">{swapped ? "foam = the cube minus your shape" : "foam = your shape, void = the rest"}</span>
+              </span>
+              <Switch checked={swapped} onCheckedChange={setSwapped} />
+            </label>
             <Button className="w-full" onClick={generatePreview}>
               Generate preview
             </Button>
@@ -536,25 +629,33 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
             </p>
           </div>
         </GlowPanel>
-        {savedSectionTiles.length > 0 && (
+        {savedCubes.length > 0 && (
           <GlowPanel glow="orange">
             <div className="space-y-2 p-4">
-              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Saved objects</div>
+              <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Saved objects ({savedCubes.length})</div>
+              <p className="text-[10px] text-muted-foreground">Every piece you generate is kept with this project code automatically.</p>
               <div className="space-y-1">
-                {savedSectionTiles.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => loadRecipe(t)}
-                    className="flex w-full items-center gap-2 rounded-md border border-input px-2 py-1.5 text-left text-xs transition-colors hover:border-magenta/50"
-                  >
-                    <TileThumbnail glbUrl={t.glbUrl} size={36} />
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium">{t.name}</span>
-                      <span className="block text-[10px] text-muted-foreground">
-                        {t.sectionRecipe?.shape} · seed {t.sectionRecipe?.seed}
+                {savedCubes.map((c) => (
+                  <div key={c.id} className="flex items-center gap-1 rounded-md border border-input pr-1 transition-colors hover:border-magenta/50">
+                    <button onClick={() => loadCube(c)} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs">
+                      <span className="inline-block h-9 w-9 shrink-0 overflow-hidden rounded bg-white/5">
+                        {c.thumb && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={c.thumb} alt="" className="h-full w-full object-contain" />
+                        )}
                       </span>
-                    </span>
-                  </button>
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{c.name}</span>
+                        <span className="block text-[10px] text-muted-foreground">
+                          {c.shape} · seed {c.seed}
+                          {c.swapped ? " · swapped" : ""}
+                        </span>
+                      </span>
+                    </button>
+                    <Button type="button" size="icon" variant="ghost" className="h-6 w-6 shrink-0 text-muted-foreground" aria-label={`Delete ${c.name}`} title="Delete this saved object" onClick={() => removeCube(c.id)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -596,7 +697,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
               </div>
             ) : (
               <div className="glass-panel flex h-full items-center justify-center rounded-lg p-8 text-center text-sm text-muted-foreground">
-                Assign tiles to faces, then Generate preview{savedSectionTiles.length ? " -- or open one of your saved objects." : "."}
+                Assign tiles to faces, then Generate preview{savedCubes.length ? " -- or open one of your saved objects." : "."}
               </div>
             )}
           </SquareFrame>

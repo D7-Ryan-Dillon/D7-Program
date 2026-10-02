@@ -209,9 +209,22 @@ export function buildSilhouetteOutline(mesh: THREE.Mesh, settings: OutlineSettin
   return outline;
 }
 
-export function buildFacetLines(mesh: THREE.Mesh, settings: FacetLineSettings): THREE.LineSegments {
+export function buildFacetLines(mesh: THREE.Mesh, settings: FacetLineSettings, ctx: LineContext): LineSegments2 {
   const edges = new THREE.EdgesGeometry(mesh.geometry, 1);
-  const lines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: settings.color, opacity: settings.opacity, transparent: settings.opacity < 1 }));
+  const geometry = new LineSegmentsGeometry();
+  geometry.setPositions(edges.attributes.position.array as Float32Array);
+  edges.dispose();
+  const lines = new LineSegments2(
+    geometry,
+    new LineMaterial({
+      color: new THREE.Color(settings.color),
+      linewidth: Math.max(settings.weightPt * ctx.pxPerPt, 0.01),
+      worldUnits: false,
+      transparent: settings.opacity < 1,
+      opacity: settings.opacity,
+      resolution: ctx.resolution.clone(),
+    }),
+  );
   lines.name = "foam-facet-lines";
   lines.position.copy(mesh.position);
   lines.rotation.copy(mesh.rotation);
@@ -232,7 +245,7 @@ export function buildLineDecorations(root: THREE.Object3D, foam: THREE.Mesh | un
   const out: THREE.Object3D[] = [];
   if (settings.foamOutline?.enabled) out.push(buildOuterShapeOutline(root, box, settings.foamOutline, ctx));
   if (settings.voidOutline?.enabled && voidMesh) out.push(buildSilhouetteOutline(voidMesh, settings.voidOutline, ctx));
-  if (settings.facetLines?.enabled && foam) out.push(buildFacetLines(foam, settings.facetLines));
+  if (settings.facetLines?.enabled && foam) out.push(buildFacetLines(foam, settings.facetLines, ctx));
   return out;
 }
 
@@ -377,6 +390,13 @@ async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> 
 }
 
 const thumbnailCache = new Map<string, Promise<string>>();
+
+/** Forgets everything cached for a GLB url -- for throwaway blob urls (e.g. a
+ * builder preview rendered once for its saved thumbnail) so they don't pile up. */
+export function evictTileRender(glbUrl: string) {
+  sceneCache.delete(glbUrl);
+  for (const key of [...thumbnailCache.keys()]) if (key.startsWith(`${glbUrl}@`)) thumbnailCache.delete(key);
+}
 
 /** A small identifying preview for a tile bank/list row -- same fixed angle
  * and colors everywhere (matching the Viewer tab's own default look) so

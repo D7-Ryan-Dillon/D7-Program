@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ParsedTile } from "@/lib/types";
 import { loadProject, saveProject } from "@/lib/persistence";
+import type { SavedCube } from "@/lib/sections/savedCubes";
 
 const LAST_CODE_KEY = "erosion-workspace:last-project-code";
 
@@ -37,6 +38,9 @@ function describeError(err: unknown): string {
 type ProjectState = {
   projectCode: string | null;
   tiles: ParsedTile[];
+  /** Pieces made in the Sections cube/hex builder -- kept with the project
+   * whether or not they were ever added to the tile bank. */
+  cubes: SavedCube[];
   activeTileId: string | null;
   saveStatus: SaveStatus;
   saveError: string | null;
@@ -44,6 +48,9 @@ type ProjectState = {
   leaveProject: () => void;
   addTile: (tile: ParsedTile) => void;
   removeTile: (id: string) => void;
+  /** Adds a saved cube, or replaces the one with the same id. */
+  saveCube: (cube: SavedCube) => void;
+  removeCube: (id: string) => void;
   updateTile: (id: string, patch: Partial<ParsedTile>) => void;
   setActiveTile: (id: string | null) => void;
   lastUsedCode: string | null;
@@ -60,6 +67,7 @@ const AUTOSAVE_DELAY_MS = 1200;
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const [projectCode, setProjectCode] = useState<string | null>(null);
   const [tiles, setTiles] = useState<ParsedTile[]>([]);
+  const [cubes, setCubes] = useState<SavedCube[]>([]);
   const [activeTileId, setActiveTileId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -76,6 +84,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     readyForCode.current = null;
     setProjectCode(code);
     setTiles([]);
+    setCubes([]);
     setActiveTileId(null);
     setPinnedTileIds([]);
     setSaveStatus("loading");
@@ -83,7 +92,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
 
     loadProject(code)
       .then((loaded) => {
-        if (loaded) setTiles(loaded);
+        if (loaded) {
+          setTiles(loaded.tiles);
+          setCubes(loaded.cubes);
+        }
         setSaveStatus("idle");
         setSaveError(null);
       })
@@ -101,6 +113,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     readyForCode.current = null;
     setProjectCode(null);
     setTiles([]);
+    setCubes([]);
     setActiveTileId(null);
     setPinnedTileIds([]);
     setSaveStatus("idle");
@@ -110,7 +123,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (!projectCode || readyForCode.current !== projectCode) return;
     setSaveStatus("saving");
     const timer = setTimeout(() => {
-      saveProject(projectCode, tiles)
+      saveProject(projectCode, tiles, cubes)
         .then(() => {
           setSaveStatus("saved");
           setSaveError(null);
@@ -122,7 +135,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         });
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [tiles, projectCode]);
+  }, [tiles, cubes, projectCode]);
 
   const addTile = useCallback((tile: ParsedTile) => {
     setTiles((prev) => {
@@ -138,6 +151,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setPinnedTileIds((prev) => prev.filter((pinnedId) => pinnedId !== id));
   }, []);
 
+  const saveCube = useCallback((cube: SavedCube) => {
+    setCubes((prev) => (prev.some((c) => c.id === cube.id) ? prev.map((c) => (c.id === cube.id ? cube : c)) : [...prev, cube]));
+  }, []);
+
+  const removeCube = useCallback((id: string) => {
+    setCubes((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
   const togglePinned = useCallback((id: string) => {
     setPinnedTileIds((prev) => (prev.includes(id) ? prev.filter((pinnedId) => pinnedId !== id) : [...prev, id]));
   }, []);
@@ -150,6 +171,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     () => ({
       projectCode,
       tiles,
+      cubes,
       activeTileId,
       saveStatus,
       saveError,
@@ -157,13 +179,15 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
       leaveProject,
       addTile,
       removeTile,
+      saveCube,
+      removeCube,
       updateTile,
       setActiveTile: setActiveTileId,
       lastUsedCode,
       pinnedTileIds,
       togglePinned,
     }),
-    [projectCode, tiles, activeTileId, saveStatus, saveError, enterProject, leaveProject, addTile, removeTile, updateTile, lastUsedCode, pinnedTileIds, togglePinned],
+    [projectCode, tiles, cubes, activeTileId, saveStatus, saveError, enterProject, leaveProject, addTile, removeTile, saveCube, removeCube, updateTile, lastUsedCode, pinnedTileIds, togglePinned],
   );
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;

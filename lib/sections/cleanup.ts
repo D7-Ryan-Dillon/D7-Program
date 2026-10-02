@@ -245,6 +245,17 @@ export function cleanupVolumeField(volume: VolumeField, settings: CleanupSetting
   return { volume: { ...volume, field }, stats };
 }
 
+/** Swaps which side of the loft is foam: negates the field, so the cube
+ * minus the lofted shape becomes the foam and the lofted shape becomes the
+ * void. Done before cleanup so the sliders act on whatever is currently the
+ * foam. (The forced-void margin flips too, but nothing ever reads it: the
+ * mesh and voxelizer only sample inside the tile.) */
+export function swapFoamVoid(volume: VolumeField): VolumeField {
+  const field = new Float32Array(volume.field.length);
+  for (let i = 0; i < field.length; i++) field[i] = -volume.field[i];
+  return { ...volume, field };
+}
+
 /** Quick foam-volume readout for the builder UI (ft^3 of positive nodes
  * inside the tile) -- lets the cleanup sliders show a sensible upper bound. */
 export function foamVolumeFt3(volume: VolumeField, tileFt = 20): number {
