@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { BankTile } from "@/lib/sections/tileLibrary";
 
@@ -16,16 +17,17 @@ function TileThumb({ tile, selected, onClick }: { tile: BankTile; selected: bool
       )}
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- a user-supplied/local photo, not an optimizable remote asset */}
-      <img src={tile.src} alt={tile.name} className="absolute inset-0 h-full w-full object-cover" />
+      <img src={tile.src} alt={tile.displayName} className="absolute inset-0 h-full w-full object-cover" />
       <svg viewBox={`0 0 ${tile.proposal.width} ${tile.proposal.height}`} preserveAspectRatio="xMidYMid slice" className="absolute inset-0 h-full w-full opacity-70 mix-blend-screen">
         {tile.proposal.shapes.map((s, i) => (
           <path key={i} d={s.d} fill="white" fillRule="evenodd" />
         ))}
       </svg>
-      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/60 px-1.5 py-1 font-mono text-[10px] uppercase tracking-label text-white opacity-0 transition-opacity group-hover:opacity-100">
-        <span className="truncate">{tile.name}</span>
-        {tile.corrected && <span className="text-cyan-400">corrected</span>}
-      </div>
+      {tile.corrected && (
+        <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1.5 py-1 text-right font-mono text-[10px] uppercase tracking-label text-cyan-400 opacity-0 transition-opacity group-hover:opacity-100">
+          corrected
+        </div>
+      )}
     </button>
   );
 }
@@ -35,11 +37,13 @@ export function TileBank({
   selected,
   onSelect,
   onAddFiles,
+  onRename,
 }: {
   tiles: BankTile[];
   selected: Set<string>;
   onSelect: (name: string, mode: "edit" | "toggle") => void;
   onAddFiles: (files: FileList) => void;
+  onRename: (name: string, displayName: string) => void;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -69,6 +73,11 @@ export function TileBank({
         {tiles.map((tile) => (
           <div key={tile.name} className="space-y-1">
             <TileThumb tile={tile} selected={selected.has(tile.name)} onClick={() => onSelect(tile.name, "edit")} />
+            <Input
+              value={tile.displayName}
+              onChange={(e) => onRename(tile.name, e.target.value)}
+              className="h-6 px-1.5 text-[10px]"
+            />
             <label className="flex items-center gap-1.5 px-0.5 text-[10px] text-muted-foreground">
               <input type="checkbox" checked={selected.has(tile.name)} onChange={() => onSelect(tile.name, "toggle")} />
               use in builder

@@ -8,8 +8,49 @@
 // moved there too, used by the shared lib/renderTile.ts, not just Boards) --
 // re-exported here so nothing importing them from this file had to change.
 import type { AxoViewKey } from "@/lib/faceViews";
+import type { ClipState } from "@/lib/clipping";
 export type { AxoViewKey } from "@/lib/faceViews";
 export { DEFAULT_AXO_VIEW } from "@/lib/faceViews";
+
+/** A custom (non-preset) camera, captured when the per-tile popup editor
+ * is left in free Perspective mode rather than a locked axo preset --
+ * enough to reproduce the exact framing in a headless re-render. */
+export interface CustomCamera {
+  position: [number, number, number];
+  target: [number, number, number];
+}
+
+export interface OutlineSettings {
+  enabled: boolean;
+  color: string;
+  opacity: number;
+  weightPx: number;
+}
+
+export interface FacetLineSettings {
+  enabled: boolean;
+  color: string;
+  opacity: number;
+}
+
+/** Per-tile overrides set from the Boards tab's per-slot popup editor --
+ * everything here is optional and falls back to the matching board-wide
+ * BoardConfig setting when unset, exactly like `view`/`nameFontSizePt`
+ * already do below. */
+export interface BoardSlotOverrides {
+  foamColor?: string;
+  foamOpacity?: number;
+  voidColor?: string;
+  voidOpacity?: number;
+  clip?: ClipState;
+  foamOutline?: OutlineSettings;
+  voidOutline?: OutlineSettings;
+  foamFacetLines?: FacetLineSettings;
+  voidFacetLines?: FacetLineSettings;
+  /** Only set when the popup was left in free Perspective rotation rather
+   * than a locked axo preset -- takes priority over `view` when present. */
+  customCamera?: CustomCamera;
+}
 
 export interface BoardSlot {
   id: string;
@@ -18,6 +59,7 @@ export interface BoardSlot {
   /** Manual override for this tile's name-tag text size, in points. Unset
    * (or null) means auto-fit. */
   nameFontSizePt: number | null;
+  overrides?: BoardSlotOverrides;
 }
 
 export interface BoardTextBox {
@@ -50,6 +92,14 @@ export interface BoardConfig {
   voidColor: string;
   foamOpacity: number;
   voidOpacity: number;
+  /** Board-wide master silhouette-outline and facet-line settings for
+   * every tile's own render (not the module's print frame -- see
+   * `outlineWidthPt` below for that) -- a per-slot popup override can
+   * shadow these for one specific tile. Default off everywhere. */
+  foamOutline: OutlineSettings;
+  voidOutline: OutlineSettings;
+  foamFacetLines: FacetLineSettings;
+  voidFacetLines: FacetLineSettings;
   /** Frame stroke weight, in points (1pt = 1/72in, same convention as
    * print/vector tools -- independent of the board's own DPI). */
   outlineWidthPt: number;
@@ -100,6 +150,10 @@ export function defaultBoardConfig(): BoardConfig {
     voidColor: "#c43383",
     foamOpacity: 0.1,
     voidOpacity: 1,
+    foamOutline: { enabled: false, color: "#ffffff", opacity: 1, weightPx: 2 },
+    voidOutline: { enabled: false, color: "#ffffff", opacity: 1, weightPx: 2 },
+    foamFacetLines: { enabled: false, color: "#ffffff", opacity: 0.4 },
+    voidFacetLines: { enabled: false, color: "#ffffff", opacity: 0.4 },
     outlineWidthPt: 1.5,
     gapXIn: 0.5,
     gapYIn: 0.5,

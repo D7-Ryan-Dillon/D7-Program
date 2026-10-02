@@ -240,6 +240,20 @@ export interface ParsedTile {
    * every Grasshopper export. A lib/sections hex-prism tile sets this to
    * its 8 face names (side1..side6, top, bottom). */
   faceNames?: FaceName[];
+  /** Present only for a tile built by the Sections cube/hex builder -- its
+   * exact build inputs (which bank tile went on which face, seed, fit
+   * tolerance, shape), the same role a Grasshopper tile's recipe.json
+   * plays: enough to reopen it in the builder and regenerate the same
+   * mesh, or to rebuild it from scratch later. */
+  sectionRecipe?: {
+    shape: "cube" | "hex-prism";
+    /** Keyed by the builder's own face names (front/back/... or
+     * side1..side6/top/bottom) -- values are bank-tile ids (BankTile.name,
+     * not its display name), so a rename elsewhere never orphans this. */
+    assignments: Record<string, string>;
+    seed: number;
+    fitTolerance: number;
+  };
 }
 
 export const GLB_TO_FEET_ROW_MAJOR: number[][] = [

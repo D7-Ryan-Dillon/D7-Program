@@ -8,6 +8,7 @@ import * as THREE from "three";
 import type { ParsedTile } from "@/lib/types";
 import { ALL_VIEWS } from "@/lib/faceViews";
 import { useShiftToPan } from "@/lib/useShiftToPan";
+import { applyClipToMesh, buildClipOutline, buildClipPlane, buildCutFaceCap, defaultClipState, type ClipState } from "@/lib/clipping";
 
 export type DisplayMode = "rendered" | "ghosted";
 export interface MeshVisibility {
@@ -31,6 +32,7 @@ interface ModelProps {
   displayMode: DisplayMode;
   visibility: MeshVisibility;
   colors: MeshColors;
+  clip?: ClipState;
   onBounds: (bounds: Bounds) => void;
 }
 
@@ -52,9 +54,10 @@ function applyMaterial(mesh: THREE.Mesh, color: string, visible: boolean, ghoste
   });
 }
 
-function Model({ tile, displayMode, visibility, colors, onBounds }: ModelProps) {
+function Model({ tile, displayMode, visibility, colors, clip, onBounds }: ModelProps) {
   const gltf = useGLTF(tile.glbUrl);
   const scene = useMemo(() => gltf.scene.clone(true), [gltf]);
+  const clipExtrasRef = useRef<THREE.Object3D[]>([]);
 
   useEffect(() => {
     const foam = scene.getObjectByName("foam");
@@ -62,6 +65,43 @@ function Model({ tile, displayMode, visibility, colors, onBounds }: ModelProps) 
     if (foam instanceof THREE.Mesh) applyMaterial(foam, colors.foam, visibility.foam, displayMode === "ghosted");
     if (voidMesh instanceof THREE.Mesh) applyMaterial(voidMesh, colors.void, visibility.void, displayMode === "ghosted");
   }, [scene, displayMode, visibility, colors]);
+
+  useEffect(() => {
+    for (const obj of clipExtrasRef.current) {
+      obj.removeFromParent();
+    }
+    clipExtrasRef.current = [];
+
+    const foam = scene.getObjectByName("foam");
+    const voidMesh = scene.getObjectByName("void");
+    const meshes = [foam, voidMesh].filter((m): m is THREE.Mesh => m instanceof THREE.Mesh);
+
+    if (!clip?.enabled) {
+      for (const mesh of meshes) applyClipToMesh(mesh, null);
+      return;
+    }
+
+    const box = new THREE.Box3().setFromObject(scene);
+    const plane = buildClipPlane(clip, box);
+    for (const mesh of meshes) applyClipToMesh(mesh, plane);
+
+    const outline = buildClipOutline(clip, box);
+    scene.add(outline);
+    clipExtrasRef.current.push(outline);
+
+    if (clip.cutFace?.enabled) {
+      if (foam instanceof THREE.Mesh) {
+        const cap = buildCutFaceCap(foam, plane, box, clip, clip.cutFace.foamColor, clip.cutFace.foamOpacity);
+        scene.add(cap);
+        clipExtrasRef.current.push(cap);
+      }
+      if (voidMesh instanceof THREE.Mesh) {
+        const cap = buildCutFaceCap(voidMesh, plane, box, clip, clip.cutFace.voidColor, clip.cutFace.voidOpacity);
+        scene.add(cap);
+        clipExtrasRef.current.push(cap);
+      }
+    }
+  }, [scene, clip]);
 
   useEffect(() => {
     const box = new THREE.Box3().setFromObject(scene);
@@ -122,12 +162,14 @@ export function ThreeViewport({
   displayMode,
   visibility,
   colors,
+  clip,
   activeViewKey,
 }: {
   tile: ParsedTile;
   displayMode: DisplayMode;
   visibility: MeshVisibility;
   colors: MeshColors;
+  clip?: ClipState;
   activeViewKey: string;
 }) {
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
@@ -136,13 +178,20 @@ export function ThreeViewport({
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-lg bg-black/40">
-      <Canvas dpr={[1, 2]} camera={{ fov: 42, near: 0.05, far: 500, position: [8, 6, 8] }} gl={{ antialias: true }}>
+      <Canvas
+        dpr={[1, 2]}
+        camera={{ fov: 42, near: 0.05, far: 500, position: [8, 6, 8] }}
+        gl={{ antialias: true }}
+        onCreated={(state) => {
+          state.gl.localClippingEnabled = true;
+        }}
+      >
         <color attach="background" args={["#0a0a0b"]} />
         <ambientLight intensity={0.6} />
         <directionalLight position={[6, 10, 4]} intensity={1.1} />
         <directionalLight position={[-6, -4, -6]} intensity={0.25} />
         <Suspense fallback={null}>
-          <Model tile={tile} displayMode={displayMode} visibility={visibility} colors={colors} onBounds={setBounds} />
+          <Model tile={tile} displayMode={displayMode} visibility={visibility} colors={colors} clip={clip ?? defaultClipState()} onBounds={setBounds} />
           <ErrorBoundary>
             <Environment preset="city" environmentIntensity={0.25} />
           </ErrorBoundary>

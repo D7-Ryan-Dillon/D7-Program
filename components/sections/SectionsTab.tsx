@@ -14,7 +14,7 @@ import { CubeHexBuilder } from "@/components/sections/CubeHexBuilder";
 // loading it client-only sidesteps that entirely rather than fighting
 // paper's own Node-detection shim (see lib/sections/correctionGeometry.ts).
 const CorrectionEditor = dynamic(() => import("@/components/sections/CorrectionEditor").then((m) => m.CorrectionEditor), { ssr: false });
-import { addNewTile, loadTileBank, saveCorrection, type BankTile } from "@/lib/sections/tileLibrary";
+import { addNewTile, loadTileBank, nextTileNumber, renameTile, saveCorrection, type BankTile } from "@/lib/sections/tileLibrary";
 import { autoTraceImage } from "@/lib/sections/autoTrace";
 
 export function SectionsTab() {
@@ -56,8 +56,13 @@ export function SectionsTab() {
           reader.onerror = reject;
           reader.readAsDataURL(file);
         });
-        const name = file.name.replace(/\.[^.]+$/, "");
+        // The stable id still comes from the file name (uniqueness, no
+        // other purpose) -- the display name users actually see is always
+        // a sequential "Tile N", continuing from whatever's already in the
+        // bank (baked photos included) rather than the raw file name.
+        const name = `${file.name.replace(/\.[^.]+$/, "")}-${Date.now().toString(36)}`;
         addNewTile({ name, src, proposal });
+        renameTile(name, `Tile ${nextTileNumber((tiles ?? []).map((t) => t.displayName))}`);
       } catch {
         toast.error(`Couldn't trace ${file.name}.`);
       }
@@ -85,7 +90,16 @@ export function SectionsTab() {
       {view === "bank" ? (
         <GlowPanel glow="magenta" className="min-h-0 flex-1 overflow-y-auto">
           <div className="p-4">
-            <TileBank tiles={tiles} selected={selectedNames} onSelect={handleSelect} onAddFiles={(files) => void handleAddFiles(files)} />
+            <TileBank
+              tiles={tiles}
+              selected={selectedNames}
+              onSelect={handleSelect}
+              onAddFiles={(files) => void handleAddFiles(files)}
+              onRename={(name, displayName) => {
+                renameTile(name, displayName);
+                setTiles((prev) => prev?.map((t) => (t.name === name ? { ...t, displayName } : t)) ?? prev);
+              }}
+            />
           </div>
         </GlowPanel>
       ) : (
@@ -96,7 +110,7 @@ export function SectionsTab() {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-6">
           <div className="flex h-full max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-white/15 bg-background">
             <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-              <span className="font-mono text-xs uppercase tracking-label text-muted-foreground">Vector correction · {editingTile.name}</span>
+              <span className="font-mono text-xs uppercase tracking-label text-muted-foreground">Vector correction · {editingTile.displayName}</span>
               <Button size="icon" variant="ghost" onClick={() => setEditingName(null)}>
                 <X className="h-4 w-4" />
               </Button>

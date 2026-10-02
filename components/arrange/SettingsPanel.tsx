@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Sparkles } from "lucide-react";
+import { ShuffleSeedButton } from "@/components/shared/ShuffleSeedButton";
 import type { AutoGenerateSettings } from "@/lib/arrange/types";
 
 export function SettingsPanel({
@@ -35,7 +36,10 @@ export function SettingsPanel({
       </div>
       <div>
         <Label className="font-mono text-[11px] uppercase tracking-label text-muted-foreground">Seed</Label>
-        <Input type="number" className="mt-1 font-mono" {...field("seed")} />
+        <div className="mt-1 flex gap-1.5">
+          <Input type="number" className="font-mono" {...field("seed")} />
+          <ShuffleSeedButton onShuffle={(seed) => onChange({ ...settings, seed })} />
+        </div>
       </div>
       <div>
         <Label className="font-mono text-[11px] uppercase tracking-label text-muted-foreground">Scale range</Label>

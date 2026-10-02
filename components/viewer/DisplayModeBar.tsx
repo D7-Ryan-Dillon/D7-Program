@@ -3,15 +3,22 @@
 import { cn } from "@/lib/utils";
 import type { DisplayMode } from "@/components/viewer/ThreeViewport";
 
-const MODES: { key: DisplayMode; label: string }[] = [
+const DEFAULT_MODES: { key: DisplayMode; label: string }[] = [
   { key: "rendered", label: "Rendered" },
   { key: "ghosted", label: "Ghosted" },
 ];
 
-export function DisplayModeBar({ mode, onChange }: { mode: DisplayMode; onChange: (mode: DisplayMode) => void }) {
+/** A pill toggle between display modes. Defaults to the Viewer tab's own
+ * Rendered/Ghosted pair; the Sections cube/hex builder passes a third
+ * "Faces" entry (its own display-mode union, unrelated to Viewer's) since
+ * only there do tiles have discrete per-face input assignments to
+ * visualize -- a real Grasshopper-exported tile has nothing a "Faces" mode
+ * would mean. */
+export function DisplayModeBar<T extends string>({ mode, onChange, modes }: { mode: T; onChange: (mode: T) => void; modes?: { key: T; label: string }[] }) {
+  const list = modes ?? (DEFAULT_MODES as unknown as { key: T; label: string }[]);
   return (
     <div className="inline-flex rounded-full border-hair p-0.5">
-      {MODES.map((m) => (
+      {list.map((m) => (
         <button
           key={m.key}
           onClick={() => onChange(m.key)}

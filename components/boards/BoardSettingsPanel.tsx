@@ -5,40 +5,8 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { ColorField } from "./ColorField";
 import { FontPicker } from "./FontPicker";
+import { NumberSlider } from "@/components/shared/NumberSlider";
 import type { BoardConfig } from "@/lib/boards/types";
-
-function NumberSlider({
-  label,
-  value,
-  min,
-  max,
-  step = 1,
-  suffix = "",
-  decimals = 0,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  suffix?: string;
-  decimals?: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="block text-xs">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-mono tabular-nums">
-          {value.toFixed(decimals)}
-          {suffix}
-        </span>
-      </div>
-      <Slider value={[value]} min={min} max={max} step={step} onValueChange={(v) => onChange(Array.isArray(v) ? v[0] : v)} />
-    </label>
-  );
-}
 
 /** A slider for coarse dragging (0.5in steps) paired with a free-form
  * number field for exact values down to the hundredth -- either one
@@ -145,6 +113,52 @@ export function BoardSettingsPanel({ config, onChange }: { config: BoardConfig; 
         <NumberSlider label="Foam opacity" value={Math.round(config.foamOpacity * 100)} min={10} max={100} suffix="%" onChange={(v) => onChange({ foamOpacity: v / 100 })} />
         <ColorField label="Void" value={config.voidColor} onChange={(voidColor) => onChange({ voidColor })} />
         <NumberSlider label="Void opacity" value={Math.round(config.voidOpacity * 100)} min={10} max={100} suffix="%" onChange={(v) => onChange({ voidOpacity: v / 100 })} />
+      </div>
+
+      <div className="space-y-2 border-t border-border pt-3">
+        <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Outline (whole board, per tile render)</div>
+        <p className="text-[10px] text-muted-foreground">Default for every tile -- override one tile&rsquo;s own in its popup editor.</p>
+        {(["foamOutline", "voidOutline"] as const).map((key) => {
+          const label = key === "foamOutline" ? "Foam" : "Void";
+          const setting = config[key];
+          return (
+            <div key={key} className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">{label} outline</span>
+                <Switch checked={setting.enabled} onCheckedChange={(enabled) => onChange({ [key]: { ...setting, enabled } })} />
+              </div>
+              {setting.enabled && (
+                <>
+                  <ColorField label="Color" value={setting.color} onChange={(color) => onChange({ [key]: { ...setting, color } })} />
+                  <NumberSlider label="Opacity" value={Math.round(setting.opacity * 100)} min={5} max={100} suffix="%" onChange={(v) => onChange({ [key]: { ...setting, opacity: v / 100 } })} />
+                  <NumberSlider label="Weight" value={setting.weightPx} min={1} max={10} suffix="px" onChange={(weightPx) => onChange({ [key]: { ...setting, weightPx } })} />
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="space-y-2 border-t border-border pt-3">
+        <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Facet lines (whole board, per tile render)</div>
+        {(["foamFacetLines", "voidFacetLines"] as const).map((key) => {
+          const label = key === "foamFacetLines" ? "Foam" : "Void";
+          const setting = config[key];
+          return (
+            <div key={key} className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">{label} facet lines</span>
+                <Switch checked={setting.enabled} onCheckedChange={(enabled) => onChange({ [key]: { ...setting, enabled } })} />
+              </div>
+              {setting.enabled && (
+                <>
+                  <ColorField label="Color" value={setting.color} onChange={(color) => onChange({ [key]: { ...setting, color } })} />
+                  <NumberSlider label="Opacity" value={Math.round(setting.opacity * 100)} min={5} max={100} suffix="%" onChange={(v) => onChange({ [key]: { ...setting, opacity: v / 100 } })} />
+                </>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <div className="space-y-2 border-t border-border pt-3">

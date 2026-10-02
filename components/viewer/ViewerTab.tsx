@@ -13,6 +13,8 @@ import { ExportPanel } from "@/components/viewer/ExportPanel";
 import { GlowPanel } from "@/components/shared/GlowPanel";
 import { SquareFrame } from "@/components/shared/SquareFrame";
 import { Separator } from "@/components/ui/separator";
+import { ClippingPlaneControl } from "@/components/shared/ClippingPlaneControl";
+import { defaultClipState, type ClipState } from "@/lib/clipping";
 
 export function ViewerTab() {
   const { tiles, activeTileId } = useProject();
@@ -22,6 +24,7 @@ export function ViewerTab() {
   const [activeView, setActiveView] = useState("perspective");
   const [visibility, setVisibility] = useState<MeshVisibility>({ foam: true, void: true });
   const [colors, setColors] = useState<MeshColors>({ foam: "#e8a6c8", void: "#1c1c1f" });
+  const [clip, setClip] = useState<ClipState>(defaultClipState());
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -50,6 +53,11 @@ export function ViewerTab() {
                 <VisibilityPanel visibility={visibility} onVisibility={setVisibility} colors={colors} onColors={setColors} />
               </div>
             </GlowPanel>
+            <GlowPanel glow="orange">
+              <div className="p-4">
+                <ClippingPlaneControl value={clip} onChange={setClip} />
+              </div>
+            </GlowPanel>
           </div>
 
           <div className="min-h-0 min-w-0">
@@ -60,6 +68,7 @@ export function ViewerTab() {
                 displayMode={displayMode}
                 visibility={visibility}
                 colors={colors}
+                clip={clip}
                 activeViewKey={activeView}
               />
             </SquareFrame>

@@ -7,7 +7,7 @@
 
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { FaceName, FacesJson, GuessedIdentity, ParsedTile, TileConfig, TileShape } from "@/lib/types";
-import { buildVolumeField, facesForShape, type VolumeAssignments, type VolumeShape } from "./volumeField";
+import { buildVolumeField, facesForShape, type VolumeAssignments, type VolumeFaceName, type VolumeShape } from "./volumeField";
 import { voxelizeVolumeField, SECTION_TILE_FT, SECTION_CELL_FT, SECTION_GRID, SECTION_HEX_APOTHEM_FT, SECTION_HEX_HEIGHT_FT } from "./voxelize";
 import { buildTileScene } from "./mesh";
 import { computeFaceData } from "./faceData";
@@ -20,6 +20,12 @@ export interface BuildSectionTileInput {
   /** Keyed by Section-Field's own cube/hex face names (front/back/... for a
    * cube, side1..side6/top/bottom for a hex-prism) -- see volumeField.ts. */
   assignments: VolumeAssignments;
+  /** The same faces, but naming which bank tile (its stable BankTile.name,
+   * not its editable display name) supplied each trace -- recorded on the
+   * result as `sectionRecipe` so the tile can be reopened in the builder
+   * later. Optional: a tile built without this (e.g. from an older
+   * session) just won't be reload-able, nothing else depends on it. */
+  assignmentNames?: Partial<Record<VolumeFaceName, string>>;
   seed?: number;
   fitTolerance?: number;
   guessed?: GuessedIdentity;
@@ -81,7 +87,7 @@ export async function buildSectionTile(input: BuildSectionTileInput): Promise<Pa
   const sections = computeSectionsData(voxels.void, SECTION_GRID, SECTION_TILE_FT);
   const metrics = computeTileMetrics(voxels.void, SECTION_GRID, SECTION_TILE_FT, faceMetrics);
 
-  const scene = buildTileScene(voxels.material, voxels.voidSmooth, SECTION_GRID, SECTION_TILE_FT);
+  const scene = buildTileScene(volume.field, volume.resolution, SECTION_TILE_FT);
   const exporter = new GLTFExporter();
   const glbBuffer = (await exporter.parseAsync(scene, { binary: true })) as ArrayBuffer;
   const glbUrl = URL.createObjectURL(new Blob([glbBuffer], { type: "model/gltf-binary" }));
@@ -107,5 +113,8 @@ export async function buildSectionTile(input: BuildSectionTileInput): Promise<Pa
     guessed: input.guessed ?? {},
     shape: shapeDescriptor,
     faceNames,
+    sectionRecipe: input.assignmentNames
+      ? { shape: input.shape, assignments: input.assignmentNames as Record<string, string>, seed, fitTolerance }
+      : undefined,
   };
 }

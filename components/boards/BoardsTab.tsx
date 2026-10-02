@@ -10,8 +10,9 @@ import { TilePicker } from "./TilePicker";
 import { SlotOrderList } from "./SlotOrderList";
 import { BoardSettingsPanel } from "./BoardSettingsPanel";
 import { BoardPreviewCanvas } from "./BoardPreviewCanvas";
+import { TileViewEditor } from "./TileViewEditor";
 import { downloadBlob, exportBoardPage1, exportBoardPage2 } from "@/lib/boards/exportBoard";
-import { DEFAULT_AXO_VIEW, defaultBoardConfig, type AxoViewKey, type BoardSlot } from "@/lib/boards/types";
+import { DEFAULT_AXO_VIEW, defaultBoardConfig, type AxoViewKey, type BoardSlot, type BoardSlotOverrides } from "@/lib/boards/types";
 
 let slotCounter = 0;
 function newSlotId() {
@@ -24,6 +25,7 @@ export function BoardsTab() {
   const [config, setConfig] = useState(defaultBoardConfig);
   const [previewPage, setPreviewPage] = useState<1 | 2>(1);
   const [exporting, setExporting] = useState(false);
+  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const previewAreaRef = useRef<HTMLDivElement>(null);
   const [previewAreaSize, setPreviewAreaSize] = useState({ width: 800, height: 600 });
 
@@ -74,6 +76,10 @@ export function BoardsTab() {
 
   const changeSlotNameSize = (slotId: string, nameFontSizePt: number | null) => {
     setConfig((prev) => ({ ...prev, slots: prev.slots.map((s) => (s.id === slotId ? { ...s, nameFontSizePt } : s)) }));
+  };
+
+  const changeSlotOverrides = (slotId: string, overrides: BoardSlotOverrides | undefined) => {
+    setConfig((prev) => ({ ...prev, slots: prev.slots.map((s) => (s.id === slotId ? { ...s, overrides } : s)) }));
   };
 
   const moveSlot = (slotId: string, direction: "up" | "down") => {
@@ -153,6 +159,7 @@ export function BoardsTab() {
                 onRemoveSlot={removeSlot}
                 onChangeSlotView={changeSlotView}
                 onChangeSlotNameSize={changeSlotNameSize}
+                onEditSlot={setEditingSlotId}
               />
             </div>
           ) : (
@@ -174,6 +181,22 @@ export function BoardsTab() {
           </div>
         </GlowPanel>
       </div>
+
+      {editingSlotId &&
+        (() => {
+          const slot = config.slots.find((s) => s.id === editingSlotId);
+          const tile = slot?.tileId ? tileById.get(slot.tileId) : undefined;
+          if (!slot || !tile) return null;
+          return (
+            <TileViewEditor
+              tile={tile}
+              slot={slot}
+              config={config}
+              onSave={(overrides) => changeSlotOverrides(slot.id, overrides)}
+              onClose={() => setEditingSlotId(null)}
+            />
+          );
+        })()}
     </div>
   );
 }

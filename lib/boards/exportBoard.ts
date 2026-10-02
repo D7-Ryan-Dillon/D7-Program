@@ -234,19 +234,26 @@ function drawNameTag(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardS
  * whichever axis is tighter), so nothing is cropped. */
 async function drawImageModule(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardSlot, tile: ParsedTile, config: BoardConfig, dpi: number) {
   const lineWidth = ptToPx(config.outlineWidthPt, dpi);
+  const o = slot.overrides;
 
   const dataUrl = await renderTileToDataUrl({
     glbUrl: tile.glbUrl,
     view: slot.view,
+    customCamera: o?.customCamera,
     width: Math.round(cell.size),
     height: Math.round(cell.size),
     backgroundColor: config.backgroundColor,
-    foamColor: config.foamColor,
-    voidColor: config.voidColor,
-    foamOpacity: config.foamOpacity,
-    voidOpacity: config.voidOpacity,
+    foamColor: o?.foamColor ?? config.foamColor,
+    voidColor: o?.voidColor ?? config.voidColor,
+    foamOpacity: o?.foamOpacity ?? config.foamOpacity,
+    voidOpacity: o?.voidOpacity ?? config.voidOpacity,
     foamVisible: true,
     voidVisible: true,
+    clip: o?.clip,
+    foamOutline: o?.foamOutline ?? config.foamOutline,
+    voidOutline: o?.voidOutline ?? config.voidOutline,
+    foamFacetLines: o?.foamFacetLines ?? config.foamFacetLines,
+    voidFacetLines: o?.voidFacetLines ?? config.voidFacetLines,
   });
   const img = await loadImage(dataUrl);
 
@@ -274,19 +281,26 @@ async function drawDescriptorModule(ctx: CanvasRenderingContext2D, cell: GridCel
   const imageWidth = cell.size * DIVIDER_X;
   const descX = cell.x + imageWidth;
   const descWidth = cell.size - imageWidth;
+  const o = slot.overrides;
 
   const dataUrl = await renderTileToDataUrl({
     glbUrl: tile.glbUrl,
     view: slot.view,
+    customCamera: o?.customCamera,
     width: Math.round(imageWidth),
     height: Math.round(cell.size),
     backgroundColor: config.backgroundColor,
-    foamColor: config.foamColor,
-    voidColor: config.voidColor,
-    foamOpacity: config.foamOpacity,
-    voidOpacity: config.voidOpacity,
+    foamColor: o?.foamColor ?? config.foamColor,
+    voidColor: o?.voidColor ?? config.voidColor,
+    foamOpacity: o?.foamOpacity ?? config.foamOpacity,
+    voidOpacity: o?.voidOpacity ?? config.voidOpacity,
     foamVisible: true,
     voidVisible: true,
+    clip: o?.clip,
+    foamOutline: o?.foamOutline ?? config.foamOutline,
+    voidOutline: o?.voidOutline ?? config.voidOutline,
+    foamFacetLines: o?.foamFacetLines ?? config.foamFacetLines,
+    voidFacetLines: o?.voidFacetLines ?? config.voidFacetLines,
   });
   const img = await loadImage(dataUrl);
 

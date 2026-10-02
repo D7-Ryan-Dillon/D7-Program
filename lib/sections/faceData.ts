@@ -14,7 +14,7 @@ import type { SectionTrace } from "./volumeField";
 import { faceMask } from "./volumeField";
 import { SECTION_CELL_FT } from "./voxelize";
 
-interface FaceLayout {
+export interface FaceLayout {
   rows: number;
   cols: number;
   /** Reads one cell of the (box) voxel grid for this face's local (row, col). */
@@ -24,8 +24,11 @@ interface FaceLayout {
 /** Box-face layouts, matching lib/arrange/transforms.ts's faceLayer exactly
  * (same grid, same convention) -- the two are independent implementations
  * on purpose (lib/arrange is Arrange-tab-only and explicitly not touched by
- * this work), but they must agree on what "the +X face" means. */
-function boxFaceLayout(face: FaceName, grid: [number, number, number]): FaceLayout {
+ * this work), but they must agree on what "the +X face" means. Exported for
+ * lib/sections/exportAnalysis.ts's depth-scan, which needs the same
+ * per-face (row, col) -> voxel mapping but walking inward from the face
+ * rather than just reading its own layer. */
+export function boxFaceLayout(face: FaceName, grid: [number, number, number]): FaceLayout {
   const [nx, ny, nz] = grid;
   if (face === "-X" || face === "+X") {
     const x = face === "-X" ? 0 : nx - 1;

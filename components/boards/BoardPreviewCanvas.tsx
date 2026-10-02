@@ -22,6 +22,7 @@ export function BoardPreviewCanvas({
   onRemoveSlot,
   onChangeSlotView,
   onChangeSlotNameSize,
+  onEditSlot,
 }: {
   config: BoardConfig;
   tileById: Map<string, ParsedTile>;
@@ -29,6 +30,7 @@ export function BoardPreviewCanvas({
   onRemoveSlot: (slotId: string) => void;
   onChangeSlotView: (slotId: string, view: AxoViewKey) => void;
   onChangeSlotNameSize: (slotId: string, sizePt: number | null) => void;
+  onEditSlot: (slotId: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -76,19 +78,30 @@ export function BoardPreviewCanvas({
           return (
             <div key={slot.id}>
               <div
-                className="absolute"
+                className="absolute cursor-pointer"
                 style={{ left: cell.x, top: cell.y, width: cell.size, height: cell.size }}
                 onMouseEnter={() => setHoveredSlotId(slot.id)}
                 onMouseLeave={() => setHoveredSlotId((id) => (id === slot.id ? null : id))}
+                onClick={() => onEditSlot(slot.id)}
+                title="Click to edit this tile's view, clipping, and material"
               >
+                {slot.overrides && <div className="absolute left-1.5 bottom-1.5 rounded-full bg-magenta/80 px-1.5 py-0.5 text-[9px] uppercase tracking-label text-white">Custom</div>}
                 {hoveredSlotId === slot.id && (
                   <>
-                    <button onClick={() => onRemoveSlot(slot.id)} className="absolute right-1.5 top-1.5 rounded-full bg-black/60 p-1" aria-label={`Remove ${tile.name}`}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveSlot(slot.id);
+                      }}
+                      className="absolute right-1.5 top-1.5 rounded-full bg-black/60 p-1"
+                      aria-label={`Remove ${tile.name}`}
+                    >
                       <X className="h-3 w-3 text-white" />
                     </button>
                     <select
                       className="absolute left-1.5 top-1.5 h-6 rounded border border-input bg-black/70 px-1 text-[10px] text-white"
                       value={slot.view}
+                      onClick={(e) => e.stopPropagation()}
                       onChange={(e) => onChangeSlotView(slot.id, e.target.value as AxoViewKey)}
                     >
                       {AXO_VIEWS.map((v) => (

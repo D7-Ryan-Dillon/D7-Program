@@ -40,14 +40,37 @@ export const ALL_VIEWS: ViewPreset[] = [...VIEW_PRESETS, PERSPECTIVE_VIEW];
 
 // True isometric corner views -- a separate set from ALL_VIEWS (Viewer tab's
 // own camera buttons) so adding these doesn't change that panel; used by the
-// Boards tab's per-tile axo preset picker instead.
+// Boards tab's per-tile axo preset picker. All 8 corners (top-4 and
+// bottom-4, [1,-1,1] = z-up means +1 is "up" in Rhino space here) are
+// covered, each clearly labeled which half it's in -- added alongside the
+// top-4 originally shipped covered only from above.
 export const AXO_VIEWS: ViewPreset[] = [
-  view("iso-ne", "Isometric NE", [1, -1, 1], [0, 0, 1]),
-  view("iso-nw", "Isometric NW", [-1, -1, 1], [0, 0, 1]),
-  view("iso-se", "Isometric SE", [1, 1, 1], [0, 0, 1]),
-  view("iso-sw", "Isometric SW", [-1, 1, 1], [0, 0, 1]),
+  view("iso-top-ne", "Top · NE", [1, -1, 1], [0, 0, 1]),
+  view("iso-top-nw", "Top · NW", [-1, -1, 1], [0, 0, 1]),
+  view("iso-top-se", "Top · SE", [1, 1, 1], [0, 0, 1]),
+  view("iso-top-sw", "Top · SW", [-1, 1, 1], [0, 0, 1]),
+  view("iso-bottom-ne", "Bottom · NE", [1, -1, -1], [0, 0, 1]),
+  view("iso-bottom-nw", "Bottom · NW", [-1, -1, -1], [0, 0, 1]),
+  view("iso-bottom-se", "Bottom · SE", [1, 1, -1], [0, 0, 1]),
+  view("iso-bottom-sw", "Bottom · SW", [-1, 1, -1], [0, 0, 1]),
   PERSPECTIVE_VIEW,
 ];
 
-export type AxoViewKey = "iso-ne" | "iso-nw" | "iso-se" | "iso-sw" | "perspective";
-export const DEFAULT_AXO_VIEW: AxoViewKey = "iso-ne";
+export type AxoViewKey =
+  | "iso-top-ne"
+  | "iso-top-nw"
+  | "iso-top-se"
+  | "iso-top-sw"
+  | "iso-bottom-ne"
+  | "iso-bottom-nw"
+  | "iso-bottom-se"
+  | "iso-bottom-sw"
+  | "perspective";
+export const DEFAULT_AXO_VIEW: AxoViewKey = "iso-top-ne";
+
+// Every preset a tile could be viewed from, for the Boards tab's per-tile
+// popup editor -- the 8 axo corners plus the Viewer tab's own 6
+// orthographic face presets, since that list already exists and costs
+// nothing extra to also offer here (BoardPreviewCanvas's plain <select>
+// keeps using AXO_VIEWS alone, unaffected).
+export const POPUP_VIEW_PRESETS: ViewPreset[] = [...AXO_VIEWS, ...VIEW_PRESETS];
