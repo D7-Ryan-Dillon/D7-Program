@@ -84,6 +84,36 @@ export interface BoardFooter {
   color: string;
 }
 
+export type DitherMode = "none" | "ordered" | "diffusion";
+
+/** Looping turntable export (GIF / MP4): every tile turns one full 360deg
+ * about its vertical axis, starting from the view it is set to, all in sync.
+ * One revolution is rendered; GIF's own loop flag (or the player's loop
+ * switch for MP4) repeats it, so the seam is seamless by construction. */
+export interface AnimationSettings {
+  /** One file per ticked page. */
+  page1: boolean;
+  page2: boolean;
+  spinSeconds: number;
+  /** Offered: 10, 20, 30. GIF frame delays are whole centiseconds, so rates
+   * that do not divide evenly (30) get alternating 30/40ms delays whose
+   * running total stays on the true frame times. */
+  fps: number;
+  /** Output width in pixels; height follows the board's aspect ratio. */
+  widthPx: number;
+  /** "auto": a global palette sized from the actual frames, dithering only
+   * where it visibly helps. "custom": the two settings below. */
+  colors: "auto" | "custom";
+  paletteSize: number;
+  dither: DitherMode;
+}
+
+export const FPS_OPTIONS = [10, 20, 30] as const;
+
+export function defaultAnimationSettings(): AnimationSettings {
+  return { page1: true, page2: false, spinSeconds: 8, fps: 20, widthPx: 1000, colors: "auto", paletteSize: 128, dither: "none" };
+}
+
 export interface BoardConfig {
   name: string;
   widthIn: number;
@@ -121,6 +151,7 @@ export interface BoardConfig {
   slots: BoardSlot[];
   textBox: BoardTextBox;
   footer: BoardFooter;
+  animation: AnimationSettings;
 }
 
 export const DPI = 300;
@@ -168,5 +199,6 @@ export function defaultBoardConfig(): BoardConfig {
     slots: [],
     textBox: { enabled: false, text: "", color: "#e6e6e6" },
     footer: { enabled: false, leftText: "DESIGN 7 | FALL 2026 | DUSTIN WHITE", rightText: "RYAN BURGESS, DILLON MITKO", color: "#ffffff" },
+    animation: defaultAnimationSettings(),
   };
 }

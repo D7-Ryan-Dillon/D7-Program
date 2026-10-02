@@ -160,7 +160,48 @@ Clicking a tile opens `TileViewEditor.tsx` (live R3F view, 8 locked axo
 corners or free perspective, clipping, colour/opacity, the three line
 settings; per-slot overrides shadow the board-wide masters). Exports two PNGs: the board itself, and a second
 page listing each tile's scored descriptors with its top 3 highlighted.
-This tab is in good shape as of this handoff -- no known issues.
+
+**Animated export (looping GIF / MP4).** `AnimatedExportPanel.tsx` (settings
+live in `BoardConfig.animation`, `lib/boards/types.ts`). One revolution is
+rendered -- N = round(spin seconds x fps) frames at 360 * i / N degrees,
+i = 0..N-1; frame N would equal frame 0, so the loop is seamless and the
+GIF's NETSCAPE loop count is 0 (forever). The pieces:
+- `lib/renderTile.ts`: `createTileRig(renderer, opts)` clones the scene and
+  builds materials / clipping / line decorations ONCE; `rig.renderAt(deg)` only
+  moves the camera. The camera, its look target, its up vector and the lights
+  all turn rigidly about the vertical axis through the model's centre, so it
+  works from any starting view (preset or the popup's free camera) and a
+  top-down view just spins in place. `renderTileToDataUrl` is now a thin
+  wrapper over the same rig (`orbitDeg` option, default 0), so stills and
+  frames share one code path.
+- `lib/boards/exportBoard.ts`: `createBoardAnimation` draws the static
+  layers once (below the tile images: background/title/caption/footer; above
+  them: frames, name tags, page-2 descriptor lists) and per frame composites
+  them around every tile's render from ONE shared WebGL renderer (all cells are
+  the same size). The tile option building, image painting and "chrome"
+  drawing are shared with the PNG export (`tileRenderOptions`,
+  `paintModuleImage`, `drawModuleChrome`). Output size is even-rounded
+  (video codecs need it); `dpi = widthPx / widthIn` so pt line weights scale.
+- `lib/boards/gifExport.ts` (gifenc, no worker -- it yields to the UI every
+  frame): ONE global palette from 8 sample frames (not per-frame, which would
+  shimmer), every frame mapped onto it with a 6-6-6-bit nearest cache (gifenc's
+  own 5-6-5 lookup bands smooth shading), and only pixels that changed since
+  the previous frame are written (the rest are a reserved transparent index,
+  dispose = 1). "Auto" picks the smallest of 32/64/128/256 colours whose average
+  error on non-flat pixels is under ~2, and turns on ordered dither only if
+  even 256 is off by more than 2.5. Ordered dither is position-based so it
+  doesn't fight the delta frames; error diffusion does shimmer. GIF delays are
+  whole centiseconds, so the per-frame delay is the difference of rounded
+  running times (30fps alternates 30/30/40ms and stays on speed). FPS options
+  are 10 / 20 / 30; width goes up to 5000 px.
+- `lib/boards/mp4Export.ts`: WebCodecs `VideoEncoder` (H.264) + `mp4-muxer`;
+  the button is hidden when WebCodecs is missing. An MP4 has no loop flag.
+- `types/gifenc.d.ts`: gifenc ships no typings.
+The panel is a collapsible section in `BoardsTab.tsx` (closed by default); it stays
+mounted when closed so a running export isn't lost, and the header shows
+"running…". Gotchas: export runs on the main thread and wants the tab visible (background
+tabs throttle timers); tile renders use the same shared-renderer limit as
+everything else (the animation owns exactly one extra WebGL context).
 
 State for all five tabs lives in `lib/project-store.tsx` (React context),
 gated behind a "project code" (`components/shared/ProjectGate.tsx`) --
@@ -333,5 +374,8 @@ access to their filesystem. The Sections tab needs no external data at all
    Supabase if cross-device correction editing turns out to matter.
 3. Clipping planes in the Arrange tab, and a saved-objects history there
    too (both planned, not built).
-4. Ask the project owner what's still open before assuming the above is the
+4. Animated export ideas not built: a live in-app turntable preview, a worker
+   for the GIF encode, per-tile spin offsets or counter-rotation, and
+   transparent-background GIFs.
+5. Ask the project owner what's still open before assuming the above is the
    full list -- priorities shift session to session.

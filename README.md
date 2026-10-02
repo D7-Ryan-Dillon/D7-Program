@@ -38,6 +38,12 @@ Five tabs, in order:
    each tile's scored descriptors. Click a tile for a popup editor: locked
    axonometric corners or free perspective, clipping plane, per-tile
    colours, outlines and facet lines (all line weights in points).
+   **Animated export** turns the board into a seamlessly looping GIF (or
+   MP4): every tile makes one full 360-degree turn from the view it is set
+   to, all in sync. Pick which pages to export (board / descriptors), the
+   spin time and frame rate (10 / 20 / 30), the output width (up to 5000 px), and the GIF's colour (auto,
+   or a custom palette size and dither). It lives in a collapsible section
+   so it stays out of the way while you build the board.
 
 Clipping planes (X/Y/Z, reversible, optional cut-face highlight) are in the
 Viewer, the Sections builder and the Boards popup. The layout works from a
@@ -92,7 +98,7 @@ lib/
   scoring/                The 12-descriptor scoring engine (Analysis tab)
   arrange/                Auto-generate, matching, joints, regrowth (Arrange tab)
   sections/               Photo -> trace -> lofted volume -> ParsedTile (Sections tab)
-  boards/                 Grid layout, frame shape, text fitting, canvas export (Boards tab)
+  boards/                 Grid layout, frame shape, text fitting, canvas export, GIF/MP4 turntable export (Boards tab)
   exporters/              CSG fuse, OBJ export, recipe manifest
   persistence.ts          Save/load a project (tiles + saved cube-builder pieces) by code, via Supabase
   clipping.ts             Shared clipping-plane system (plane, outline, stencil cut-face caps)

@@ -10,7 +10,7 @@
 
 import { scoreTile, type DescriptorResult } from "@/lib/scoring/descriptors";
 import type { ParsedTile } from "@/lib/types";
-import { renderTileToDataUrl } from "@/lib/renderTile";
+import { createTileRenderer, createTileRig, renderTileToDataUrl, type TileRenderOptions, type TileRig } from "@/lib/renderTile";
 import { traceModuleOutline, traceSquareOnly, DIVIDER_X, TAG_HEIGHT_FRACTION, TOP_EDGE_FRACTION } from "./frameShape";
 import { squareGridLayout, squareGridCells, type GridCell } from "./grid";
 import { fitText, wrapToWidth } from "./textFit";
@@ -229,19 +229,24 @@ function drawNameTag(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardS
   ctx.restore();
 }
 
-/** Page 1: the tile render fills the whole square (above the name tag), at
- * its own exact aspect ratio (renderTileToDataUrl fits the camera to
- * whichever axis is tighter), so nothing is cropped. */
-async function drawImageModule(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardSlot, tile: ParsedTile, config: BoardConfig, dpi: number) {
-  const lineWidth = ptToPx(config.outlineWidthPt, dpi);
-  const o = slot.overrides;
+/** The pixel box a tile's render occupies inside its module: page 1 fills
+ * the whole square (above the name tag); page 2 shrinks it into the left
+ * portion beside the descriptor list. */
+function moduleImageSize(cell: GridCell, page: 1 | 2): { width: number; height: number } {
+  return { width: page === 1 ? cell.size : cell.size * DIVIDER_X, height: cell.size };
+}
 
-  const dataUrl = await renderTileToDataUrl({
+/** Everything about how one slot's tile is rendered -- shared by the still
+ * export, the live preview and the turntable animation, so a setting can't
+ * mean different things in different places. */
+function tileRenderOptions(slot: BoardSlot, tile: ParsedTile, config: BoardConfig, dpi: number, width: number, height: number): TileRenderOptions {
+  const o = slot.overrides;
+  return {
     glbUrl: tile.glbUrl,
     view: slot.view,
     customCamera: o?.customCamera,
-    width: Math.round(cell.size),
-    height: Math.round(cell.size),
+    width,
+    height,
     backgroundColor: config.backgroundColor,
     foamColor: o?.foamColor ?? config.foamColor,
     voidColor: o?.voidColor ?? config.voidColor,
@@ -254,74 +259,54 @@ async function drawImageModule(ctx: CanvasRenderingContext2D, cell: GridCell, sl
     voidOutline: o?.voidOutline ?? config.voidOutline,
     facetLines: o?.facetLines ?? config.facetLines,
     pxPerPt: dpi / 72,
-  });
-  const img = await loadImage(dataUrl);
+  };
+}
 
+/** Lays a rendered tile into its module, clipped to the module's square.
+ * (Page 2 first fills the square with the board colour, as the descriptor
+ * column to the right of the image has none of its own.) */
+function paintModuleImage(ctx: CanvasRenderingContext2D, cell: GridCell, image: CanvasImageSource, page: 1 | 2, config: BoardConfig) {
+  const { width, height } = moduleImageSize(cell, page);
   ctx.save();
   traceSquareOnly(ctx, cell.x, cell.y, cell.size);
   ctx.clip();
-  ctx.drawImage(img, cell.x, cell.y, cell.size, cell.size);
+  if (page === 2) {
+    ctx.fillStyle = config.backgroundColor;
+    ctx.fillRect(cell.x, cell.y, cell.size, cell.size);
+  }
+  ctx.drawImage(image, cell.x, cell.y, width, height);
   ctx.restore();
+}
+
+/** The static part of a module that sits on top of its tile render: the
+ * frame outline and name tag, plus -- on page 2 -- the divider and the
+ * scored descriptor list. Nothing here depends on the render, which is what
+ * lets the turntable animation draw it once. */
+function drawModuleChrome(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardSlot, tile: ParsedTile, config: BoardConfig, dpi: number, page: 1 | 2) {
+  const lineWidth = ptToPx(config.outlineWidthPt, dpi);
 
   ctx.save();
   ctx.strokeStyle = config.descriptorColor;
   ctx.lineWidth = lineWidth;
   traceModuleOutline(ctx, cell.x, cell.y, cell.size);
   ctx.stroke();
+  if (page === 2) {
+    const descX = cell.x + cell.size * DIVIDER_X;
+    ctx.beginPath();
+    ctx.moveTo(descX, cell.y + cell.size * TOP_EDGE_FRACTION);
+    ctx.lineTo(descX, cell.y + cell.size);
+    ctx.stroke();
+  }
   ctx.restore();
 
+  if (page === 2) drawDescriptorList(ctx, cell, tile, config);
   drawNameTag(ctx, cell, slot, tile.name, config, dpi);
 }
 
-/** Page 2: the tile render is shrunk into the left portion, its scored
- * descriptors listed in the right column -- same outer shape, same name
- * tag, as page 1. */
-async function drawDescriptorModule(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardSlot, tile: ParsedTile, config: BoardConfig, dpi: number) {
-  const lineWidth = ptToPx(config.outlineWidthPt, dpi);
+function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile: ParsedTile, config: BoardConfig) {
   const imageWidth = cell.size * DIVIDER_X;
   const descX = cell.x + imageWidth;
   const descWidth = cell.size - imageWidth;
-  const o = slot.overrides;
-
-  const dataUrl = await renderTileToDataUrl({
-    glbUrl: tile.glbUrl,
-    view: slot.view,
-    customCamera: o?.customCamera,
-    width: Math.round(imageWidth),
-    height: Math.round(cell.size),
-    backgroundColor: config.backgroundColor,
-    foamColor: o?.foamColor ?? config.foamColor,
-    voidColor: o?.voidColor ?? config.voidColor,
-    foamOpacity: o?.foamOpacity ?? config.foamOpacity,
-    voidOpacity: o?.voidOpacity ?? config.voidOpacity,
-    foamVisible: true,
-    voidVisible: true,
-    clip: o?.clip,
-    foamOutline: o?.foamOutline ?? config.foamOutline,
-    voidOutline: o?.voidOutline ?? config.voidOutline,
-    facetLines: o?.facetLines ?? config.facetLines,
-    pxPerPt: dpi / 72,
-  });
-  const img = await loadImage(dataUrl);
-
-  ctx.save();
-  traceSquareOnly(ctx, cell.x, cell.y, cell.size);
-  ctx.clip();
-  ctx.fillStyle = config.backgroundColor;
-  ctx.fillRect(cell.x, cell.y, cell.size, cell.size);
-  ctx.drawImage(img, cell.x, cell.y, imageWidth, cell.size);
-  ctx.restore();
-
-  ctx.save();
-  ctx.strokeStyle = config.descriptorColor;
-  ctx.lineWidth = lineWidth;
-  traceModuleOutline(ctx, cell.x, cell.y, cell.size);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(descX, cell.y + cell.size * TOP_EDGE_FRACTION);
-  ctx.lineTo(descX, cell.y + cell.size);
-  ctx.stroke();
-  ctx.restore();
 
   const results: DescriptorResult[] = scoreTile(tile);
   const topKeys = new Set(
@@ -367,8 +352,33 @@ async function drawDescriptorModule(ctx: CanvasRenderingContext2D, cell: GridCel
     ctx.textBaseline = "middle";
     ctx.fillText(String(r.score), descX + padding + barWidth + fit.fontSize * 0.4, barY + barHeight / 2);
   });
+}
 
-  drawNameTag(ctx, cell, slot, tile.name, config, dpi);
+async function drawModule(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardSlot, tile: ParsedTile, config: BoardConfig, dpi: number, page: 1 | 2) {
+  const { width, height } = moduleImageSize(cell, page);
+  const dataUrl = await renderTileToDataUrl(tileRenderOptions(slot, tile, config, dpi, Math.round(width), Math.round(height)));
+  const img = await loadImage(dataUrl);
+  paintModuleImage(ctx, cell, img, page, config);
+  drawModuleChrome(ctx, cell, slot, tile, config, dpi, page);
+}
+
+interface Module {
+  cell: GridCell;
+  slot: BoardSlot;
+  tile: ParsedTile;
+}
+
+/** The cells that actually hold a tile (the caption cell and empty slots
+ * are skipped), in drawing order. */
+function boardModules(config: BoardConfig, geo: PageGeometry, tileById: Map<string, ParsedTile>): Module[] {
+  const out: Module[] = [];
+  for (let i = 0; i < geo.cells.length; i++) {
+    if (geo.captionCellIndex === i) continue;
+    const slot = config.slots[geo.captionCellIndex !== null ? i - 1 : i];
+    const tile = slot?.tileId ? tileById.get(slot.tileId) : undefined;
+    if (slot && tile) out.push({ cell: geo.cells[i], slot, tile });
+  }
+  return out;
 }
 
 function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -392,29 +402,17 @@ export async function drawBoardPage(
 ): Promise<PageGeometry> {
   const geo = computeGeometry(config, dpi);
   drawBackgroundAndTitle(ctx, config, geo);
-
-  for (let i = 0; i < geo.cells.length; i++) {
-    const cell = geo.cells[i];
-    if (geo.captionCellIndex === i) {
-      if (page === 1) drawCaptionCell(ctx, cell, config, dpi);
-      continue;
-    }
-    const slotIndex = geo.captionCellIndex !== null ? i - 1 : i;
-    const slot = config.slots[slotIndex];
-    const tile = slot?.tileId ? tileById.get(slot.tileId) : undefined;
-    if (!slot || !tile) continue;
-    if (page === 1) await drawImageModule(ctx, cell, slot, tile, config, dpi);
-    else await drawDescriptorModule(ctx, cell, slot, tile, config, dpi);
-  }
+  if (page === 1 && geo.captionCellIndex !== null) drawCaptionCell(ctx, geo.cells[geo.captionCellIndex], config, dpi);
+  for (const m of boardModules(config, geo, tileById)) await drawModule(ctx, m.cell, m.slot, m.tile, config, dpi, page);
   await drawFooter(ctx, config, geo);
   return geo;
 }
 
-function newCanvas(widthPx: number, heightPx: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
+function newCanvas(widthPx: number, heightPx: number, willReadFrequently = false): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");
   canvas.width = widthPx;
   canvas.height = heightPx;
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", willReadFrequently ? { willReadFrequently: true } : undefined);
   if (!ctx) throw new Error("Canvas 2D context unavailable");
   return { canvas, ctx };
 }
@@ -444,6 +442,90 @@ export async function renderBoardPreview(canvas: HTMLCanvasElement, config: Boar
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   await drawBoardPage(ctx, config, tileById, page, dpi);
+}
+
+export interface BoardAnimation {
+  /** Even pixel dimensions (video codecs need them). */
+  width: number;
+  height: number;
+  frameCount: number;
+  /** Frame i of the loop: every tile turned 360 * i / frameCount degrees.
+   * Frame frameCount would equal frame 0, so it is never drawn. */
+  renderFrame(i: number): void;
+  /** The composed frame, for the encoders. */
+  canvas: HTMLCanvasElement;
+  dispose(): void;
+}
+
+const evenUp = (n: number) => Math.ceil(n / 2) * 2;
+
+/** Builds a turntable source for one page: the background, title, footer,
+ * module frames, name tags and (page 2) descriptor lists are drawn once into
+ * two static layers; each frame then only re-aims the tiles' cameras
+ * (lib/renderTile.ts TileRig) and composites -- everything below the tile
+ * images and everything above them. One shared WebGL renderer serves every
+ * tile (they are all the same size), so a 12-tile board uses one context. */
+export async function createBoardAnimation(
+  config: BoardConfig,
+  tileById: Map<string, ParsedTile>,
+  page: 1 | 2,
+  frameCount: number,
+  onProgress?: (done: number, total: number) => void,
+  signal?: AbortSignal,
+): Promise<BoardAnimation> {
+  const dpi = config.animation.widthPx / config.widthIn;
+  const geo = computeGeometry(config, dpi);
+  const width = evenUp(geo.widthPx);
+  const height = evenUp(geo.heightPx);
+  const modules = boardModules(config, geo, tileById);
+  if (!modules.length) throw new Error("Add at least one tile to the board first.");
+
+  const under = newCanvas(width, height);
+  under.ctx.fillStyle = config.backgroundColor;
+  under.ctx.fillRect(0, 0, width, height);
+  drawBackgroundAndTitle(under.ctx, config, geo);
+  if (page === 1 && geo.captionCellIndex !== null) drawCaptionCell(under.ctx, geo.cells[geo.captionCellIndex], config, dpi);
+  await drawFooter(under.ctx, config, geo);
+
+  const over = newCanvas(width, height);
+  for (const m of modules) drawModuleChrome(over.ctx, m.cell, m.slot, m.tile, config, dpi, page);
+
+  const size = moduleImageSize(modules[0].cell, page);
+  const renderer = createTileRenderer(Math.round(size.width), Math.round(size.height), false);
+  const rigs: TileRig[] = [];
+  const release = () => {
+    rigs.forEach((r) => r.dispose());
+    renderer.dispose();
+    renderer.forceContextLoss();
+  };
+  try {
+    for (const m of modules) {
+      if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
+      rigs.push(await createTileRig(renderer, tileRenderOptions(m.slot, m.tile, config, dpi, Math.round(size.width), Math.round(size.height))));
+      onProgress?.(rigs.length, modules.length);
+    }
+  } catch (err) {
+    release();
+    throw err;
+  }
+
+  const frame = newCanvas(width, height, true);
+  return {
+    width,
+    height,
+    frameCount,
+    canvas: frame.canvas,
+    renderFrame(i: number) {
+      const angle = (360 * i) / frameCount;
+      frame.ctx.drawImage(under.canvas, 0, 0);
+      modules.forEach((m, k) => {
+        rigs[k].renderAt(angle);
+        paintModuleImage(frame.ctx, m.cell, renderer.domElement, page, config);
+      });
+      frame.ctx.drawImage(over.canvas, 0, 0);
+    },
+    dispose: release,
+  };
 }
 
 export function downloadBlob(filename: string, blob: Blob) {

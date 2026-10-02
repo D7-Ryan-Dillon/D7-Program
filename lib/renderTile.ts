@@ -60,6 +60,10 @@ export interface TileRenderOptions {
    * builder, whose void is a solid cube shell that would hide the foam
    * entirely, the void is left out. */
   thumbnail?: boolean;
+  /** Degrees the model is turned about its own vertical axis from the
+   * starting view (positive = counter-clockwise seen from above). 0 is the
+   * view exactly as set. Turntable GIF/MP4 export steps this 0..360. */
+  orbitDeg?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,15 +291,46 @@ function serialized<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** Renders one tile to a dataURL at `width`x`height` pixels. A fresh
- * renderer per call (rather than a pooled one) keeps this safe to run for
- * several tiles back to back, including at very large export sizes,
- * without one render's leftover state leaking into the next. */
-export function renderTileToDataUrl(opts: TileRenderOptions): Promise<string> {
-  return serialized(() => renderTileToDataUrlNow(opts));
+/** A tile prepared for rendering once and drawn many times: the scene is
+ * cloned, materials / clipping / line decorations built a single time, and
+ * only the camera moves between draws -- what makes a 100-frame turntable
+ * affordable (a fresh clone and fresh decorations per frame would not be). */
+export interface TileRig {
+  /** Draws the tile turned `orbitDeg` degrees about its vertical axis (see
+   * `TileRenderOptions.orbitDeg`) into the renderer the rig was made for,
+   * which must already be sized to the rig's own width x height. */
+  renderAt(orbitDeg: number): void;
+  dispose(): void;
 }
 
-async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> {
+const UP_AXIS = new THREE.Vector3(0, 1, 0);
+
+/** A WebGL renderer sized for `createTileRig`: stencil on (cut-face caps),
+ * local clipping on, one drawing-buffer pixel per CSS pixel. */
+export function createTileRenderer(width: number, height: number, alpha: boolean): THREE.WebGLRenderer {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha, preserveDrawingBuffer: true, stencil: true });
+  renderer.localClippingEnabled = true;
+  renderer.setSize(width, height, false);
+  renderer.setPixelRatio(1);
+  return renderer;
+}
+
+/** Frees what a rig made for itself. The foam/void geometry is shared with
+ * the cached source scene, so only their (per-rig) materials go. */
+function disposeOwned(root: THREE.Object3D, ownGeometry: boolean) {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (ownGeometry) mesh.geometry?.dispose();
+    const mat = mesh.material;
+    if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+    else mat?.dispose();
+  });
+}
+
+export async function createTileRig(renderer: THREE.WebGLRenderer, opts: TileRenderOptions): Promise<TileRig> {
   const original = await loadScene(opts.glbUrl);
   const scene = original.clone(true);
 
@@ -316,12 +351,13 @@ async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> 
   const aspect = opts.width / opts.height;
   const vFov = 42;
   const camera = new THREE.PerspectiveCamera(vFov, aspect, 0.05, 500);
+  const lookTarget = new THREE.Vector3();
   let distance: number;
   if (opts.customCamera) {
     camera.position.set(...opts.customCamera.position);
-    const target = new THREE.Vector3(...opts.customCamera.target);
-    camera.lookAt(target);
-    distance = camera.position.distanceTo(target);
+    lookTarget.set(...opts.customCamera.target);
+    camera.lookAt(lookTarget);
+    distance = camera.position.distanceTo(lookTarget);
   } else {
     const preset = POPUP_VIEW_PRESETS.find((v) => v.key === opts.view) ?? AXO_VIEWS.find((v) => v.key === opts.view) ?? AXO_VIEWS[0];
     const dir = new THREE.Vector3(...preset.dir).normalize();
@@ -335,13 +371,16 @@ async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> 
     distance = (radius / Math.sin(constrainingHalf)) * 1.08;
     camera.position.copy(sphere.center).addScaledVector(dir, distance);
     camera.up.set(...preset.up);
-    camera.lookAt(sphere.center);
+    lookTarget.copy(sphere.center);
+    camera.lookAt(lookTarget);
   }
   // A tight depth range keeps the depth buffer's precision where the model
   // actually is -- needed for the outline hull, which sits a fraction of a
-  // pixel behind the real surface.
-  camera.near = Math.max(0.05, distance - radius * 2);
-  camera.far = distance + radius * 3;
+  // pixel behind the real surface. Measured to the model's centre, which an
+  // orbit about the model's own axis never changes.
+  const centerDistance = camera.position.distanceTo(sphere.center);
+  camera.near = Math.max(0.05, centerDistance - radius * 2);
+  camera.far = centerDistance + radius * 3;
   camera.updateProjectionMatrix();
 
   let clipPlane: THREE.Plane | null = null;
@@ -350,43 +389,83 @@ async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> 
     for (const mesh of [foam, voidM]) if (mesh) applyClipToMesh(mesh, clipPlane);
   }
 
+  const owned: THREE.Object3D[] = [];
   const lineCtx: LineContext = {
     pxPerPt: opts.pxPerPt ?? 300 / 72,
     resolution: new THREE.Vector2(opts.width, opts.height),
     worldPerPx: (2 * distance * Math.tan((vFov * Math.PI) / 360)) / opts.height,
   };
-  for (const obj of buildLineDecorations(scene, foam, voidM, box, { foamOutline: opts.foamOutline, voidOutline: opts.voidOutline, facetLines: opts.facetLines }, lineCtx)) scene.add(obj);
+  for (const obj of buildLineDecorations(scene, foam, voidM, box, { foamOutline: opts.foamOutline, voidOutline: opts.voidOutline, facetLines: opts.facetLines }, lineCtx)) owned.push(obj);
 
   if (clipPlane) {
-    scene.add(buildClipOutline(opts.clip!, box));
+    owned.push(buildClipOutline(opts.clip!, box));
     if (opts.clip!.cutFace?.enabled) {
-      if (foam) scene.add(buildCutFaceCap(foam, clipPlane, box, opts.clip!, opts.clip!.cutFace.foamColor, opts.clip!.cutFace.foamOpacity));
-      if (voidM) scene.add(buildCutFaceCap(voidM, clipPlane, box, opts.clip!, opts.clip!.cutFace.voidColor, opts.clip!.cutFace.voidOpacity));
+      if (foam) owned.push(buildCutFaceCap(foam, clipPlane, box, opts.clip!, opts.clip!.cutFace.foamColor, opts.clip!.cutFace.foamOpacity));
+      if (voidM) owned.push(buildCutFaceCap(voidM, clipPlane, box, opts.clip!, opts.clip!.cutFace.voidColor, opts.clip!.cutFace.voidOpacity));
     }
   }
+  for (const obj of owned) scene.add(obj);
 
   const threeScene = new THREE.Scene();
   if (opts.backgroundColor) threeScene.background = new THREE.Color(opts.backgroundColor);
   threeScene.add(scene);
-  threeScene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  // The lights ride in a group that turns with the camera, so a turntable
+  // keeps the same lighting on the model's visible side instead of the
+  // light sweeping across it.
+  const lights = new THREE.Group();
+  lights.add(new THREE.AmbientLight(0xffffff, 0.6));
   const key = new THREE.DirectionalLight(0xffffff, 1.1);
   key.position.set(6, 10, 4);
-  threeScene.add(key);
+  lights.add(key);
   const fill = new THREE.DirectionalLight(0xffffff, 0.25);
   fill.position.set(-6, -4, -6);
-  threeScene.add(fill);
+  lights.add(fill);
+  threeScene.add(lights);
 
-  const canvas = document.createElement("canvas");
-  canvas.width = opts.width;
-  canvas.height = opts.height;
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: !opts.backgroundColor, preserveDrawingBuffer: true, stencil: true });
-  renderer.localClippingEnabled = true;
-  renderer.setSize(opts.width, opts.height, false);
-  renderer.setPixelRatio(1);
-  renderer.render(threeScene, camera);
-  const dataUrl = canvas.toDataURL("image/png");
-  renderer.dispose();
-  return dataUrl;
+  // The whole camera rig (position, look target, up) turns rigidly about the
+  // vertical axis through the model's centre -- equivalent to turning the
+  // model on a turntable, whatever the starting view (a top-down view just
+  // spins in place).
+  const baseOffset = camera.position.clone().sub(sphere.center);
+  const baseTargetOffset = lookTarget.clone().sub(sphere.center);
+  const baseUp = camera.up.clone();
+  const scratch = new THREE.Vector3();
+
+  return {
+    renderAt(orbitDeg: number) {
+      const a = -THREE.MathUtils.degToRad(orbitDeg);
+      camera.position.copy(baseOffset).applyAxisAngle(UP_AXIS, a).add(sphere.center);
+      camera.up.copy(baseUp).applyAxisAngle(UP_AXIS, a);
+      camera.lookAt(scratch.copy(baseTargetOffset).applyAxisAngle(UP_AXIS, a).add(sphere.center));
+      lights.rotation.y = a;
+      renderer.render(threeScene, camera);
+    },
+    dispose() {
+      for (const obj of owned) disposeOwned(obj, true);
+      for (const mesh of [foam, voidM]) if (mesh) disposeOwned(mesh, false);
+    },
+  };
+}
+
+/** Renders one tile to a dataURL at `width`x`height` pixels. A fresh
+ * renderer per call (rather than a pooled one) keeps this safe to run for
+ * several tiles back to back, including at very large export sizes,
+ * without one render's leftover state leaking into the next. */
+export function renderTileToDataUrl(opts: TileRenderOptions): Promise<string> {
+  return serialized(() => renderTileToDataUrlNow(opts));
+}
+
+async function renderTileToDataUrlNow(opts: TileRenderOptions): Promise<string> {
+  const renderer = createTileRenderer(opts.width, opts.height, !opts.backgroundColor);
+  try {
+    const rig = await createTileRig(renderer, opts);
+    rig.renderAt(opts.orbitDeg ?? 0);
+    const dataUrl = renderer.domElement.toDataURL("image/png");
+    rig.dispose();
+    return dataUrl;
+  } finally {
+    renderer.dispose();
+  }
 }
 
 const thumbnailCache = new Map<string, Promise<string>>();

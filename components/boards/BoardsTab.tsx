@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { useProject } from "@/lib/project-store";
 import { GlowPanel } from "@/components/shared/GlowPanel";
@@ -9,10 +10,11 @@ import { Separator } from "@/components/ui/separator";
 import { TilePicker } from "./TilePicker";
 import { SlotOrderList } from "./SlotOrderList";
 import { BoardSettingsPanel } from "./BoardSettingsPanel";
+import { AnimatedExportPanel } from "./AnimatedExportPanel";
 import { BoardPreviewCanvas } from "./BoardPreviewCanvas";
 import { TileViewEditor } from "./TileViewEditor";
 import { downloadBlob, exportBoardPage1, exportBoardPage2 } from "@/lib/boards/exportBoard";
-import { DEFAULT_AXO_VIEW, defaultBoardConfig, type AxoViewKey, type BoardSlot, type BoardSlotOverrides } from "@/lib/boards/types";
+import { DEFAULT_AXO_VIEW, defaultBoardConfig, type AnimationSettings, type AxoViewKey, type BoardSlot, type BoardSlotOverrides } from "@/lib/boards/types";
 
 let slotCounter = 0;
 function newSlotId() {
@@ -26,6 +28,8 @@ export function BoardsTab() {
   const [previewPage, setPreviewPage] = useState<1 | 2>(1);
   const [exporting, setExporting] = useState(false);
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+  const [animOpen, setAnimOpen] = useState(false);
+  const [animBusy, setAnimBusy] = useState(false);
   const previewAreaRef = useRef<HTMLDivElement>(null);
   const [previewAreaSize, setPreviewAreaSize] = useState({ width: 800, height: 600 });
 
@@ -54,6 +58,8 @@ export function BoardsTab() {
   const fitHeight = fitWidth / boardRatio;
 
   const patchConfig = (patch: Partial<typeof config>) => setConfig((prev) => ({ ...prev, ...patch }));
+
+  const patchAnimation = (patch: Partial<AnimationSettings>) => setConfig((prev) => ({ ...prev, animation: { ...prev.animation, ...patch } }));
 
   const toggleTile = (tileId: string) => {
     setConfig((prev) => {
@@ -169,6 +175,23 @@ export function BoardsTab() {
       </div>
 
       <div className="order-3 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
+        <GlowPanel glow="magenta">
+          <div className="p-4">
+            <button
+              type="button"
+              aria-expanded={animOpen}
+              onClick={() => setAnimOpen((o) => !o)}
+              className="flex w-full items-center justify-between font-mono text-[11px] tracking-label uppercase text-muted-foreground hover:text-foreground"
+            >
+              <span>Animated export (GIF / MP4){animBusy ? " — running…" : ""}</span>
+              <ChevronDown className={`size-4 transition-transform ${animOpen ? "rotate-180" : ""}`} />
+            </button>
+            {/* Kept mounted while closed so an export in progress is not lost. */}
+            <div className={animOpen ? "mt-3" : "hidden"}>
+              <AnimatedExportPanel config={config} tileById={tileById} onChange={patchAnimation} onBusyChange={setAnimBusy} />
+            </div>
+          </div>
+        </GlowPanel>
         <GlowPanel glow="orange" className="flex-1">
           <div className="p-4">
             <div className="mb-2 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Board settings</div>
