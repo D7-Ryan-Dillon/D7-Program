@@ -46,7 +46,8 @@ export function fitText(
     }
     if (maxLines > 1) {
       const wrapped = wrapToWidth(ctx, text, maxWidth);
-      const fits = wrapped.length <= maxLines && wrapped.length * lineHeight <= maxHeight;
+      // every wrapped line must fit too: a single long word (CONTINUOUS, NON-HIERARCHICAL) cannot be wrapped and used to overflow
+      const fits = wrapped.length <= maxLines && wrapped.length * lineHeight <= maxHeight && wrapped.every((l) => ctx.measureText(l).width <= maxWidth);
       if (fits) return { fontSize: size, lines: wrapped };
     }
   }

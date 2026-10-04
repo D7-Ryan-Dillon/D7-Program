@@ -100,7 +100,8 @@ Viewer, the Sections builder and the Boards popup. The layout works from a
 phone up to a desktop; on a phone or half-screen laptop the viewport (or the
 board) stays pinned to the top of the tab while you scroll the controls.
 The loaded tiles sit in the top bar on Viewer and Analysis, so they stay on
-screen. The whole app is black with pink, orange and gray only; new viewports
+screen; filter chips beside them (All, Gathering, Workspace, Lobby, Cube builder)
+show only one kind at a time. The whole app is black with pink, orange and gray only; new viewports
 and boards start in the same look (ghosted foam, magenta void, peach floor
 plates, orange branches).
 

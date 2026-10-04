@@ -440,12 +440,25 @@ function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile:
   const labelMaxWidth = descWidth - padding * 2;
   const barHeight = Math.max(2, rowHeight * 0.1);
 
+  // one label size for the whole list (the smallest any row needs), so the rows read as a set and none runs past the frame
+  const labelSize = Math.min(
+    ...results.map((r) =>
+      fitText(ctx, r.label.toUpperCase(), labelMaxWidth, rowHeight * 0.55, {
+        maxFontSize: rowHeight * 0.3,
+        minFontSize: 6,
+        maxLines: 2,
+        fontWeight: topKeys.has(r.key) ? "600" : "",
+        fontFamily: config.fontFamily,
+      }).fontSize,
+    ),
+  );
+
   results.forEach((r, i) => {
     const rowTop = listTop + i * rowHeight;
     const highlighted = topKeys.has(r.key);
     const color = highlighted ? config.highlightColor : config.descriptorColor;
     const fit = fitText(ctx, r.label.toUpperCase(), labelMaxWidth, rowHeight * 0.55, {
-      maxFontSize: rowHeight * 0.3,
+      maxFontSize: labelSize,
       minFontSize: 6,
       maxLines: 2,
       fontWeight: highlighted ? "600" : "",

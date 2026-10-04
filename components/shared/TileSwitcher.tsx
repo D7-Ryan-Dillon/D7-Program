@@ -1,11 +1,28 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Menu } from "@base-ui/react/menu";
 import { Pin, ChevronDown, X, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useProject } from "@/lib/project-store";
+import type { ParsedTile } from "@/lib/types";
 import { TileThumbnail } from "./TileThumbnail";
+
+type TileFilter = "all" | "gathering" | "office" | "lobby" | "builder" | "other";
+
+const FILTERS: { key: Exclude<TileFilter, "all">; label: string }[] = [
+  { key: "gathering", label: "Gathering" },
+  { key: "office", label: "Workspace" },
+  { key: "lobby", label: "Lobby" },
+  { key: "builder", label: "Cube builder" },
+  { key: "other", label: "Other" },
+];
+
+/** Which filter chip a tile belongs to: pieces made in the cube / hex builder have their own chip; the rest go by the typology category. */
+function tileGroup(tile: ParsedTile): Exclude<TileFilter, "all"> {
+  if (tile.sectionRecipe) return "builder";
+  return tile.guessed.category ?? "other";
+}
 
 /** The loaded-tiles bar. It lives in the top bar (Header) on Viewer and Analysis, so it stays on screen with the tabs -- a single
  * horizontally-scrolling row (rather than wrapping to as many rows as it
@@ -16,17 +33,49 @@ import { TileThumbnail } from "./TileThumbnail";
 export function TileSwitcher() {
   const { tiles, activeTileId, setActiveTile, removeTile, pinnedTileIds, togglePinned } = useProject();
 
+  const [filter, setFilter] = useState<TileFilter>("all");
+
+  const counts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const t of tiles) c[tileGroup(t)] = (c[tileGroup(t)] ?? 0) + 1;
+    return c;
+  }, [tiles]);
+
+  // a chip is only offered for groups that have tiles; if the chosen group empties (its last tile was closed) fall back to all
+  const present = FILTERS.filter((f) => counts[f.key]);
+  const activeFilter: TileFilter = filter !== "all" && !counts[filter] ? "all" : filter;
+
   const ordered = useMemo(() => {
     const pinnedSet = new Set(pinnedTileIds);
-    const pinned = tiles.filter((t) => pinnedSet.has(t.id));
-    const rest = tiles.filter((t) => !pinnedSet.has(t.id));
+    const shown = activeFilter === "all" ? tiles : tiles.filter((t) => tileGroup(t) === activeFilter);
+    const pinned = shown.filter((t) => pinnedSet.has(t.id));
+    const rest = shown.filter((t) => !pinnedSet.has(t.id));
     return [...pinned, ...rest];
-  }, [tiles, pinnedTileIds]);
+  }, [tiles, pinnedTileIds, activeFilter]);
 
   if (!tiles.length) return null;
 
   return (
     <div className="flex items-center gap-2 border-t border-white/10 pt-2.5">
+      {present.length > 1 && (
+        <div className="flex shrink-0 items-center gap-1" role="group" aria-label="Filter tiles">
+          {[{ key: "all" as const, label: "All" }, ...present].map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              aria-pressed={activeFilter === f.key}
+              onClick={() => setFilter(f.key)}
+              className={cn(
+                "rounded-full border-hair px-2.5 py-1 font-mono text-[10px] uppercase tracking-label transition-colors",
+                activeFilter === f.key ? "border-magenta/50 bg-magenta/10 text-foreground" : "text-muted-foreground hover:border-white/25 hover:text-foreground",
+              )}
+            >
+              {f.label}
+              <span className="ml-1 opacity-60">{f.key === "all" ? tiles.length : counts[f.key]}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
         {ordered.map((tile) => {
           const pinned = pinnedTileIds.includes(tile.id);

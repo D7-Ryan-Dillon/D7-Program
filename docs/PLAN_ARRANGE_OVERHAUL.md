@@ -65,7 +65,20 @@ Order and dependency: 1 first (everything else stands on it), 2 and 3 next (they
 - **Verification**: the two unconfirmed pieces (smooth and seal, regenerate marked) get a real browser test before anything is built on them.
 - Arrange internals are off-limits unless asked: this plan starts only on the owner's "go".
 
-## 7. Questions for the owner (these change the design)
+## 7. Owner's answers (2026-10-04)
+
+1. **Target**: one connected, walkable building-like mass.
+2. **Stacking**: tiles stack in Z as freely as they like.
+3. **Wall mode**: no, drop it (tilt stays off).
+4. **Scale**: keep the option, expected to be rarely used.
+5. **Interlock test** (2/4/8 copies by repeat, mirror, shift): not graded, but wanted as a one-click test.
+6. **Outputs**: all of them matter (Boards, STL, drawings, Rhino), each for a different reason; be thorough.
+7. **Variants**: one at a time. Each assembly must be saveable back into the program as a tile like any other, so it can be compared in the Viewer tab (this makes feature 9's "assembly as a tile" and feature 10 central, and puts ranking/gallery (7) later).
+8. **Taller or non-cubic tiles**: not needed; the owner will ask if so.
+
+Status: still planning; nothing in Arrange is built.
+
+## 8. Original questions (kept for the record)
 
 1. **What is the target?** One building-like mass that is connected and walkable, or a looser aggregation (a field of clusters)? This sets the objective of the generator.
 2. **Stacking**: should tiles stack in Z (floors meeting roofs) freely, or is the assembly mostly a horizontal layout with occasional second layers?
