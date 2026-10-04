@@ -1,0 +1,27 @@
+{
+  "schema": "erosion-recipe/2",
+  "name": "space_stacked_atrium",
+  "engine_version": "7.0",
+  "sim": {"tile_w": 20, "tile_h": 26, "cell": 0.5, "steps": 160, "gravity": 0.6, "drain": false, "n_frames": 8, "smooth": 0.9, "seed": 7},
+  "cleanup": {"min_void_ft3": 6, "min_foam_ft3": 8, "weld": ""},
+  "foam": {"v": 1, "noise": 0.5, "scale": 4, "grain": 0.3, "seed": 31, "web": 0.0, "web_open": 0.3, "web_thickness": 0.5, "layers": false, "layer_count": 3, "layer_axis": 2, "layer_thickness": 0.75, "layer_strength": 0.85},
+  "plates": [
+    {"v": 1, "kind": "plates", "name": "level 1 floor (L-shape, with stair well)", "thickness": 1.5, "resistance": 2.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "auto_support": true, "min_support": 8.0, "max_span": 10.0, "strut_size": 1.5, "verticality": 0.3, "branch_from_top": false,
+     "shapes": [
+       {"type": "poly", "pts": [[2, 2, 9], [18, 2, 9], [18, 10, 9], [10, 10, 9], [10, 18, 9], [2, 18, 9]]},
+       {"type": "poly", "pts": [[13, 4, 9], [16.5, 4, 9], [16.5, 8, 9], [13, 8, 9]]}
+     ]},
+    {"v": 1, "kind": "plates", "name": "level 2 mezzanine (held from above)", "thickness": 1.0, "resistance": 1.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "auto_support": true, "min_support": 6.0, "max_span": 8.0, "strut_size": 1.2, "verticality": 0.0, "branch_from_top": true,
+     "shapes": [
+       {"type": "poly", "pts": [[2, 3, 17], [11, 3, 17], [11, 17, 17], [2, 17, 17]]}
+     ]}
+  ],
+  "sources": [
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [9, 8, 3.5], "dose": 650, "spread": 4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [7, 8, 12], "dose": 750, "spread": 4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [14.5, 6, 11], "dose": 500, "spread": 2.5, "start": 0, "duration": 0, "dir": null, "plate_mode": "through", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [7, 11, 20.5], "dose": 800, "spread": 4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false}
+  ],
+  "frame": null,
+  "expect": {"tile_id": "ec148c3755fa1aca"}
+}

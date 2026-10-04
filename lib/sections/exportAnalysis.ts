@@ -1,7 +1,9 @@
-// Builds a full Grasshopper-style `<tile_name>_analysis` bundle (zip) from
-// a Sections-tab-built ParsedTile, so it's indistinguishable from a real
-// erosion_engine_5f.py export for a human reviewing it -- per
-// docs/DATA_FORMAT.md section 3. Deliberately data-complete rather than
+// Builds a full `<tile_name>_analysis` bundle (zip) from a Sections-tab-built
+// ParsedTile, the same schema-4 folder the Grasshopper engine writes (docs/DATA_FORMAT.md
+// sections 3 and 12-13): voxels including the floor plates and rooms, faces / sections /
+// plates / spaces / structure data, the model GLBs, plan and section drawings, and print
+// STL files. Everything about the tile comes from the ParsedTile that lib/tiles has
+// already completed, so this and "Add tile" can never disagree. Deliberately data-complete rather than
 // decorative: every documented file a human or the app itself would
 // actually use is here (manifest, README, voxels, the richer faces/sections
 // JSON with outlines, every face/section/projection image, SVGs); the
@@ -17,6 +19,9 @@ import type { FaceEntry, FaceName, ParsedTile, SectionEntry } from "@/lib/types"
 import { traceContours, type Contour } from "./contours";
 import { SECTION_CELL_FT } from "./voxelize";
 import { renderTileThumbnail } from "@/lib/renderTile";
+import { drawingSet } from "@/lib/drawing/exportSet";
+import { buildStl } from "@/lib/exporters/stl";
+import { ANALYSIS_VERSION } from "@/lib/tiles/analyze";
 
 const PX_PER_FT = 50;
 const FOAM_RGB: [number, number, number] = [240, 170, 205];
@@ -232,11 +237,20 @@ export async function buildAnalysisZip(tile: ParsedTile): Promise<AnalysisExport
   // --- model/<name>.glb -- re-fetch the already-built GLB's own bytes.
   const glbBuffer = await fetch(tile.glbUrl).then((r) => r.arrayBuffer());
   zip.file(`${root}/model/${safeName(tile.name)}.glb`, glbBuffer);
+  // the floor plates (and branches) as their own mesh, when the tile has them
+  if (tile.partsUrl) {
+    const partsBuffer: ArrayBuffer = await fetch(tile.partsUrl).then((r) => r.arrayBuffer());
+    zip.file(`${root}/model/${safeName(tile.name)}_parts.glb`, partsBuffer);
+  }
 
   // --- voxels/*.u8
   zip.file(`${root}/voxels/void.u8`, tile.voxels.void ?? new Uint8Array());
   if (tile.voxels.material) zip.file(`${root}/voxels/material.u8`, tile.voxels.material);
   if (tile.voxels.voidSmooth) zip.file(`${root}/voxels/void_smooth.u8`, tile.voxels.voidSmooth);
+  if (tile.voxels.plates) zip.file(`${root}/voxels/plates.u8`, tile.voxels.plates);
+  if (tile.voxels.struts) zip.file(`${root}/voxels/struts.u8`, tile.voxels.struts);
+  if (tile.voxels.mask) zip.file(`${root}/voxels/mask.u8`, tile.voxels.mask);
+  if (tile.voxels.rooms) zip.file(`${root}/voxels/rooms.u8`, tile.voxels.rooms);
 
   // --- data/faces.json (richer than the live ParsedTile's own -- outlines
   // for every face via the mask it already carries, plus depth/edges/plane
@@ -312,6 +326,22 @@ export async function buildAnalysisZip(tile: ParsedTile): Promise<AnalysisExport
   }
   zip.file(`${root}/data/sections.json`, JSON.stringify({ schema: tile.sections?.schema ?? "section-field-tile/1", sections: richSections }, null, 2));
 
+  // --- data/plates.json, spaces.json, structure.json: the tile read as architecture (lib/tiles), as the engine writes them
+  if (tile.plates?.length) zip.file(`${root}/data/plates.json`, JSON.stringify({ schema: "erosion-tile/4", note: "Floor plates derived from the plate cells of voxels/plates.u8 (the engine writes this analytically).", plates: tile.plates }, null, 2));
+  if (tile.spaces) zip.file(`${root}/data/spaces.json`, JSON.stringify({ schema: "erosion-tile/4", ...tile.spaces, cell_ft: tile.cellFt }, null, 2));
+  if (tile.structure) zip.file(`${root}/data/structure.json`, JSON.stringify({ schema: "erosion-tile/4", analysis_version: ANALYSIS_VERSION, cell_ft: tile.cellFt, structure: tile.structure }, null, 2));
+
+  // --- vector/drawings: a plan of every level and sections along X and Y (poche, 1 in = 10 ft)
+  for (const f of drawingSet(tile)) zip.file(`${root}/${f.path}`, f.svg);
+
+  // --- print/: foam and void as STL at 1 inch = 10 feet (the Viewer's Print panel offers other scales and parts)
+  try {
+    const stl = await buildStl(tile, ["foam", "void"], 120, false);
+    for (const f of stl.files) zip.file(`${root}/print/${f.name}`, f.blob);
+  } catch {
+    // Non-essential -- skip rather than fail the whole export.
+  }
+
   // --- images/projections/void_thickness_along_<axis>.png -- a straight
   // count-projection (not the engine's own log/lognormal palette, just a
   // linear 0..axisLength heat), matching the documented "white = void all
@@ -355,8 +385,17 @@ export async function buildAnalysisZip(tile: ParsedTile): Promise<AnalysisExport
     grid: tile.grid,
     config: tile.config,
     metrics: tile.metrics,
+    origin_ft: [0, 0, 0],
+    container: { kind: tile.shape?.kind === "hex-prism" ? "hex-prism" : "cube", volume_ft3: tile.metrics.tile_volume_ft3 },
+    meta: tile.meta ?? (tile.guessed.category ? { category: tile.guessed.category, typology: tile.guessed.typology } : undefined),
+    levels: tile.spaces?.levels.map((l) => ({ id: l.id, name: l.name, z_ft: l.z_ft, area_ft2: l.area_ft2, kind: l.kind })),
+    analysis: tile.spaces ? { version: ANALYSIS_VERSION, spaces_file: "data/spaces.json", structure_file: "data/structure.json", rooms_file: tile.voxels.rooms ? "voxels/rooms.u8" : undefined } : undefined,
+    plates_file: tile.plates?.length ? "data/plates.json" : undefined,
+    recipe_file: tile.sectionRecipe ? "recipe.json" : undefined,
   };
   zip.file(`${root}/tile.json`, JSON.stringify(tileJson, null, 2));
+  // --- recipe.json: the builder's own recipe (which bank tile on which face, seed, cleanup, plates), enough to reopen or rebuild it
+  if (tile.sectionRecipe) zip.file(`${root}/recipe.json`, JSON.stringify({ schema: "section-field-recipe/1", name: tile.name, meta: tileJson.meta, builder: tile.sectionRecipe }, null, 2));
 
   // --- manifest.json -- the "start here" file list + roles.
   const fileList = Object.keys(zip.files).filter((p) => !zip.files[p].dir);
@@ -382,7 +421,7 @@ export async function buildAnalysisZip(tile: ParsedTile): Promise<AnalysisExport
       `Built in-browser from the Sections tab's cube/hex builder, exported to match a Grasshopper erosion-engine tile bundle (docs/DATA_FORMAT.md).\n\n` +
       `tile_ft: ${tile.tileFt.join(" x ")}   cell_ft: ${tile.cellFt}   grid: ${tile.grid.join("x")}\n` +
       `void_fraction: ${tile.metrics.void_fraction?.toFixed?.(3) ?? tile.metrics.void_fraction}\n\n` +
-      `See manifest.json for the full file list and what each one is.\n`,
+      `See manifest.json for the full file list and what each one is. data/spaces.json and data/structure.json read the tile as architecture (levels, rooms, routes, daylight, structure); vector/drawings holds its plans and sections; print/ holds STL files at 1 inch = 10 feet.\n`,
   );
 
   const blob = await zip.generateAsync({ type: "blob" });
@@ -392,7 +431,18 @@ export async function buildAnalysisZip(tile: ParsedTile): Promise<AnalysisExport
 function manifestRole(path: string): string {
   if (path.endsWith("tile.json")) return "identity, settings, measurements";
   if (path.endsWith("manifest.json")) return "this file";
+  if (path.includes("/model/") && path.endsWith("_parts.glb")) return "floor plates and branches as separate meshes (parts of the foam)";
   if (path.includes("/model/")) return "foam + void mesh for three.js";
+  if (path.includes("voxels/plates.u8")) return "floor plate id per cell (these cells are foam in void.u8)";
+  if (path.includes("voxels/struts.u8")) return "support branches (foam in void.u8)";
+  if (path.includes("voxels/rooms.u8")) return "which room each void cell belongs to (data/spaces.json)";
+  if (path.includes("voxels/mask.u8")) return "inside-the-container mask";
+  if (path.includes("data/plates.json")) return "each floor plate: position, slope, thickness, clear height above and below";
+  if (path.includes("data/spaces.json")) return "the void as spaces: levels, rooms, connections, routes, daylight, face openings";
+  if (path.includes("data/structure.json")) return "foam pieces, thin-wall shares, overhang and bed contact";
+  if (path.includes("vector/drawings/")) return "plan or section drawing (poche), 1 in = 10 ft";
+  if (path.includes("/print/")) return "STL for 3D printing, millimetres, Z up";
+  if (path.endsWith("recipe.json")) return "the builder recipe (faces, seed, cleanup, plates)";
   if (path.includes("/voxels/void.u8")) return "void/foam raw voxel grid, 1=void";
   if (path.includes("/voxels/material.u8")) return "foam material grid, 0..255";
   if (path.includes("/voxels/void_smooth.u8")) return "smoothed void grid, 0..255";

@@ -3,6 +3,7 @@
 import type { FaceName, ParsedTile } from "@/lib/types";
 import { faceNamesOf } from "@/lib/types";
 import { Section } from "@/components/shared/Section";
+import { SpacesPanel } from "@/components/viewer/SpacesPanel";
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
@@ -21,7 +22,7 @@ function ft2(n: number | undefined) {
   return n === undefined ? "—" : `${n.toFixed(1)} ft²`;
 }
 
-export function MetricsPanel({ tile }: { tile: ParsedTile }) {
+export function MetricsPanel({ tile, onShowLevel }: { tile: ParsedTile; onShowLevel?: (levelId: number) => void }) {
   const { metrics, config } = tile;
   const tileFaceNames = faceNamesOf(tile);
   const openFaces = tileFaceNames.filter((f) => (metrics.faces?.[f]?.open_area_ft2 ?? 0) > 8);
@@ -35,6 +36,7 @@ export function MetricsPanel({ tile }: { tile: ParsedTile }) {
           <div className="mt-1 font-mono text-[11px] uppercase tracking-label text-orange">
             {tile.guessed.category}
             {tile.guessed.typology ? ` · ${tile.guessed.typology}` : ""}
+            {tile.meta?.variant ? ` · ${tile.meta.variant}` : ""}
           </div>
         )}
       </div>
@@ -55,6 +57,8 @@ export function MetricsPanel({ tile }: { tile: ParsedTile }) {
           ))}
         </div>
       </Section>
+
+      <SpacesPanel tile={tile} onShowLevel={onShowLevel} />
 
       <Section id="viewer.recipe" variant="inline" title="Recipe settings" defaultOpen={false} bodyClassName="space-y-0">
         <Stat label="Steps" value={config.steps ?? "—"} />
@@ -91,6 +95,14 @@ export function MetricsTable({ tiles }: { tiles: ParsedTile[] }) {
       { label: "Fraction", values: tiles.map((t) => pct(t.metrics.void_fraction)) },
       { label: "Volume", values: tiles.map((t) => `${t.metrics.void_volume_ft3.toFixed(0)} ft³`) },
       { label: "Pieces", values: tiles.map((t) => String(t.metrics.void_pieces ?? "—")) },
+    ]),
+    section("Spaces", [
+      { label: "Levels", values: tiles.map((t) => String(t.spaces?.levels.length ?? "—")) },
+      { label: "Rooms", values: tiles.map((t) => String(t.spaces?.rooms.length ?? "—")) },
+      { label: "Tallest", values: tiles.map((t) => (t.spaces ? `${t.spaces.rooms.reduce((a, r) => Math.max(a, r.kind === "shaft" ? r.clear_height_ft.max : r.clear_height_ft.mean), 0).toFixed(0)} ft` : "—")) },
+      { label: "In light", values: tiles.map((t) => (t.spaces ? pct(t.spaces.daylight.lit_floor_fraction) : "—")) },
+      { label: "Route", values: tiles.map((t) => (t.spaces?.main_route ? `${t.spaces.main_route.length_ft.toFixed(0)} ft` : "—")) },
+      { label: "Plates", values: tiles.map((t) => String(t.plates?.length ?? 0)) },
     ]),
     section("Faces open (ft²)", [
       {

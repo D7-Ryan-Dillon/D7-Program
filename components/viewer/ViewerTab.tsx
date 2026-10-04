@@ -5,9 +5,9 @@ import { useProject, useProjectUi } from "@/lib/project-store";
 import { usePresets } from "@/lib/presets";
 import { newLinkHub, type CameraLink } from "@/lib/cameraLink";
 import { UploadZone } from "@/components/viewer/UploadZone";
-import { TileSwitcher } from "@/components/shared/TileSwitcher";
 import { MetricsPanel, MetricsTable } from "@/components/viewer/MetricsPanel";
 import { ExportPanel } from "@/components/viewer/ExportPanel";
+import { PrintPanel } from "@/components/viewer/PrintPanel";
 import { GlowPanel } from "@/components/shared/GlowPanel";
 import { PresetBar } from "@/components/shared/PresetBar";
 import { Segmented } from "@/components/shared/Segmented";
@@ -119,8 +119,6 @@ export function ViewerTab() {
 
   return (
     <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
-      <TileSwitcher />
-
       {!activeTile ? (
         <div className="flex flex-1 items-center justify-center p-8">
           <div className="w-full max-w-xl">
@@ -181,8 +179,15 @@ export function ViewerTab() {
           <div className="order-3 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
             <GlowPanel className="flex-1" glow="magenta">
               <div className="p-4">
-                {count > 1 ? <MetricsTable tiles={shownTiles} /> : <MetricsPanel tile={activeTile} />}
-                <div className="mt-4">
+                {count > 1 ? (
+                  <MetricsTable tiles={shownTiles} />
+                ) : (
+                  <MetricsPanel tile={activeTile} onShowLevel={(level) => patchPane(0, { draw: { ...panes[0].draw, mode: "plan", level } })} />
+                )}
+                <div className="mt-4 space-y-4">
+                  <Section id="viewer.stl" variant="inline" title="Print (STL)" defaultOpen={false}>
+                    <PrintPanel tile={activeTile} />
+                  </Section>
                   <Section id="viewer.export" variant="inline" title="Export (OBJ / analysis)">
                     <ExportPanel tile={activeTile} visibility={panes[0].visibility} />
                   </Section>

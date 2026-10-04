@@ -52,7 +52,21 @@ The Grasshopper/Python tool chain that *produces* the tiles the Viewer tab
 reads now lives in this repo too, under [`engine/`](engine/)
 (`erosion_engine_5f.py`, `erosion_foam.py`, `erosion_source.py`) -- added
 2026-10-01 so both project members can see and edit it alongside the web
-app. The `.gh` file and the 15 tile recipes are still local-only (binary
+app. **Engine 7 (2026-10-03)** rebuilt it from 5f: floor plates
+(`erosion_plates.py`: closed flat curves or geometry, any tilt, true flat tops,
+per-source `plate_mode` and `cut`, anchor foam and support branches), any
+closed geometry as the foam (`geo`), a bake-and-feed-back loop (`mass` out ->
+`mass_in`), self-contained recipes (`erosion-recipe/2`) and an export that adds
+`recipe.json`, `data/plates.json` and `voxels/mask|plates|struts.u8`
+(`erosion-tile/4`). It is **uncommitted/untested in real Rhino** at the time of
+writing: the numeric core is covered by `engine/headless/tests` (run
+`run_all.py` with Rhino's bundled Python), the Rhino-only calls (reading
+curves/geometry, `.3dm`) are not. Read `engine/ENGINE_7_GUIDE.md` (controls and
+wiring) and `engine/RECIPES.md` (how to write and preview recipes -- a session
+can design spaces by writing a recipe). The web app does not read plates yet:
+`docs/DATA_FORMAT.md` section 12 is the contract; wiring plates into Viewer /
+Analysis is the next app step once the engine is confirmed in Rhino. The fifteen **typology tile recipes** (engine 7: eroded forms, soft passages and warped strata, meeting at a shared standard port) are in `engine/tiles/recipes/` with previews, a report and the scripts
+that build and check them (`engine/tiles/README.md`); the older V1/V2 sets and the `.gh` file are still local-only (binary
 Rhino file, not meaningfully diffable). Both the Grasshopper scripts and
 this app are actively worked on by both project members, not split by
 person. The app itself never executes these scripts -- what it needs from
@@ -73,11 +87,29 @@ the Boards tab's print-resolution composition.
 **Viewer -> Sections -> Analysis -> Arrange -> Boards**.
 
 ### Viewer (`components/viewer/`)
+Each viewport can show 3D, a Plan or a Section (`PaneState.draw`, `components/viewer/DrawingView.tsx`), has a Layers popup (foam, void, floor
+plates, branches, tint by room or level, quick looks "Architecture" / "Rooms"), and the right panel has Spaces, Floor plates, Structure, Print checks
+(`SpacesPanel.tsx`) and a Print (STL) section (`PrintPanel.tsx`).
 Drop, upload, or `.zip` a Grasshopper `_analysis` folder (via the header's
 always-present "Add folder" / "Add .zip" buttons, `components/shared/
 AddTilesButtons.tsx`); see it in 3D; read its metrics. `lib/ingest.ts` turns
 a folder/zip into a `ParsedTile` (`lib/types.ts`), the one shape every tab
 downstream works with regardless of which tab created it.
+
+### The shared tile pipeline (`lib/tiles/`, `lib/drawing/`) -- read before touching how a tile is processed
+**Standing rule: how a tile is processed lives in `lib/tiles`, in one place.** The Grasshopper engine's export, the Sections builder's "Add tile"
+(`lib/sections/buildTile.ts`) and "Export _analysis" (`lib/sections/exportAnalysis.ts`) must all produce the same data, so none of them may carry
+a private copy of a measurement. `lib/tiles/measure.ts` (metrics, faces, sections), `analyze.ts` (levels, rooms, connections, routes, profile,
+daylight, openings, structure; the TypeScript twin of `analyze_tile()` in `engine/erosion_engine_7.py`), `plates.ts` (plate facts from plate
+cells), `pipeline.ts` (`ensureAnalysis`: fills in what a loaded or built tile lacks; called by ingest, the builder and project load),
+`tint.ts`, `checks.ts` (print checks), `facts.ts` (groundwork for the Arrange overhaul, not imported by Arrange). Spec: `docs/DATA_FORMAT.md`
+section 13. **`npm run check:parity`** compares `analyze.ts` with the engine's own `spaces.json` / `structure.json` on the 15 typology tiles
+(`lib/tiles/fixtures`, regenerate with `engine/tiles/make_fixtures.py`); change the Python and the TypeScript together and keep it green.
+`ParsedTile` carries `spaces`, `structure`, `plates`, `meta`, `partsUrl` and extra voxel arrays (`plates`, `struts`, `mask`, `rooms`), all persisted.
+The main GLB (`glbUrl`) must stay foam + void only (Arrange, Boards and the OBJ exports render every node); plates and branches are a second
+file (`partsUrl`, only the Viewer loads it).
+`lib/drawing/` makes the automatic plan and section drawings (`build.ts` -> `Drawing`, `render.ts` canvas / SVG / PNG on the app's dark palette or
+paper, `state.ts` the per-viewport / per-board-slot setting). `lib/exporters/stl.ts` writes print STL (parts, scale).
 
 ### Sections (`components/sections/`, `lib/sections/`)
 A second, independent way to make a tile -- entirely in-browser, no
@@ -164,6 +196,7 @@ GLB is stored -- opening one re-lofts from the stored traces.
   Select behind a `<select>`-shaped API: same `value`/`onChange(e.target.value)`/
   `<option>` children), and `app/globals.css` styles the generic controls (range,
   colour, checkbox, details, scrollbars).
+- **Palette and top bar.** Black background, grayscale surfaces, and only three accents: magenta `#c43383`, orange `#db7228`, soft pink `#e8a6c8` (Tailwind `bg-pink` / `text-pink`, the "fine / lifts it" mark where other apps use green); errors are hot pink (`--destructive`); floor plates are peach `#f2b878`, branches orange. No blue, green or teal anywhere (the animated backdrop is only on the project-code screen). New viewports start in the board look (`defaultPane` in `components/shared/TilePane.tsx`: ghosted white foam, magenta void), and the Viewer's drawing export defaults to the black ground. `TileSwitcher` lives in the `Header` (top bar) on Viewer and Analysis so it stays on screen.
 - **Collapsible sections.** Long side panels are made of `components/shared/Section.tsx`:
   chevron + title (optional `summary` shown while shut, optional `action` slot for a
   switch / Reset), body folds away. `variant="panel"` pads it directly inside a
@@ -242,6 +275,13 @@ auto-rotating axo viewport beside the cards) and a Compare view (2 columns, a
 3rd shown from `xl` up; per-descriptor rows are aligned and the highest/lowest
 tile is marked when the tiles differ by >= 25 points).
 
+**What a descriptor is now** (`lib/scoring/descriptors.ts`, `measures.ts`, `words.ts`): every descriptor reads the tile's spaces (`tile.spaces`,
+`tile.structure`) and returns a score, a `quant` block (headline + measures with how each was measured), a `qualitative` reading on a named scale, `drivers`
+(factor, value, how well it did, weight), an `explanation` (one or two sentences about this tile's spaces, built from the data, never canned) and
+`evidence` (rooms / levels / route, lit by the Evidence button). The old compat fields (`quantValue`, `verdict`, ...) are still set for the Boards
+descriptor page. Calibrated for mostly-eroded tiles (Carved peaks at 58% void); there is no old-calibration switch. `compare.ts` writes the Compare
+sentence, `exportResults.ts` the results table (CSV / image) and the annotated diagrams.
+
 **Criteria carry-forward** (`lib/scoring/selection.ts`, `lib/useCriteria.ts`,
 `CriteriaPanel.tsx`): for the project's own tiles, picks the 6-12 strongest
 descriptors -- spread across tiles (what separates them), measured not inferred
@@ -280,7 +320,7 @@ Clicking a tile opens `TileViewEditor.tsx` (live R3F view, 8 locked axo
 corners or free perspective, clipping, colour/opacity, the three line
 settings; per-slot overrides shadow the board-wide masters). Exports two PNGs: the board itself, and a second
 page listing each tile's scored descriptors (the carried criteria) with an
-optional top-N highlight (`config.highlight`).
+optional top-N highlight (`config.highlight`). The caption box is one per page (`config.textBox` = page 1, `config.textBox2` = page 2); one caption cell is held on both pages when either is on, so the tiles never move between them. `config.descriptorHeadlines` (default off) prints each descriptor's measured value under its bar.
 
 **Name tag + labels.** The tag's width and height are fractions of the module
 (`config.nameTag`; `TagGeometry` in `frameShape.ts`, `moduleOutline()`), the
@@ -455,7 +495,8 @@ reproduced. Compare directly against
 - **Push straight to `master`.** The owner is the only one working on this
   repo right now and wants to see/test every change immediately -- no
   feature branches, no PRs, unless they say otherwise.
-- Keep `npm run lint` and `npx tsc --noEmit` clean at all times.
+- Keep `npm run lint` and `npx tsc --noEmit` clean at all times, and `npm run check:parity` green when `lib/tiles/analyze.ts` or the engine's analysis changes.
+- Tile processing lives in `lib/tiles` only (see "The shared tile pipeline" above); never give the builder, the exporters or the Analysis a private copy of a measurement.
 - A two-step scaffold sometimes shows up and gets deleted repeatedly during
   Viewer-tab development: a `__devIngestFromPublic()` function in
   `lib/ingest.ts` and a matching "dev: ..." button in `UploadZone.tsx`, used
@@ -503,6 +544,7 @@ access to their filesystem. The Sections tab needs no external data at all
 
 ## 10. Suggested next steps (outside the off-limits areas in section 7)
 
+0. **The Arrange overhaul** is planned in `docs/PLAN_ARRANGE_OVERHAUL.md` (lattice placement, a joint score that also checks floors, an in-app interlock test and pair matrix, whole-assembly analysis, a better generator and a variations gallery, outputs). It starts only on the owner's go and answers to the questions at the end of that file.
 1. Sync the Arrange assembly to Supabase (everything else now saves with
    the project). Arrange's tile reading, the interlock test (2/4/8 copies by
    repeat, mirror, shift, with scale/rotate allowed) and an arrangement

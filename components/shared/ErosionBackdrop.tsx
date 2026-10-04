@@ -89,10 +89,10 @@ export function ErosionBackdrop() {
       const img = ctx.createImageData(W, H);
       for (let i = 0; i < size; i++) {
         const vv = Math.max(0, Math.min(1, v[i] * 1.6));
-        // near-black base -> faint magenta mid -> faint orange peak, kept dim throughout
+        // black base -> faint pink mid -> faint orange peak (no blue), kept dim throughout
         const r = 8 + vv * (196 * 0.55 - 8) * vv + (1 - vv) * 0;
-        const g = 8 + vv * 40;
-        const b = 10 + vv * 90 * (1 - vv * 0.6);
+        const g = 8 + vv * 30;
+        const b = 8 + vv * 34 * (1 - vv * 0.6);
         const mix = vv; // blend magenta->orange at higher activity
         const rr = r + mix * mix * 60;
         const o = i * 4;

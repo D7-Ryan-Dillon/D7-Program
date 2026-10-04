@@ -4,7 +4,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import type { MeshColors, MeshVisibility } from "@/components/viewer/ThreeViewport";
 
-const SWATCHES = ["#e8a6c8", "#c43383", "#db7228", "#f2b878", "#9aa0a6", "#e6e6e6", "#1c1c1f"];
+const SWATCHES = ["#ffffff", "#e8a6c8", "#c43383", "#db7228", "#f2b878", "#9a9a9a", "#e6e6e6", "#1c1c1c"];
 
 function Row({
   label,

@@ -1,9 +1,12 @@
 // Assembles a finished ParsedTile from a cube/hex-prism face assignment --
-// the single entry point lib/sections' UI (the Sections tab, not yet
-// built) calls once the user is happy with a lofted preview. The result is
-// built in memory, not round-tripped through a real _analysis zip -- there
-// is no folder to parse, so this hands lib/project-store a ParsedTile
-// directly instead of going through lib/ingest.ts.
+// the single entry point the Sections builder calls for BOTH "Add tile" and
+// "Export _analysis", so the two can never differ. The result is built in
+// memory, not round-tripped through a real _analysis zip.
+//
+// A cube tile is measured by lib/tiles (the same code and definitions the
+// Grasshopper engine's export uses -- metrics, faces, sections, levels, rooms,
+// routes, daylight, structure, plates) rather than by a private copy. Keep it
+// that way: anything about how a tile is processed belongs in lib/tiles.
 
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import type { FaceName, FacesJson, GuessedIdentity, ParsedTile, TileConfig, TileShape } from "@/lib/types";
@@ -12,6 +15,10 @@ import { voxelizeVolumeField, SECTION_TILE_FT, SECTION_CELL_FT, SECTION_GRID, SE
 import { buildTileScene } from "./mesh";
 import { cleanupVolumeField, defaultCleanup, swapFoamVoid, type CleanupSettings } from "./cleanup";
 import { applyPlates, arePlatesActive, defaultPlates, type PlateSettings } from "./plates";
+import { voxelizePlates } from "./plateVoxels";
+import { buildPlatesGlbUrl } from "./plateMesh";
+import { measureFaces, measureMetrics, measureSections } from "@/lib/tiles/measure";
+import { ensureAnalysis } from "@/lib/tiles/pipeline";
 import { computeFaceData } from "./faceData";
 import { computeSectionsData } from "./sectionsData";
 import { computeTileMetrics } from "./metrics";
@@ -86,49 +93,70 @@ export async function buildSectionTile(input: BuildSectionTileInput): Promise<Pa
   const cleanup = input.cleanup ?? defaultCleanup;
   const lofted = buildVolumeField(input.assignments, input.shape, seed, fitTolerance, 46);
   const swappedField = input.swapped ? swapFoamVoid(lofted) : lofted;
-  const plated = applyPlates(swappedField, input.plates ?? defaultPlates(), input.shape, SECTION_TILE_FT[0]).volume;
-  const volume = cleanupVolumeField(plated, cleanup).volume;
+  const platedResult = applyPlates(swappedField, input.plates ?? defaultPlates(), input.shape, SECTION_TILE_FT[0]);
+  const volume = cleanupVolumeField(platedResult.volume, cleanup).volume;
   const voxels = voxelizeVolumeField(volume);
   if (!voxels.void || !voxels.material || !voxels.voidSmooth) {
     throw new Error("Voxelization produced no data -- this is a bug in lib/sections/voxelize.ts, not a bad input.");
   }
+  // which cells are floor plates (foam in `void`), so the tile carries them like an engine tile does
+  if (platedResult.plateField && platedResult.plateIds) voxels.plates = voxelizePlates(platedResult.plateField, platedResult.plateIds, volume.resolution, voxels.void);
 
   const shapeDescriptor: TileShape = isHex ? { kind: "hex-prism", apothemFt: SECTION_HEX_APOTHEM_FT, heightFt: SECTION_HEX_HEIGHT_FT } : { kind: "box" };
   const faceNames: FaceName[] | undefined = isHex ? [...facesForShape("hex-prism")] : undefined;
   const faceAssignmentsForData = isHex ? input.assignments : relabelCubeAssignments(input.assignments);
 
-  const { faces: faceEntries, faceMetrics } = computeFaceData(shapeDescriptor, faceNames ?? ["+X", "-X", "+Y", "-Y", "+Z", "-Z"], voxels.void, SECTION_GRID, faceAssignmentsForData);
-  const sections = computeSectionsData(voxels.void, SECTION_GRID, SECTION_TILE_FT);
-  const metrics = computeTileMetrics(voxels.void, SECTION_GRID, SECTION_TILE_FT, faceMetrics);
+  const measureInput = { void: voxels.void, grid: SECTION_GRID, cell: SECTION_CELL_FT, plates: voxels.plates };
+  let facesJson: FacesJson;
+  let sections;
+  let metrics;
+  if (isHex) {
+    // a hex prism has angled side faces the box measurements do not describe; it keeps its own face data
+    const { faces: faceEntries, faceMetrics } = computeFaceData(shapeDescriptor, faceNames ?? ["+X", "-X", "+Y", "-Y", "+Z", "-Z"], voxels.void, SECTION_GRID, faceAssignmentsForData);
+    facesJson = { schema: "section-field-tile/1", cell_ft: SECTION_CELL_FT, faces: faceEntries };
+    sections = computeSectionsData(voxels.void, SECTION_GRID, SECTION_TILE_FT);
+    metrics = computeTileMetrics(voxels.void, SECTION_GRID, SECTION_TILE_FT, faceMetrics);
+  } else {
+    facesJson = measureFaces(measureInput);
+    sections = measureSections(measureInput);
+    metrics = measureMetrics(measureInput);
+  }
 
   const scene = buildTileScene(volume.field, volume.resolution, SECTION_TILE_FT, input.shape);
   const exporter = new GLTFExporter();
   const glbBuffer = (await exporter.parseAsync(scene, { binary: true })) as ArrayBuffer;
   const glbUrl = URL.createObjectURL(new Blob([glbBuffer], { type: "model/gltf-binary" }));
+  // the floor plates as their own mesh for the Viewer's layers (the main GLB stays foam + void)
+  const partsUrl = voxels.plates && platedResult.plateField ? await buildPlatesGlbUrl(platedResult.plateField, volume.resolution, input.shape) : undefined;
 
   const id = await hashTileId(voxels.void, `section-field:${input.shape}:${seed}:${fitTolerance}:${input.swapped ? "swapped" : ""}:${arePlatesActive(input.plates) ? JSON.stringify(input.plates) : ""}`);
-  const facesJson: FacesJson = { schema: "section-field-tile/1", cell_ft: SECTION_CELL_FT, faces: faceEntries };
   const config: TileConfig = { seed, cell: SECTION_CELL_FT, tile_w: SECTION_TILE_FT[0], tile_h: SECTION_TILE_FT[2] };
 
-  return {
+  const meta = input.guessed?.category ? { category: input.guessed.category, typology: input.guessed.typology } : undefined;
+  const tile: ParsedTile = {
     id,
     name: input.name,
     sourceFolderName: input.name,
-    schema: "section-field-tile/1",
+    schema: isHex ? "section-field-tile/1" : "erosion-tile/4",
+    engineVersion: "section-field-builder",
     tileFt: SECTION_TILE_FT,
     cellFt: SECTION_CELL_FT,
     grid: SECTION_GRID,
     config,
     metrics,
     glbUrl,
+    partsUrl,
     voxels,
     faces: facesJson,
     sections,
     guessed: input.guessed ?? {},
+    meta,
     shape: shapeDescriptor,
     faceNames,
     sectionRecipe: input.assignmentNames
       ? { shape: input.shape, assignments: input.assignmentNames as Record<string, string>, seed, fitTolerance, cleanup, swapped: !!input.swapped, plates: arePlatesActive(input.plates) ? input.plates : undefined, rotations: input.rotations }
       : undefined,
   };
+  // levels, rooms, routes, daylight, structure and plates, measured exactly as for an engine tile
+  return ensureAnalysis(tile);
 }

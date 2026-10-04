@@ -661,7 +661,7 @@ export function CorrectionEditor({
                         const isActive = activeAnchor?.i === i && activeAnchor.pi === pi && activeAnchor.si === si;
                         return (
                           <g key={`${i}-${pi}-${si}`}>
-                            <path d={`M${x - r},${y}h${2 * r}M${x},${y - r}v${2 * r}`} stroke="#6bd6d4" strokeWidth={1 / scale} />
+                            <path d={`M${x - r},${y}h${2 * r}M${x},${y - r}v${2 * r}`} stroke="#f2b878" strokeWidth={1 / scale} />
                             {isActive &&
                               (["handleIn", "handleOut"] as const).map((h) => {
                                 if (!seg[h].length) return null;
@@ -680,7 +680,7 @@ export function CorrectionEditor({
                   : [],
               )}
             {showCleanup &&
-              [...cleanupPreview!.removed.map((d) => ({ d, color: "#ff269e" })), ...cleanupPreview!.filled.map((d) => ({ d, color: "#6bd6d4" }))].map(
+              [...cleanupPreview!.removed.map((d) => ({ d, color: "#ff269e" })), ...cleanupPreview!.filled.map((d) => ({ d, color: "#f2b878" }))].map(
                 ({ d, color }, i) => <path key={i} d={d} fill="none" stroke={color} strokeWidth={1 / scale} strokeDasharray={`${2 / scale} ${3 / scale}`} />,
               )}
             {draft.length > 0 && (
@@ -690,11 +690,11 @@ export function CorrectionEditor({
                     .map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`)
                     .join(" ")}
                   fill="none"
-                  stroke={tool === "subtract" ? "#ff269e" : "#6bd6d4"}
+                  stroke={tool === "subtract" ? "#ff269e" : "#f2b878"}
                   strokeWidth={1 / scale}
                 />
                 {draft.map(([x, y], i) => (
-                  <path key={i} d={`M${x - 2.5 / scale},${y}h${5 / scale}M${x},${y - 2.5 / scale}v${5 / scale}`} stroke="#6bd6d4" strokeWidth={1 / scale} />
+                  <path key={i} d={`M${x - 2.5 / scale},${y}h${5 / scale}M${x},${y - 2.5 / scale}v${5 / scale}`} stroke="#f2b878" strokeWidth={1 / scale} />
                 ))}
               </>
             )}
@@ -705,8 +705,8 @@ export function CorrectionEditor({
                 y={Math.min(gesture.startY, cursor.y)}
                 width={Math.abs(cursor.x - gesture.startX)}
                 height={Math.abs(cursor.y - gesture.startY)}
-                fill="#6bd6d415"
-                stroke="#6bd6d4"
+                fill="#f2b87815"
+                stroke="#f2b878"
                 strokeWidth={1 / scale}
                 strokeDasharray={`${4 / scale} ${4 / scale}`}
               />

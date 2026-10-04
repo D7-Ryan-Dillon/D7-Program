@@ -1,8 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Camera, Eye, Ghost, RotateCcw, RotateCw, Scissors } from "lucide-react";
-import { ThreeViewport, type DisplayMode, type MeshColors, type MeshOpacity, type MeshVisibility } from "@/components/viewer/ThreeViewport";
+import { useMemo, useRef, useState } from "react";
+import { Camera, Eye, Ghost, Layers, PenLine, RotateCcw, RotateCw, Ruler, Scissors } from "lucide-react";
+import { PLATE_COLOR, STRUT_COLOR, ThreeViewport, type DisplayMode, type MeshColors, type MeshOpacity, type MeshVisibility } from "@/components/viewer/ThreeViewport";
+import { DrawingExport, DrawingView } from "@/components/viewer/DrawingView";
+import { defaultDrawState, type DrawMode, type DrawState } from "@/lib/drawing/state";
+import type { TintMode } from "@/lib/tiles/tint";
+import type { Evidence } from "@/lib/scoring/descriptors";
 import { ViewportExportButton } from "@/components/shared/ViewportExport";
 import { PaneMenu } from "@/components/shared/PaneMenu";
 import { Segmented } from "@/components/shared/Segmented";
@@ -20,7 +24,7 @@ import type { ParsedTile } from "@/lib/types";
 
 /** Every view a pane can show: the face views, then the axo corners. */
 const PANE_VIEWS = [...ALL_VIEWS, ...AXO_VIEWS.filter((v) => !ALL_VIEWS.some((a) => a.key === v.key))];
-const SWATCHES = ["#e8a6c8", "#c43383", "#db7228", "#f2b878", "#9aa0a6", "#e6e6e6", "#1c1c1f"];
+const SWATCHES = ["#ffffff", "#e8a6c8", "#c43383", "#db7228", "#f2b878", "#9a9a9a", "#e6e6e6", "#1c1c1c"];
 
 /** Everything one viewport remembers (saved with the project). */
 export interface PaneState {
@@ -35,6 +39,10 @@ export interface PaneState {
   colors: MeshColors;
   opacity: MeshOpacity;
   clip: ClipState;
+  /** Colour the void by room or level (needs the tile's room data). */
+  tint: TintMode;
+  /** 3D model, or the automatic plan / section drawing of the tile. */
+  draw: DrawState;
 }
 
 export const defaultPane = (autoRotate = false): PaneState => ({
@@ -43,10 +51,13 @@ export const defaultPane = (autoRotate = false): PaneState => ({
   autoRotate,
   rotateSecs: 24,
   displayMode: "rendered",
-  visibility: { foam: true, void: true },
-  colors: { foam: "#e8a6c8", void: "#1c1c1f" },
-  opacity: { foam: 1, void: 1 },
+  visibility: { foam: true, void: true, plates: true, struts: true },
+  // the same look as a board: ghosted white foam, magenta void, peach plates, orange branches, on black
+  colors: { foam: "#ffffff", void: "#c43383", plates: PLATE_COLOR, struts: STRUT_COLOR },
+  opacity: { foam: 0.12, void: 1, plates: 1, struts: 1 },
   clip: defaultClipState(),
+  tint: "none",
+  draw: defaultDrawState(),
 });
 
 /** Fills in anything an older saved pane doesn't have yet. */
@@ -65,9 +76,12 @@ export const SYNC_FIELDS: { key: SyncField; label: string }[] = [
 /** The settings in `fields` copied from `source` onto `target`. */
 export function syncPane(target: PaneState, source: PaneState, fields: SyncField[]): PaneState {
   const next = { ...target };
-  if (fields.includes("view")) next.view = source.view;
+  if (fields.includes("view")) {
+    next.view = source.view;
+    next.draw = { ...source.draw };
+  }
   if (fields.includes("display")) next.displayMode = source.displayMode;
-  if (fields.includes("visibility")) Object.assign(next, { visibility: { ...source.visibility }, colors: { ...source.colors }, opacity: { ...source.opacity } });
+  if (fields.includes("visibility")) Object.assign(next, { visibility: { ...source.visibility }, colors: { ...source.colors }, opacity: { ...source.opacity }, tint: source.tint });
   if (fields.includes("clip")) next.clip = JSON.parse(JSON.stringify(source.clip));
   if (fields.includes("rotation")) Object.assign(next, { autoRotate: source.autoRotate, rotateSecs: source.rotateSecs });
   return next;
@@ -135,6 +149,7 @@ export function TilePane({
   link,
   compact = false,
   onApplyAll,
+  emphasis,
 }: {
   /** 1-based number shown on the viewport's badge (and in the specs table). */
   index?: number;
@@ -148,11 +163,35 @@ export function TilePane({
   compact?: boolean;
   /** When given, each setting's popup offers "Apply to all viewports". */
   onApplyAll?: (patch: Partial<PaneState>) => void;
+  /** Rooms / levels / the route to light up (the Analysis's evidence): tinted in 3D, lit on a plan or section. */
+  emphasis?: Evidence;
 }) {
   const handleRef = useRef<ViewportHandle | null>(null);
   const [nonce, setNonce] = useState(0);
   const ghosted = pane.displayMode === "ghosted";
   const all = (patch: Partial<PaneState>) => (onApplyAll ? () => onApplyAll(patch) : undefined);
+  const tintEmphasis = useMemo(() => (emphasis ? { rooms: emphasis.rooms, levels: emphasis.levels } : undefined), [emphasis]);
+  const draw = pane.draw;
+  const drawing = draw.mode !== "model";
+  const levels = tile.spaces?.levels ?? [];
+  const hasParts = !!tile.partsUrl;
+  const hasRooms = !!tile.voxels.rooms;
+  const setDraw = (patch: Partial<DrawState>) => onPane({ draw: { ...draw, ...patch } });
+  const span = tile.tileFt[draw.axis === "x" ? 0 : 1];
+  const defaults = defaultPane();
+  const looks: { label: string; hint: string; patch: Partial<PaneState> }[] = [
+    {
+      label: "Architecture",
+      hint: "foam faint, floor plates and branches solid",
+      patch: { displayMode: "rendered", tint: "none", visibility: { ...pane.visibility, foam: true, void: false, plates: true, struts: true }, opacity: { ...pane.opacity, foam: 0.3, plates: 1, struts: 1 } },
+    },
+    {
+      label: "Rooms",
+      hint: "the void tinted room by room",
+      patch: { displayMode: "rendered", tint: "rooms", visibility: { ...pane.visibility, foam: true, void: true }, opacity: { ...pane.opacity, foam: 0.12, void: 1 } },
+    },
+    { label: "Reset", hint: "everything back to solid foam and void", patch: { displayMode: "rendered", tint: "none", visibility: defaults.visibility, opacity: defaults.opacity, colors: defaults.colors } },
+  ];
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col gap-1.5">
@@ -174,9 +213,14 @@ export function TilePane({
       </div>
 
       <div className="relative min-h-0 flex-1">
+        {drawing ? (
+          <DrawingView tile={tile} draw={draw} highlight={emphasis} />
+        ) : (
         <ThreeViewport
           key={tile.id}
           tile={tile}
+          tint={pane.tint}
+          emphasis={tintEmphasis}
           displayMode={pane.displayMode}
           visibility={pane.visibility}
           colors={pane.colors}
@@ -189,9 +233,64 @@ export function TilePane({
           handleRef={handleRef}
           link={link}
         />
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-1">
+        <PaneMenu icon={Layers} label={draw.mode === "model" ? "3D" : draw.mode === "plan" ? "Plan" : "Section"} showLabel={!compact} active={drawing} onApplyAll={all({ draw: pane.draw })}>
+          <Segmented
+            value={draw.mode}
+            options={[{ value: "model", label: "3D" }, { value: "plan", label: "Plan" }, { value: "section", label: "Section" }]}
+            onChange={(mode) => setDraw({ mode: mode as DrawMode })}
+          />
+          <p className="text-[10px] text-muted-foreground">Plan and Section are drawn automatically from the tile: foam and plates cut solid, void open, 10 ft ruler.</p>
+        </PaneMenu>
+
+        {drawing && draw.mode === "plan" && (
+          <PaneMenu icon={Layers} label="Level" showLabel={!compact} onApplyAll={all({ draw: pane.draw })}>
+            {levels.length ? (
+              <div className="flex flex-wrap gap-1">
+                {levels.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => setDraw({ level: l.id })}
+                    className={cn("rounded-full border-hair px-2 py-0.5 font-mono text-[10px] tracking-label transition-colors", (draw.level ?? levels[0].id) === l.id ? "border-magenta/60 bg-magenta/15 text-foreground" : "text-muted-foreground hover:text-foreground")}
+                  >
+                    {l.name.replace(/^the /, "")} · {Math.round(l.area_ft2)} ft²
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-muted-foreground">This tile has no floors to cut a plan through; showing a plan at mid height.</p>
+            )}
+            <p className="text-[10px] text-muted-foreground">Each plan is cut 4 ft above the level&apos;s floor, the floor tinted below.</p>
+          </PaneMenu>
+        )}
+        {drawing && draw.mode === "section" && (
+          <PaneMenu icon={Ruler} label="Section" showLabel={!compact} onApplyAll={all({ draw: pane.draw })}>
+            <Segmented value={draw.axis} options={[{ value: "x", label: "Along X" }, { value: "y", label: "Along Y" }]} onChange={(axis) => setDraw({ axis: axis as "x" | "y", pos: null })} />
+            <NumberSlider label="Position" value={draw.pos ?? span / 2} min={tile.cellFt / 2} max={span - tile.cellFt / 2} step={tile.cellFt} suffix=" ft" decimals={1} onChange={(pos) => setDraw({ pos })} />
+          </PaneMenu>
+        )}
+        {drawing && (
+          <PaneMenu icon={PenLine} label="Drawing" showLabel={!compact} onApplyAll={all({ draw: pane.draw })}>
+            <Segmented value={draw.ground} options={[{ value: "dark", label: "Dark" }, { value: "paper", label: "Paper" }]} onChange={(ground) => setDraw({ ground })} />
+            <label className="flex items-center justify-between">
+              <span className="text-muted-foreground">Room labels</span>
+              <Switch checked={draw.labels} onCheckedChange={(labels) => setDraw({ labels })} />
+            </label>
+            <label className="flex items-center justify-between">
+              <span className="text-muted-foreground">Main route</span>
+              <Switch checked={draw.route} onCheckedChange={(route) => setDraw({ route })} />
+            </label>
+            <div className="border-t border-border pt-2">
+              <DrawingExport tile={tile} draw={draw} />
+            </div>
+          </PaneMenu>
+        )}
+
+        {!drawing && (<>
         <PaneMenu icon={Camera} label="View" showLabel={!compact} onApplyAll={all({ view: pane.view })}>
           <div className="flex flex-wrap gap-1">
             {PANE_VIEWS.map((v) => (
@@ -214,7 +313,19 @@ export function TilePane({
           <Segmented value={pane.displayMode} options={[{ value: "rendered", label: "Rendered" }, { value: "ghosted", label: "Ghosted" }]} onChange={(displayMode) => onPane({ displayMode })} />
         </PaneMenu>
 
-        <PaneMenu icon={Eye} label="Visibility" showLabel={!compact} active={!pane.visibility.foam || !pane.visibility.void} onApplyAll={all({ visibility: pane.visibility, colors: pane.colors, opacity: pane.opacity })}>
+        <PaneMenu icon={Eye} label="Layers" showLabel={!compact} active={!pane.visibility.foam || !pane.visibility.void || pane.tint !== "none"} onApplyAll={all({ visibility: pane.visibility, colors: pane.colors, opacity: pane.opacity, tint: pane.tint })}>
+          {(hasParts || hasRooms) && (
+            <div className="space-y-1.5">
+              <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Quick looks</div>
+              <div className="flex flex-wrap gap-1">
+                {looks.map((l) => (
+                  <button key={l.label} type="button" title={l.hint} onClick={() => onPane(l.patch)} className="rounded-full border-hair px-2 py-0.5 font-mono text-[10px] uppercase tracking-label text-muted-foreground transition-colors hover:border-magenta/50 hover:text-foreground">
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <MeshRow
             label="Foam"
             visible={pane.visibility.foam}
@@ -235,6 +346,38 @@ export function TilePane({
             onOpacity={(v) => onPane({ opacity: { ...pane.opacity, void: v } })}
             opacityActive={!ghosted}
           />
+          {hasParts && (
+            <>
+              <MeshRow
+                label="Floor plates"
+                visible={pane.visibility.plates ?? true}
+                onVisible={(plates) => onPane({ visibility: { ...pane.visibility, plates } })}
+                color={pane.colors.plates ?? PLATE_COLOR}
+                onColor={(plates) => onPane({ colors: { ...pane.colors, plates } })}
+                opacity={pane.opacity.plates ?? 1}
+                onOpacity={(plates) => onPane({ opacity: { ...pane.opacity, plates } })}
+                opacityActive={!ghosted}
+              />
+              {tile.voxels.struts && (
+                <MeshRow
+                  label="Branches"
+                  visible={pane.visibility.struts ?? true}
+                  onVisible={(struts) => onPane({ visibility: { ...pane.visibility, struts } })}
+                  color={pane.colors.struts ?? STRUT_COLOR}
+                  onColor={(struts) => onPane({ colors: { ...pane.colors, struts } })}
+                  opacity={pane.opacity.struts ?? 1}
+                  onOpacity={(struts) => onPane({ opacity: { ...pane.opacity, struts } })}
+                  opacityActive={!ghosted}
+                />
+              )}
+            </>
+          )}
+          {hasRooms && (
+            <div className="space-y-1.5">
+              <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Tint the void by</div>
+              <Segmented value={pane.tint} options={[{ value: "none", label: "None" }, { value: "rooms", label: "Room" }, { value: "levels", label: "Level" }]} onChange={(tint) => onPane({ tint: tint as TintMode })} />
+            </div>
+          )}
         </PaneMenu>
 
         <PaneMenu icon={Scissors} label="Clip" showLabel={!compact} active={pane.clip.enabled} onApplyAll={all({ clip: pane.clip })}>
@@ -251,6 +394,7 @@ export function TilePane({
         </PaneMenu>
 
         <ViewportExportButton handleRef={handleRef} name={tile.name} className="h-7 gap-1 px-1.5 text-[10px]" />
+        </>)}
       </div>
     </div>
   );

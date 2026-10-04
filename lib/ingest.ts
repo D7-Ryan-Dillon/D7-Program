@@ -1,5 +1,7 @@
 import JSZip from "jszip";
 import type { FacesJson, GuessedIdentity, ParsedTile, SectionsJson, TileJson, TileVoxels } from "@/lib/types";
+import type { PlateEntry, SpacesData, StructureData, TileMeta } from "@/lib/tiles/types";
+import { ensureAnalysis } from "@/lib/tiles/pipeline";
 
 /** A lazily-readable virtual file, regardless of whether it came from a real
  * directory drop, an <input webkitdirectory> FileList, or a .zip archive. */
@@ -9,6 +11,12 @@ interface VirtualFile {
 }
 
 const CATEGORY_NAMES = ["gathering", "office", "lobby"] as const;
+
+/** The engine's own category / typology (recipe meta) when it wrote one; otherwise guessed from the name. */
+function identityOf(name: string, meta: TileMeta | undefined): GuessedIdentity {
+  if (meta?.category) return { category: meta.category, typology: meta.typology };
+  return guessIdentity(name);
+}
 
 function guessIdentity(name: string): GuessedIdentity {
   const stripped = name.replace(/_v\d+$/i, "");
@@ -63,12 +71,14 @@ async function buildTile(files: VirtualFile[]): Promise<ParsedTile> {
   const tileJson = await readJson<TileJson>(byRelPath.get("tile.json"));
   if (!tileJson) throw new Error("tile.json was found but could not be parsed as JSON.");
 
-  const glbEntry = files.find((f) => f.path.toLowerCase().endsWith(".glb"));
+  const glbEntry = files.find((f) => f.path.toLowerCase().endsWith(".glb") && !f.path.toLowerCase().endsWith("_parts.glb"));
+  const partsEntry = files.find((f) => f.path.toLowerCase().endsWith("_parts.glb"));
   if (!glbEntry) {
     throw new Error("No .glb model file found under model/ -- the _analysis folder looks incomplete.");
   }
   const glbBytes = await glbEntry.bytes();
   const glbUrl = URL.createObjectURL(new Blob([glbBytes], { type: "model/gltf-binary" }));
+  const partsUrl = partsEntry ? URL.createObjectURL(new Blob([await partsEntry.bytes()], { type: "model/gltf-binary" })) : undefined;
 
   const voxels: TileVoxels = {};
   const voxelFile = async (name: string) => {
@@ -80,17 +90,25 @@ async function buildTile(files: VirtualFile[]): Promise<ParsedTile> {
   voxels.voidSmooth = await voxelFile("void_smooth.u8");
   voxels.material = await voxelFile("material.u8");
   voxels.softness = await voxelFile("softness.u8");
+  // engine 7: floor plates, support branches, the container, and which room each void cell is in
+  voxels.plates = await voxelFile("plates.u8");
+  voxels.struts = await voxelFile("struts.u8");
+  voxels.mask = await voxelFile("mask.u8");
+  voxels.rooms = await voxelFile("rooms.u8");
 
   const faces = await readJson<FacesJson>(byRelPath.get("data/faces.json"));
   const sections = await readJson<SectionsJson>(byRelPath.get("data/sections.json"));
   const manifestRaw = await readJson<unknown>(byRelPath.get("manifest.json"));
+  const platesDoc = await readJson<{ plates?: PlateEntry[] }>(byRelPath.get("data/plates.json"));
+  const spaces = await readJson<SpacesData>(byRelPath.get("data/spaces.json"));
+  const structureDoc = await readJson<StructureData>(byRelPath.get("data/structure.json"));
 
   // Optional: a sibling _reference/recipe.json, if the user dropped a parent
   // folder that happens to contain both _analysis and _reference.
   const recipeFile = files.find((f) => f.path.toLowerCase().endsWith("recipe.json"));
   const recipeText = await readText(recipeFile);
 
-  return {
+  const tile: ParsedTile = {
     id: tileJson.id,
     name: tileJson.name,
     sourceFolderName: root || tileJson.name,
@@ -104,13 +122,20 @@ async function buildTile(files: VirtualFile[]): Promise<ParsedTile> {
     config: tileJson.config,
     metrics: tileJson.metrics,
     glbUrl,
+    partsUrl,
     voxels,
     faces,
     sections,
     manifestRaw,
-    guessed: guessIdentity(tileJson.name),
+    guessed: identityOf(tileJson.name, tileJson.meta),
+    meta: tileJson.meta,
+    spaces,
+    structure: structureDoc?.structure,
+    plates: platesDoc?.plates,
     recipeText,
   };
+  // whatever the export did not carry (older exports, a missing file) is measured from the voxels
+  return ensureAnalysis(tile);
 }
 
 export interface IngestResult {

@@ -501,7 +501,7 @@ export function renderTileThumbnail(glbUrl: string, size: number): Promise<strin
       height: size,
       backgroundColor: null,
       foamColor: "#e8a6c8",
-      voidColor: "#1c1c1f",
+      voidColor: "#1c1c1c",
       foamOpacity: 1,
       voidOpacity: 1,
       foamVisible: true,

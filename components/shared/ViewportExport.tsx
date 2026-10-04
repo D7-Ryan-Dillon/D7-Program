@@ -44,8 +44,8 @@ interface ExportUi {
 }
 const defaultExportUi = (): ExportUi => ({
   mode: "png",
-  png: { sizeBy: "px", widthPx: 2400, widthIn: 8, dpi: 300, aspect: "view", transparent: false, background: "#0a0a0b" },
-  turntable: { format: "gif", startView: "iso-top-ne", spinSeconds: 8, fps: 20, widthPx: 800, aspect: "1:1", background: "#0a0a0b", colors: "auto", paletteSize: 128, dither: "none" },
+  png: { sizeBy: "px", widthPx: 2400, widthIn: 8, dpi: 300, aspect: "view", transparent: false, background: "#000000" },
+  turntable: { format: "gif", startView: "iso-top-ne", spinSeconds: 8, fps: 20, widthPx: 800, aspect: "1:1", background: "#000000", colors: "auto", paletteSize: 128, dither: "none" },
 });
 
 const slug = (s: string) => s.trim().replace(/[^\w.-]+/g, "_") || "view";

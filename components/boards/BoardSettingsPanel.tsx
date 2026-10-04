@@ -10,7 +10,8 @@ import { FontPicker } from "./FontPicker";
 import { NumberSlider } from "@/components/shared/NumberSlider";
 import { Section } from "@/components/shared/Section";
 import { useSectionGroup } from "@/lib/workspaceUi";
-import { defaultBoardConfig, type BoardConfig, type LabelMode } from "@/lib/boards/types";
+import { Segmented } from "@/components/shared/Segmented";
+import { defaultBoardConfig, type BoardConfig, type BoardViewMode, type LabelMode } from "@/lib/boards/types";
 
 /** A slider for coarse dragging (0.5in steps) paired with a free-form
  * number field for exact values down to the hundredth -- either one
@@ -79,7 +80,7 @@ function OptionalSizeField({ label, valuePt, onChange }: { label: string; valueP
   );
 }
 
-const BOARD_SECTION_IDS = ["page", "layout", "nametag", "catalogue", "typography", "descriptors", "materials", "outlines", "facets", "caption", "footer"].map((k) => `boards.${k}`);
+const BOARD_SECTION_IDS = ["page", "layout", "views", "nametag", "catalogue", "typography", "descriptors", "materials", "outlines", "facets", "caption", "footer"].map((k) => `boards.${k}`);
 
 /** One collapsible group of board settings, with its own Reset link and an optional on/off switch. */
 function Group({
@@ -173,6 +174,34 @@ export function BoardSettingsPanel({ config, onChange, criteriaCount }: { config
         <NumberSlider label="Gap Y (rows)" value={config.gapYIn} min={0} max={3} step={0.05} decimals={2} suffix="in" onChange={(gapYIn) => onChange({ gapYIn })} />
       </Group>
 
+      <Group id="views" title="Tile views" summary={config.drawing.mode === "model" ? "3D" : config.drawing.mode} onReset={() => reset("drawing")}>
+        <p className="text-[10px] text-muted-foreground">What every tile shows: the 3D render, or an automatic plan or section drawn from the tile (poche, on this board&rsquo;s background). Override one tile in the tile list.</p>
+        <Segmented value={config.drawing.mode} options={[{ value: "model", label: "3D" }, { value: "plan", label: "Plan" }, { value: "section", label: "Section" }]} onChange={(mode) => onChange({ drawing: { ...config.drawing, mode: mode as BoardViewMode } })} />
+        {config.drawing.mode === "plan" && (
+          <label className="flex items-center justify-between gap-2 text-xs">
+            <span className="text-muted-foreground">Floor</span>
+            <Select className="h-7 w-40 text-[11px]" value={String(config.drawing.level ?? 1)} onChange={(e) => onChange({ drawing: { ...config.drawing, level: Number(e.target.value) } })} aria-label="Which floor to cut the plan through">
+              <option value="1">Lowest level</option>
+              <option value="2">Second level</option>
+              <option value="3">Third level</option>
+              <option value="0">Highest level</option>
+            </Select>
+          </label>
+        )}
+        {config.drawing.mode === "section" && (
+          <>
+            <Segmented value={config.drawing.axis} options={[{ value: "x", label: "Along X" }, { value: "y", label: "Along Y" }]} onChange={(axis) => onChange({ drawing: { ...config.drawing, axis: axis as "x" | "y" } })} />
+            <NumberSlider label="Position" value={config.drawing.pos ?? 10} min={0.5} max={19.5} step={0.5} suffix=" ft" decimals={1} onChange={(pos) => onChange({ drawing: { ...config.drawing, pos } })} />
+          </>
+        )}
+        {config.drawing.mode === "plan" && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Room names and areas</span>
+            <Switch checked={config.drawing.labels} onCheckedChange={(labels) => onChange({ drawing: { ...config.drawing, labels } })} />
+          </div>
+        )}
+      </Group>
+
       <Group id="nametag" title="Name tag" summary={nt.labelMode} onReset={() => reset("nameTag")}>
         <label className="block text-xs">
           <span className="mb-1 block text-muted-foreground">Label text</span>
@@ -255,7 +284,7 @@ export function BoardSettingsPanel({ config, onChange, criteriaCount }: { config
         <ColorField label="Highlight color" value={config.highlightColor} onChange={(highlightColor) => onChange({ highlightColor })} />
       </Group>
 
-      <Group id="descriptors" title="Descriptor page" onReset={() => reset("highlight")}>
+      <Group id="descriptors" title="Descriptor page" onReset={() => reset("highlight", "descriptorHeadlines")}>
         <p className="text-[10px] text-muted-foreground">
           {criteriaCount === null ? "Lists every descriptor." : `Lists the ${criteriaCount} criteria carried forward in the Analysis tab.`}
         </p>
@@ -272,6 +301,10 @@ export function BoardSettingsPanel({ config, onChange, criteriaCount }: { config
             onChange={(count) => onChange({ highlight: { ...config.highlight, count } })}
           />
         )}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground" title="The measured value under each bar, for example the tallest clear height. It does not always fit in a small tile.">Measured value under each bar</span>
+          <Switch checked={config.descriptorHeadlines} onCheckedChange={(descriptorHeadlines) => onChange({ descriptorHeadlines })} aria-label="Show the measured value under each descriptor bar" />
+        </div>
       </Group>
 
       <Group id="materials" title="Materials (whole board)" onReset={() => reset("foamColor", "voidColor", "foamOpacity", "voidOpacity")}>
@@ -322,25 +355,38 @@ export function BoardSettingsPanel({ config, onChange, criteriaCount }: { config
 
       <Group
         id="caption"
-        title="Caption box"
-        summary={config.textBox.enabled ? "on" : "off"}
-        onReset={() => reset("textBox", "captionFontSizePt")}
-        extra={<Switch checked={config.textBox.enabled} onCheckedChange={(enabled) => onChange({ textBox: { ...config.textBox, enabled } })} />}
+        title="Caption boxes"
+        summary={config.textBox.enabled || config.textBox2.enabled ? [config.textBox.enabled && "page 1", config.textBox2.enabled && "page 2"].filter(Boolean).join(" + ") : "off"}
+        onReset={() => reset("textBox", "textBox2", "captionFontSizePt")}
       >
-        {!config.textBox.enabled ? (
-          <p className="text-[10px] text-muted-foreground">Off. Turn on for a text box under the tiles.</p>
-        ) : (
-          <>
-            <textarea
-              value={config.textBox.text}
-              onChange={(e) => onChange({ textBox: { ...config.textBox, text: e.target.value } })}
-              className="h-16 w-full resize-none rounded-md border border-input bg-transparent p-2 text-xs"
-              placeholder="Caption text…"
-            />
-            <ColorField label="Text color" value={config.textBox.color} onChange={(color) => onChange({ textBox: { ...config.textBox, color } })} />
-            <OptionalSizeField label="Text size" valuePt={config.captionFontSizePt} onChange={(captionFontSizePt) => onChange({ captionFontSizePt })} />
-          </>
-        )}
+        <p className="text-[10px] text-muted-foreground">An optional text box in the first cell of the grid. Each page has its own: turn on either or both, with different text. The cell is kept on both pages so the tiles do not move between them.</p>
+        {([
+          { key: "textBox", title: "Page 1 (tiles)" },
+          { key: "textBox2", title: "Page 2 (descriptors)" },
+        ] as const).map(({ key, title }) => {
+          const box = config[key];
+          const setBox = (patch: Partial<typeof box>) => onChange({ [key]: { ...box, ...patch } });
+          return (
+            <div key={key} className="space-y-1.5 rounded-md border-hair p-2">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">{title}</span>
+                <Switch checked={box.enabled} onCheckedChange={(enabled) => setBox({ enabled })} aria-label={`Caption box on ${title}`} />
+              </div>
+              {box.enabled && (
+                <>
+                  <textarea
+                    value={box.text}
+                    onChange={(e) => setBox({ text: e.target.value })}
+                    className="h-16 w-full resize-none rounded-md border border-input bg-transparent p-2 text-xs"
+                    placeholder="Caption text…"
+                  />
+                  <ColorField label="Text color" value={box.color} onChange={(color) => setBox({ color })} />
+                </>
+              )}
+            </div>
+          );
+        })}
+        {(config.textBox.enabled || config.textBox2.enabled) && <OptionalSizeField label="Text size (both)" valuePt={config.captionFontSizePt} onChange={(captionFontSizePt) => onChange({ captionFontSizePt })} />}
       </Group>
 
       <Group

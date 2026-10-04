@@ -15,6 +15,8 @@
  * every `Record<FaceName, ...>` in this file accepts either without a
  * second parallel type; FACE_NAMES remains the box-tile default used
  * wherever a tile doesn't carry its own `faceNames` (see ParsedTile). */
+import type { PlateEntry, SpacesData, StructureInfo, TileMeta } from "@/lib/tiles/types";
+
 export type FaceName = string;
 export const FACE_NAMES: FaceName[] = ["-X", "+X", "-Y", "+Y", "-Z", "+Z"];
 
@@ -126,6 +128,8 @@ export interface TileConfig {
   min_void_ft3?: number;
   min_foam_ft3?: number;
   weld?: string;
+  /** engine 7: one entry per floor-plate group (name, resistance, support settings, shape_count ...); absent without plates */
+  plates?: { name?: string; resistance?: number; [key: string]: unknown }[];
 }
 
 export interface TileJson {
@@ -143,12 +147,20 @@ export interface TileJson {
   last_frame?: number;
   config: TileConfig;
   metrics: TileMetrics;
+  /** engine 7: category / typology / variant from the recipe */
+  meta?: TileMeta;
+  origin_ft?: number[];
+  levels?: { id: number; name: string; z_ft: number; area_ft2: number; kind: string }[];
 }
 
 export interface FaceEntry {
   stored_axes?: string[];
   mask_rows?: string[];
   mask_rows_6in?: string[];
+  /** 1 = foam that is not a plate / 1 = floor plate / 1 = outside a non-cube container (engine 7; same layout as mask_rows) */
+  foam_mask_rows?: string[];
+  plate_mask_rows?: string[];
+  outside_mask_rows?: string[];
   depth_cells?: number[][];
   open_cells?: number;
   open_area_ft2?: number;
@@ -198,6 +210,14 @@ export interface TileVoxels {
   voidSmooth?: Uint8Array;
   material?: Uint8Array;
   softness?: Uint8Array;
+  /** floor plate id per cell, 0 = none (plates are foam in `void`) */
+  plates?: Uint8Array;
+  /** 1 = support branch (foam in `void`) */
+  struts?: Uint8Array;
+  /** 1 = inside the container (absent: the whole box) */
+  mask?: Uint8Array;
+  /** room id per void cell (data/spaces.json), 0 = foam or a speck */
+  rooms?: Uint8Array;
 }
 
 /** Guessed from the tile's file name, per HANDOFF section 3 -- the export carries no typology/category. */
@@ -225,11 +245,21 @@ export interface ParsedTile {
   config: TileConfig;
   metrics: TileMetrics;
   glbUrl: string;
+  /** A second GLB (nodes `plates` and `struts`, parts of the foam) for the Viewer's layers; the main GLB stays foam + void only, which is all Arrange, Boards and the exports read. */
+  partsUrl?: string;
   voxels: TileVoxels;
   faces?: FacesJson;
   sections?: SectionsJson;
   manifestRaw?: unknown;
   guessed: GuessedIdentity;
+  /** category / typology / variant as the engine wrote them (when present, `guessed` is filled from it). */
+  meta?: TileMeta;
+  /** The tile read as architecture: levels, rooms, connections, routes, daylight, face openings (lib/tiles/analyze.ts, or the engine's data/spaces.json). */
+  spaces?: SpacesData;
+  /** How the foam holds together and prints (data/structure.json, or lib/tiles/analyze.ts). */
+  structure?: StructureInfo;
+  /** Floor plates: the engine's data/plates.json, or derived from the plate cells (lib/tiles/plates.ts). */
+  plates?: PlateEntry[];
   /** Present only if a matching _reference/recipe.json was dropped in alongside the _analysis folder. */
   recipeText?: string;
   /** Absent (box) for every tile exported by the Grasshopper engine so far.

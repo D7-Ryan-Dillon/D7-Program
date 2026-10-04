@@ -11,6 +11,8 @@ import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PrintPanel } from "@/components/viewer/PrintPanel";
 import { GlowPanel } from "@/components/shared/GlowPanel";
 import { SquareFrame } from "@/components/shared/SquareFrame";
 import { DisplayModeBar } from "@/components/viewer/DisplayModeBar";
@@ -53,7 +55,7 @@ interface FaceOverlaySettings {
   opacity: number;
 }
 
-const OVERLAY_PALETTE = ["#e8a6c8", "#c43383", "#db7228", "#f2b878", "#9aa0a6", "#e6e6e6", "#5ec8c8", "#8a7fd1"];
+const OVERLAY_PALETTE = ["#e8a6c8", "#c43383", "#db7228", "#f2b878", "#9a9a9a", "#e6e6e6", "#ff269e", "#8a8a8a"];
 
 function defaultFaceOverlay(index: number): FaceOverlaySettings {
   return { visible: true, color: OVERLAY_PALETTE[index % OVERLAY_PALETTE.length], opacity: 0.55 };
@@ -310,7 +312,7 @@ const defaultBuilderUi = (): BuilderUi => ({
   typology: "",
   displayMode: "rendered",
   visibility: { foam: true, void: false },
-  colors: { foam: "#e8a6c8", void: "#1c1c1f" },
+  colors: { foam: "#e8a6c8", void: "#1c1c1c" },
   clip: defaultClipState(),
   pool: "checked",
   autoRotate: false,
@@ -346,6 +348,9 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
   const rawCounter = useRef(0);
   const [busy, setBusy] = useState(false);
   const [exportingAnalysis, setExportingAnalysis] = useState(false);
+  /** The tile built for the Print STL dialog (the same build "Add tile" and "Export _analysis" use). */
+  const [printTile, setPrintTile] = useState<ParsedTile | null>(null);
+  const [preparingPrint, setPreparingPrint] = useState(false);
 
   const faceNames = facesForShape(shape);
   const tileByName = useMemo(() => new Map(allTiles.map((t) => [t.name, t])), [allTiles]);
@@ -556,6 +561,21 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
       return;
     }
     downloadTextFile(`${(name.trim() || "section_tile").replace(/\s+/g, "_")}.obj`, groupToObjText(cleanMeshGroup(previewGroup)));
+  };
+
+  const openPrint = async () => {
+    if (!Object.keys(volAssignments).length) {
+      toast.error("Assign at least one tile to a face first.");
+      return;
+    }
+    setPreparingPrint(true);
+    try {
+      setPrintTile(await buildSectionTile({ ...buildInput(), name: name.trim() || "section_tile" }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't build this tile for printing.");
+    } finally {
+      setPreparingPrint(false);
+    }
   };
 
   const exportAnalysisBundle = async () => {
@@ -843,7 +863,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                     state.gl.localClippingEnabled = true;
                   }}
                 >
-                  <color attach="background" args={["#0a0a0b"]} />
+                  <color attach="background" args={["#000000"]} />
                   <ambientLight intensity={0.6} />
                   <directionalLight position={[10, 16, 8]} intensity={1.1} />
                   <directionalLight position={[-8, -6, -8]} intensity={0.25} />
@@ -957,9 +977,20 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                 {exportingAnalysis ? "Building…" : "Export _analysis"}
               </Button>
             </div>
+            <Button className="w-full" variant="outline" size="sm" disabled={preparingPrint} onClick={() => void openPrint()}>
+              {preparingPrint ? "Building…" : "Print STL (parts and scale)"}
+            </Button>
           </div>
         </GlowPanel>
       </div>
+      <Dialog open={!!printTile} onOpenChange={(open) => !open && setPrintTile(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-mono text-sm">Print {printTile?.name}</DialogTitle>
+          </DialogHeader>
+          {printTile && <PrintPanel tile={printTile} />}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

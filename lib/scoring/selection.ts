@@ -9,6 +9,7 @@
 import type { ParsedTile } from "@/lib/types";
 import { DESCRIPTOR_META, scoreTile, type DescriptorKey, type DescriptorResult } from "@/lib/scoring/descriptors";
 import { clamp } from "@/lib/scoring/utils";
+import { shortName } from "@/lib/scoring/compare";
 
 export const MIN_CRITERIA = 6;
 export const MAX_CRITERIA = 12;
@@ -35,6 +36,8 @@ export interface DescriptorStat {
   key: DescriptorKey;
   label: string;
   scores: number[];
+  /** the tiles' names, in the same order as `scores` */
+  names: string[];
   mean: number;
   min: number;
   max: number;
@@ -65,6 +68,7 @@ export function computeStats(tiles: ParsedTile[]): DescriptorStat[] {
       key: t.key,
       label: t.label,
       scores,
+      names: tiles.map(shortName),
       mean,
       min: scores.length ? Math.min(...scores) : 0,
       max: scores.length ? Math.max(...scores) : 0,
@@ -152,11 +156,11 @@ function carriedReason(s: DescriptorStat, carried: DescriptorStat[], how: "auto"
   const n = s.scores.length;
   const lead =
     n >= 2 && s.std >= 10
-      ? `Tells these tiles apart (scores ${range(s)}, average ${Math.round(s.mean)}).`
+      ? `Tells these tiles apart: from ${Math.round(s.min)} on ${s.names[s.scores.indexOf(s.min)]} to ${Math.round(s.max)} on ${s.names[s.scores.indexOf(s.max)]} (average ${Math.round(s.mean)}).`
       : s.mean >= 40
         ? `Reads clearly in these tiles (average ${Math.round(s.mean)}).`
         : `Present in these tiles, though modestly (average ${Math.round(s.mean)}).`;
-  const how2 = s.approximate ? " Partly inferred from design intent rather than measured, so read it with care." : " Measured directly from the geometry.";
+  const how2 = s.approximate ? " Partly inferred from the recipe or missing data, so read it with care." : " Measured from the tile's spaces.";
   return prefix + lead + how2 + describeOverlap(s, carried);
 }
 

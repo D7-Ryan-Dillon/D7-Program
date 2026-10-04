@@ -58,9 +58,25 @@ export interface BoardSlotOverrides {
   customCamera?: CustomCamera;
 }
 
+/** A tile shown as an automatic drawing (plan or section, from lib/drawing) instead of the 3D render. "model" is the 3D render. */
+export type BoardViewMode = "model" | "plan" | "section";
+export interface BoardDrawing {
+  mode: BoardViewMode;
+  /** plan: which floor, as a level number (1 = the lowest); null = the lowest, 0 = the highest */
+  level: number | null;
+  axis: "x" | "y";
+  /** section position in feet; null = the middle */
+  pos: number | null;
+  /** room names and areas on a plan */
+  labels: boolean;
+}
+export const defaultBoardDrawing = (): BoardDrawing => ({ mode: "model", level: null, axis: "x", pos: null, labels: true });
+
 export interface BoardSlot {
   id: string;
   tileId: string | null;
+  /** Per-tile override of the board's drawing setting (only the parts set here differ). */
+  drawing?: Partial<BoardDrawing>;
   /** Category + typology number for the label and the catalogue layout,
    * overriding what is parsed from the tile's name. */
   tag?: { category: string; number: number | null };
@@ -197,8 +213,14 @@ export interface BoardConfig {
   titleFontSizePt: number | null;
   captionFontSizePt: number | null;
   footerFontSizePt: number | null;
+  /** What every tile shows by default: the 3D render, or a plan / section. A slot can override it. */
+  drawing: BoardDrawing;
   slots: BoardSlot[];
+  /** The optional caption box of page 1 (the tiles) and of page 2 (the descriptors): each page has its own switch, text and colour. */
   textBox: BoardTextBox;
+  textBox2: BoardTextBox;
+  /** Page 2: print each descriptor's measured quantity under its bar. Off by default (it does not always fit in the tile). */
+  descriptorHeadlines: boolean;
   footer: BoardFooter;
   animation: AnimationSettings;
   nameTag: NameTagSettings;
@@ -240,7 +262,7 @@ export function defaultCatalogue(): CatalogueSettings {
     showColumnLabels: true,
     rowLabels: ["Gathering", "Office", "Lobby"],
     columnLabels: ["1", "2", "3", "4", "5"],
-    labelColor: "#9aa0a6",
+    labelColor: "#9a9a9a",
     labelFontPt: null,
     rowBandIn: 1.2,
     columnBandIn: 0.4,
@@ -255,7 +277,7 @@ export function defaultBoardConfig(): BoardConfig {
     backgroundColor: "#000000",
     fontFamily: "Arkitech",
     titleColor: "#c43383",
-    descriptorColor: "#9aa0a6",
+    descriptorColor: "#9a9a9a",
     highlightColor: "#db7228",
     foamColor: "#ffffff",
     voidColor: "#c43383",
@@ -270,8 +292,11 @@ export function defaultBoardConfig(): BoardConfig {
     titleFontSizePt: null,
     captionFontSizePt: null,
     footerFontSizePt: null,
+    drawing: defaultBoardDrawing(),
     slots: [],
     textBox: { enabled: false, text: "", color: "#e6e6e6" },
+    textBox2: { enabled: false, text: "", color: "#e6e6e6" },
+    descriptorHeadlines: false,
     footer: { enabled: false, leftText: "DESIGN 7 | FALL 2026 | DUSTIN WHITE", rightText: "RYAN BURGESS, DILLON MITKO", color: "#ffffff" },
     animation: defaultAnimationSettings(),
     nameTag: defaultNameTag(),

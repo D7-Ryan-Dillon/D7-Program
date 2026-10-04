@@ -185,7 +185,7 @@ export function BoardsTab() {
                 </button>
               }
             >
-              <SlotOrderList slots={config.slots} tileById={tileById} onMove={moveSlot} onRemove={removeSlot} />
+              <SlotOrderList slots={config.slots} tileById={tileById} onMove={moveSlot} onRemove={removeSlot} onView={(slotId, mode) => patchSlot(slotId, { drawing: mode ? { mode } : undefined })} />
             </Section>
             <Section id="boards.tiles" variant="inline" title="Tiles">
               <TilePicker slots={config.slots} onToggle={toggleTile} />
@@ -200,7 +200,7 @@ export function BoardsTab() {
           <div className="flex items-center gap-3">
             <div className="font-mono text-xs text-muted-foreground">
               {config.slots.length} tile(s)
-              {config.textBox.enabled && !config.catalogue.enabled ? " + caption" : ""}
+              {(config.textBox.enabled || config.textBox2.enabled) && !config.catalogue.enabled ? " + caption" : ""}
             </div>
             <div className="inline-flex rounded-full border-hair p-0.5">
               {([1, 2] as const).map((p) => (

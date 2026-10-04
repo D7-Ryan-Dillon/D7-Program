@@ -169,7 +169,7 @@ export function ArrangeViewport({
   return (
     <div className="relative h-full w-full overflow-hidden rounded-lg bg-black/40">
       <Canvas dpr={[1, 2]} camera={{ fov: 45, near: 0.05, far: 1000, position: [15, 12, 15] }} gl={{ antialias: true }}>
-        <color attach="background" args={["#0a0a0b"]} />
+        <color attach="background" args={["#000000"]} />
         <ambientLight intensity={0.6} />
         <directionalLight position={[10, 16, 8]} intensity={1.1} />
         <directionalLight position={[-8, -6, -8]} intensity={0.25} />

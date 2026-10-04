@@ -12,21 +12,32 @@ import { CaptureBridge } from "@/components/shared/CaptureBridge";
 import type { ViewportHandle } from "@/lib/viewportCapture";
 import { markActive, publish, type CameraLink } from "@/lib/cameraLink";
 import { applyClipToMesh, buildClipOutline, buildClipPlane, buildCutFaceCap, defaultClipState, type ClipState } from "@/lib/clipping";
+import { vertexTint, type TintEmphasis, type TintMode } from "@/lib/tiles/tint";
 
 export type DisplayMode = "rendered" | "ghosted";
+/** plates / struts are the floor plates and support branches (parts of the foam, drawn over it); absent means shown. */
 export interface MeshVisibility {
   foam: boolean;
   void: boolean;
+  plates?: boolean;
+  struts?: boolean;
 }
 export interface MeshColors {
   foam: string;
   void: string;
+  plates?: string;
+  struts?: string;
 }
 /** 0-1 per mesh; only used in rendered mode (ghosted keeps its own fixed look). */
 export interface MeshOpacity {
   foam: number;
   void: number;
+  plates?: number;
+  struts?: number;
 }
+
+export const PLATE_COLOR = "#f2b878";
+export const STRUT_COLOR = "#db7228";
 
 interface Bounds {
   center: THREE.Vector3;
@@ -43,10 +54,12 @@ interface ModelProps {
   colors: MeshColors;
   opacity: MeshOpacity;
   clip?: ClipState;
+  tint: TintMode;
+  emphasis?: TintEmphasis;
   onBounds: (bounds: Bounds) => void;
 }
 
-function applyMaterial(mesh: THREE.Mesh, color: string, visible: boolean, ghosted: boolean, kind: "foam" | "void", opacity: number) {
+function applyMaterial(mesh: THREE.Mesh, color: string, visible: boolean, ghosted: boolean, kind: "foam" | "void" | "plates" | "struts", opacity: number) {
   mesh.visible = visible;
   const alpha = ghosted ? 0.22 : opacity;
   const see = ghosted || opacity < 1;
@@ -66,22 +79,51 @@ function applyMaterial(mesh: THREE.Mesh, color: string, visible: boolean, ghoste
     // Foam and void can share their whole interface surface (a builder tile's
     // void is the cube minus the foam); nudge the void behind so they don't z-fight.
     polygonOffset: true,
-    polygonOffsetFactor: kind === "void" ? 2 : 1,
-    polygonOffsetUnits: kind === "void" ? 2 : 1,
+    // plates and branches are parts of the foam, so they lie on its surface: pull them in front of it
+    polygonOffsetFactor: kind === "void" ? 2 : kind === "foam" ? 1 : kind === "plates" ? -2 : -3,
+    polygonOffsetUnits: kind === "void" ? 2 : kind === "foam" ? 1 : kind === "plates" ? -2 : -3,
   });
 }
 
-function Model({ tile, displayMode, visibility, colors, opacity, clip, onBounds }: ModelProps) {
+function Model({ tile, displayMode, visibility, colors, opacity, clip, tint, emphasis, onBounds }: ModelProps) {
   const gltf = useGLTF(tile.glbUrl);
   const scene = useMemo(() => gltf.scene.clone(true), [gltf]);
+  // the floor plates and branches live in a second GLB; without one this loads the main file again (cached) and ignores it
+  const partsGltf = useGLTF(tile.partsUrl ?? tile.glbUrl);
+  const parts = useMemo(() => (tile.partsUrl ? partsGltf.scene.clone(true) : null), [partsGltf, tile.partsUrl]);
   const clipExtrasRef = useRef<THREE.Object3D[]>([]);
 
   useEffect(() => {
+    const ghosted = displayMode === "ghosted";
     const foam = scene.getObjectByName("foam");
     const voidMesh = scene.getObjectByName("void");
-    if (foam instanceof THREE.Mesh) applyMaterial(foam, colors.foam, visibility.foam, displayMode === "ghosted", "foam", opacity.foam);
-    if (voidMesh instanceof THREE.Mesh) applyMaterial(voidMesh, colors.void, visibility.void, displayMode === "ghosted", "void", opacity.void);
-  }, [scene, displayMode, visibility, colors, opacity]);
+    if (foam instanceof THREE.Mesh) applyMaterial(foam, colors.foam, visibility.foam, ghosted, "foam", opacity.foam);
+    if (voidMesh instanceof THREE.Mesh) {
+      applyMaterial(voidMesh, colors.void, visibility.void, ghosted, "void", opacity.void);
+      // rooms / levels: colour the void by what each vertex sits in (own copy of the geometry: the loaded one is shared)
+      const tinted = tint !== "none" || !!emphasis?.rooms?.length || !!emphasis?.levels?.length;
+      if (tinted) {
+        if (!voidMesh.userData.ownGeometry) {
+          voidMesh.geometry = voidMesh.geometry.clone();
+          voidMesh.userData.ownGeometry = true;
+        }
+        const rgb = vertexTint(tile, voidMesh.geometry.getAttribute("position").array, tint, emphasis);
+        if (rgb) {
+          voidMesh.geometry.setAttribute("color", new THREE.BufferAttribute(rgb, 3));
+          const m = voidMesh.material as THREE.MeshStandardMaterial;
+          m.vertexColors = true;
+          m.color.set("#ffffff");
+          m.needsUpdate = true;
+        }
+      }
+    }
+    if (parts) {
+      const plates = parts.getObjectByName("plates");
+      const struts = parts.getObjectByName("struts");
+      if (plates instanceof THREE.Mesh) applyMaterial(plates, colors.plates ?? PLATE_COLOR, visibility.plates ?? true, ghosted, "plates", opacity.plates ?? 1);
+      if (struts instanceof THREE.Mesh) applyMaterial(struts, colors.struts ?? STRUT_COLOR, visibility.struts ?? true, ghosted, "struts", opacity.struts ?? 1);
+    }
+  }, [scene, parts, tile, displayMode, visibility, colors, opacity, tint, emphasis]);
 
   useEffect(() => {
     for (const obj of clipExtrasRef.current) {
@@ -91,7 +133,7 @@ function Model({ tile, displayMode, visibility, colors, opacity, clip, onBounds 
 
     const foam = scene.getObjectByName("foam");
     const voidMesh = scene.getObjectByName("void");
-    const meshes = [foam, voidMesh].filter((m): m is THREE.Mesh => m instanceof THREE.Mesh);
+    const meshes = [foam, voidMesh, parts?.getObjectByName("plates"), parts?.getObjectByName("struts")].filter((m): m is THREE.Mesh => m instanceof THREE.Mesh);
 
     if (!clip?.enabled) {
       for (const mesh of meshes) applyClipToMesh(mesh, null);
@@ -118,7 +160,7 @@ function Model({ tile, displayMode, visibility, colors, opacity, clip, onBounds 
         clipExtrasRef.current.push(cap);
       }
     }
-  }, [scene, clip]);
+  }, [scene, parts, clip]);
 
   useEffect(() => {
     const box = new THREE.Box3().setFromObject(scene);
@@ -130,7 +172,12 @@ function Model({ tile, displayMode, visibility, colors, opacity, clip, onBounds 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene]);
 
-  return <primitive object={scene} />;
+  return (
+    <>
+      <primitive object={scene} />
+      {parts && <primitive object={parts} />}
+    </>
+  );
 }
 
 function CameraRig({
@@ -251,6 +298,8 @@ export function ThreeViewport({
   viewNonce = 0,
   handleRef,
   link,
+  tint = "none",
+  emphasis,
 }: {
   tile: ParsedTile;
   displayMode: DisplayMode;
@@ -258,6 +307,10 @@ export function ThreeViewport({
   colors: MeshColors;
   opacity?: MeshOpacity;
   clip?: ClipState;
+  /** Colour the void by room or by level. */
+  tint?: TintMode;
+  /** Light these rooms / levels (the Analysis's evidence) and dim the rest. */
+  emphasis?: TintEmphasis;
   activeViewKey: string;
   /** Slowly orbits the model about its vertical axis (the user can still take over). */
   autoRotate?: boolean;
@@ -286,12 +339,12 @@ export function ThreeViewport({
           state.gl.localClippingEnabled = true;
         }}
       >
-        <color attach="background" args={["#0a0a0b"]} />
+        <color attach="background" args={["#000000"]} />
         <ambientLight intensity={0.6} />
         <directionalLight position={[6, 10, 4]} intensity={1.1} />
         <directionalLight position={[-6, -4, -6]} intensity={0.25} />
         <Suspense fallback={null}>
-          <Model tile={tile} displayMode={displayMode} visibility={visibility} colors={colors} opacity={opacity} clip={clip ?? defaultClipState()} onBounds={setBounds} />
+          <Model tile={tile} displayMode={displayMode} visibility={visibility} colors={colors} opacity={opacity} clip={clip ?? defaultClipState()} tint={tint} emphasis={emphasis} onBounds={setBounds} />
           <ErrorBoundary>
             <Environment preset="city" environmentIntensity={0.25} />
           </ErrorBoundary>

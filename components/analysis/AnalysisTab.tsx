@@ -6,7 +6,9 @@ import { usePresets } from "@/lib/presets";
 import { newLinkHub, type CameraLink } from "@/lib/cameraLink";
 import { useCriteria } from "@/lib/useCriteria";
 import { scoreTileCached } from "@/lib/scoring/selection";
-import { TileSwitcher } from "@/components/shared/TileSwitcher";
+import { compareSentence } from "@/lib/scoring/compare";
+import type { DescriptorKey, DescriptorResult } from "@/lib/scoring/descriptors";
+import { ResultsPanel } from "@/components/analysis/ResultsPanel";
 import { UploadZone } from "@/components/viewer/UploadZone";
 import { DescriptorCard } from "@/components/analysis/DescriptorCard";
 import { CriteriaPanel } from "@/components/analysis/CriteriaPanel";
@@ -46,6 +48,10 @@ export function AnalysisTab() {
   const single = useMemo(() => normalizeAnalysisPane(ui.single), [ui.single]);
   const panes = useMemo(() => ui.panes.map(normalizeAnalysisPane), [ui.panes]);
   const { keys: carriedKeys } = useCriteria();
+  /** Which card's evidence the views are lighting (pane 0 is the single viewport). */
+  const [evidence, setEvidence] = useState<{ pane: number; key: DescriptorKey } | null>(null);
+  const toggleEvidence = (pane: number, key: DescriptorKey) => setEvidence((prev) => (prev && prev.pane === pane && prev.key === key ? null : { pane, key }));
+  const evidenceOf = (pane: number, rs: DescriptorResult[]) => (evidence && evidence.pane === pane ? rs.find((r) => r.key === evidence.key)?.evidence : undefined);
   const presets = usePresets<ComparePresetData>("compare");
   const [hub] = useState(newLinkHub);
 
@@ -115,13 +121,12 @@ export function AnalysisTab() {
   if (mode === "single") {
     return (
       <div className="flex flex-col gap-4">
-        <TileSwitcher />
         {modeBar}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(300px,420px)_minmax(0,1fr)]">
           {/* The tile you are reading stays in view: pinned to the top on narrow screens, beside the cards on wide ones. */}
           <div className="sticky top-0 z-20 self-start bg-background/95 pb-2 lg:top-0">
             <div className="h-[44vh] w-full lg:h-[min(64vh,560px)]">
-              <TilePane tile={activeTile} pane={single} onPane={patchSingle} />
+              <TilePane tile={activeTile} pane={single} onPane={patchSingle} emphasis={evidenceOf(0, results)} />
             </div>
           </div>
           <div className="min-w-0">
@@ -133,7 +138,7 @@ export function AnalysisTab() {
               <Section id="analysis.descriptors" title={`Descriptors (${results.length})`} summary={`${carriedKeys.length} carried`}>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {results.map((r) => (
-                    <DescriptorCard key={r.key} result={r} carried={carriedKeys.includes(r.key)} />
+                    <DescriptorCard key={r.key} result={r} carried={carriedKeys.includes(r.key)} evidenceOn={evidence?.pane === 0 && evidence.key === r.key} onEvidence={() => toggleEvidence(0, r.key)} />
                   ))}
                 </div>
               </Section>
@@ -141,6 +146,7 @@ export function AnalysisTab() {
           </div>
         </div>
         <CriteriaPanel />
+        <ResultsPanel tiles={tiles} keys={carriedKeys} activeTile={activeTile} />
       </div>
     );
   }
@@ -181,6 +187,7 @@ export function AnalysisTab() {
                 link={linkFor(i)}
                 compact
                 onApplyAll={applyAll}
+                emphasis={evidenceOf(i, compareResults[i])}
               />
             </div>
           ) : null,
@@ -201,9 +208,21 @@ export function AnalysisTab() {
               {row.map((r, i) => (
                 <div key={i} className={i === 2 ? "max-xl:hidden" : ""}>
                   <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-muted-foreground md:hidden">{compareTiles[i]?.name}</div>
-                  <DescriptorCard result={r} carried={carriedKeys.includes(r.key)} mark={spread >= 25 && i === hi ? "high" : spread >= 25 && i === lo ? "low" : null} spread={spread} />
+                  <DescriptorCard
+                    result={r}
+                    carried={carriedKeys.includes(r.key)}
+                    mark={spread >= 25 && i === hi ? "high" : spread >= 25 && i === lo ? "low" : null}
+                    spread={spread}
+                    evidenceOn={evidence?.pane === i && evidence.key === r.key}
+                    onEvidence={() => toggleEvidence(i, r.key)}
+                  />
                 </div>
               ))}
+              {row.length > 1 && (
+                <p className="text-xs leading-relaxed text-muted-foreground md:col-span-full">
+                  {compareSentence(row.map((r, i) => ({ tile: compareTiles[i]!, result: r })).filter((e) => e.tile))}
+                </p>
+              )}
             </div>
           );
         })}
@@ -213,6 +232,7 @@ export function AnalysisTab() {
       </div>
 
       <CriteriaPanel />
+      <ResultsPanel tiles={tiles} keys={carriedKeys} activeTile={activeTile} />
     </div>
   );
 }

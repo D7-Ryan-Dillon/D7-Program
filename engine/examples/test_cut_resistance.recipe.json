@@ -1,0 +1,26 @@
+{
+  "schema": "erosion-recipe/2",
+  "name": "test_cut_resistance",
+  "engine_version": "7.0",
+  "sim": {"tile_w": 20, "tile_h": 20, "cell": 0.5, "steps": 160, "gravity": 0.6, "drain": false, "n_frames": 8, "smooth": 0.8, "seed": 4},
+  "cleanup": {"min_void_ft3": 6, "min_foam_ft3": 8, "weld": ""},
+  "foam": {"v": 1, "noise": 0.2, "scale": 4, "grain": 0.1, "seed": 12, "web": 0.0, "web_open": 0.3, "web_thickness": 0.5, "layers": false, "layer_count": 3, "layer_axis": 2, "layer_thickness": 0.75, "layer_strength": 0.85},
+  "plates": [
+    {"v": 1, "kind": "plates", "name": "soft 0.5", "thickness": 1.0, "resistance": 0.5, "anchor_ft": 1.5, "anchor_strength": 3.0, "min_support": 6.0, "max_span": 12.0, "strut_size": 1.5,
+     "shapes": [{"type": "poly", "pts": [[2, 2, 10], [9, 2, 10], [9, 9, 10], [2, 9, 10]]}]},
+    {"v": 1, "kind": "plates", "name": "same 1.0", "thickness": 1.0, "resistance": 1.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "min_support": 6.0, "max_span": 12.0, "strut_size": 1.5,
+     "shapes": [{"type": "poly", "pts": [[11, 2, 10], [18, 2, 10], [18, 9, 10], [11, 9, 10]]}]},
+    {"v": 1, "kind": "plates", "name": "hard 2.0", "thickness": 1.0, "resistance": 2.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "min_support": 6.0, "max_span": 12.0, "strut_size": 1.5,
+     "shapes": [{"type": "poly", "pts": [[2, 11, 10], [9, 11, 10], [9, 18, 10], [2, 18, 10]]}]},
+    {"v": 1, "kind": "plates", "name": "very hard 4.0", "thickness": 1.0, "resistance": 4.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "min_support": 6.0, "max_span": 12.0, "strut_size": 1.5,
+     "shapes": [{"type": "poly", "pts": [[11, 11, 10], [18, 11, 10], [18, 18, 10], [11, 18, 10]]}]}
+  ],
+  "sources": [
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [5.5, 5.5, 12], "dose": 420, "spread": 3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": true},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [14.5, 5.5, 12], "dose": 420, "spread": 3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": true},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [5.5, 14.5, 12], "dose": 420, "spread": 3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": true},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [14.5, 14.5, 12], "dose": 420, "spread": 3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": true}
+  ],
+  "frame": null,
+  "expect": {"tile_id": "f2516baaf7003c70"}
+}

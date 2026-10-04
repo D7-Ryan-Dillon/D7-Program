@@ -15,6 +15,14 @@
 #   aim      : SPRAY ONLY - direction the spray travels (a vector). Put geo
 #              outside the block, like a nozzle, and aim it at the block.
 #              Blank = spray the nearest face straight on.
+#   plate_mode : (engine 7) what this acetone does when it meets a FLOOR PLATE:
+#              0 or "pool"    = the plate blocks it; it gathers and spreads on top (default)
+#              1 or "stop"    = the plate blocks it and soaks it up; erosion ends there
+#              2 or "around"  = the plate blocks it; it slides off toward the plate edge and carries on
+#              3 or "through" = the plate is invisible to it; it flows straight through
+#   cut      : (engine 7) True = this acetone also DISSOLVES floor plates (a plate is
+#              eaten like foam, scaled by the plate's own `resistance`). False (default)
+#              = it can never erode a plate, whatever plate_mode is.
 #
 # OUTPUTS
 #   src      : a text description of this application -> engine `sources`
@@ -34,6 +42,8 @@ DEFAULT_DOSE = {INJECT: 1500.0, POUR: 500.0, SPRAY: 200.0, LINE: 1800.0}
 DEFAULT_SPREAD = {INJECT: 3.0, POUR: 1.0, SPRAY: 6.0, LINE: 2.0}
 DEFAULT_DURATION = {INJECT: 0.0, POUR: 60.0, SPRAY: 10.0, LINE: 0.0}
 CURVE_SAMPLE_FT = 0.25      # a curve is stored as points this far apart (engine resamples as needed)
+PLATE_MODES = {"pool": 0, "stop": 1, "around": 2, "through": 3, "ghost": 3, "p": 0, "s": 1, "a": 2, "t": 3}
+PLATE_MODE_LABEL = {0: "pool", 1: "stop", 2: "around", 3: "through"}
 
 
 def _inp(name, default):
@@ -144,6 +154,28 @@ def _parse_mode(m, is_curve):
     raise ValueError("unknown mode '%s'. Use inject, pour, spray or line (or 0, 1, 2, 3)." % m)
 
 
+def _parse_plate_mode(m):
+    if m is None:
+        return 0
+    if isinstance(m, (int, float)) and not isinstance(m, bool) and int(m) in PLATE_MODE_LABEL:
+        return int(m)
+    key = str(m).strip().lower()
+    if key in PLATE_MODES:
+        return PLATE_MODES[key]
+    try:
+        if int(float(key)) in PLATE_MODE_LABEL:
+            return int(float(key))
+    except Exception:
+        pass
+    raise ValueError("unknown plate_mode '%s'. Use pool, stop, around or through (or 0, 1, 2, 3)." % m)
+
+
+def _truthy(v):
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return bool(v)
+
+
 def _circle(origin, normal, r):
     return rg.Circle(rg.Plane(origin, normal), r).ToNurbsCurve()
 
@@ -206,14 +238,17 @@ def run():
     if d is not None and mode != SPRAY:
         d = None                                        # only sprays use a direction
 
+    plate_mode = _parse_plate_mode(_inp("plate_mode", None))
+    cut = _truthy(_inp("cut", False))
     spec = {"v": 1, "mode": MODE_LABEL[mode], "kind": kind,
             "pt": geom if kind == "pt" else None,
             "pts": geom if kind == "crv" else None,
-            "dose": dose, "spread": spread, "start": start, "duration": dur, "dir": d}
+            "dose": dose, "spread": spread, "start": start, "duration": dur, "dir": d,
+            "plate_mode": PLATE_MODE_LABEL[plate_mode], "cut": cut}
     text = json.dumps(spec)
     marker = _marker(kind, mode, geom, spread, d)
     try:
-        ghenv.Component.Message = "%s | %.0f ft3" % (MODE_LABEL[mode], dose)
+        ghenv.Component.Message = "%s | %.0f ft3 | plates: %s%s" % (MODE_LABEL[mode], dose, PLATE_MODE_LABEL[plate_mode], " + cut" if cut else "")
         import Grasshopper
         if spread > 40.0:
             ghenv.Component.AddRuntimeMessage(Grasshopper.Kernel.GH_RuntimeMessageLevel.Warning,

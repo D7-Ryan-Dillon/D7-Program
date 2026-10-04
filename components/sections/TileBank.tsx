@@ -27,7 +27,7 @@ export function TileThumb({ tile, selected, onClick, className }: { tile: BankTi
         ))}
       </svg>
       {tile.corrected && (
-        <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1.5 py-1 text-right font-mono text-[10px] uppercase tracking-label text-cyan-400 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1.5 py-1 text-right font-mono text-[10px] uppercase tracking-label text-orange opacity-0 transition-opacity group-hover:opacity-100">
           corrected
         </div>
       )}

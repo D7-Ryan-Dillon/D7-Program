@@ -1,13 +1,14 @@
 import { supabase } from "@/lib/supabase/client";
 import type { ParsedTile, TileVoxels } from "@/lib/types";
 import type { SavedCube } from "@/lib/sections/savedCubes";
+import { ensureAnalysis } from "@/lib/tiles/pipeline";
 
-const VOXEL_KEYS = ["void", "voidSmooth", "material", "softness"] as const;
+const VOXEL_KEYS = ["void", "voidSmooth", "material", "softness", "plates", "struts", "mask", "rooms"] as const;
 const BUCKET = "tile-assets";
 const uploadedTiles = new Set<string>();
 
-type StoredTile = Omit<ParsedTile, "glbUrl" | "voxels"> & {
-  assets: { glb: string; voxels: Partial<Record<keyof TileVoxels, string>> };
+type StoredTile = Omit<ParsedTile, "glbUrl" | "partsUrl" | "voxels"> & {
+  assets: { glb: string; parts?: string; voxels: Partial<Record<keyof TileVoxels, string>> };
 };
 
 /** Uploads one tile's binary assets (glb + voxel arrays) to Storage and returns
@@ -21,9 +22,9 @@ async function storeTile(code: string, tile: ParsedTile): Promise<StoredTile> {
   if (uploadedTiles.has(glbPath)) {
     const paths: Partial<Record<keyof TileVoxels, string>> = {};
     for (const key of VOXEL_KEYS) if (tile.voxels[key]) paths[key] = `${code}/${tile.id}/voxels/${key}.bin`;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropping these two from the stored copy is the point
-    const { glbUrl: _g, voxels: _v, ...same } = tile;
-    return { ...same, assets: { glb: glbPath, voxels: paths } };
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropping these from the stored copy is the point
+    const { glbUrl: _g, partsUrl: _p, voxels: _v, ...same } = tile;
+    return { ...same, assets: { glb: glbPath, parts: tile.partsUrl ? `${code}/${tile.id}/parts.glb` : undefined, voxels: paths } };
   }
   const glbBytes = await fetch(tile.glbUrl).then((r) => r.arrayBuffer());
   const glbUpload = await supabase.storage.from(BUCKET).upload(glbPath, glbBytes, {
@@ -31,6 +32,12 @@ async function storeTile(code: string, tile: ParsedTile): Promise<StoredTile> {
     upsert: true,
   });
   if (glbUpload.error) throw glbUpload.error;
+  let partsPath: string | undefined;
+  if (tile.partsUrl) {
+    partsPath = `${code}/${tile.id}/parts.glb`;
+    const partsUpload = await supabase.storage.from(BUCKET).upload(partsPath, await fetch(tile.partsUrl).then((r) => r.arrayBuffer()), { contentType: "model/gltf-binary", upsert: true });
+    if (partsUpload.error) throw partsUpload.error;
+  }
 
   const voxelPaths: Partial<Record<keyof TileVoxels, string>> = {};
   for (const key of VOXEL_KEYS) {
@@ -45,10 +52,10 @@ async function storeTile(code: string, tile: ParsedTile): Promise<StoredTile> {
     voxelPaths[key] = path;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropping these two from the stored copy is the point
-  const { glbUrl, voxels, ...rest } = tile;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropping these from the stored copy is the point
+  const { glbUrl, partsUrl, voxels, ...rest } = tile;
   uploadedTiles.add(glbPath);
-  return { ...rest, assets: { glb: glbPath, voxels: voxelPaths } };
+  return { ...rest, assets: { glb: glbPath, parts: partsPath, voxels: voxelPaths } };
 }
 
 /** Downloads one stored tile's assets back into the in-app ParsedTile shape --
@@ -60,6 +67,11 @@ async function hydrateTile(stored: StoredTile): Promise<ParsedTile> {
   const glbDownload = await supabase.storage.from(BUCKET).download(assets.glb);
   if (glbDownload.error || !glbDownload.data) throw glbDownload.error ?? new Error(`Missing asset: ${assets.glb}`);
   const glbUrl = URL.createObjectURL(glbDownload.data);
+  let partsUrl: string | undefined;
+  if (assets.parts) {
+    const partsDownload = await supabase.storage.from(BUCKET).download(assets.parts);
+    if (!partsDownload.error && partsDownload.data) partsUrl = URL.createObjectURL(partsDownload.data);
+  }
 
   const voxels: TileVoxels = {};
   for (const [key, path] of Object.entries(assets.voxels) as [keyof TileVoxels, string | undefined][]) {
@@ -69,7 +81,8 @@ async function hydrateTile(stored: StoredTile): Promise<ParsedTile> {
     voxels[key] = new Uint8Array(await download.data.arrayBuffer());
   }
 
-  return { ...rest, glbUrl, voxels };
+  // a project saved before a tile was read as spaces gets that now
+  return ensureAnalysis({ ...rest, glbUrl, partsUrl, voxels });
 }
 
 /** Uploads every tile's assets and upserts the project row for `code`. Only

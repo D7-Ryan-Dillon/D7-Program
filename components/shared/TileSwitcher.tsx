@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { useProject } from "@/lib/project-store";
 import { TileThumbnail } from "./TileThumbnail";
 
-/** The loaded-tiles bar at the top of Viewer/Analysis -- a single
+/** The loaded-tiles bar. It lives in the top bar (Header) on Viewer and Analysis, so it stays on screen with the tabs -- a single
  * horizontally-scrolling row (rather than wrapping to as many rows as it
  * takes) so a large bank stays a fixed, small height. Pinned tiles are
  * reordered to the front of that row so they're always the first thing
@@ -26,7 +26,7 @@ export function TileSwitcher() {
   if (!tiles.length) return null;
 
   return (
-    <div className="flex items-center gap-2 border-b border-border pb-3">
+    <div className="flex items-center gap-2 border-t border-white/10 pt-2.5">
       <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
         {ordered.map((tile) => {
           const pinned = pinnedTileIds.includes(tile.id);

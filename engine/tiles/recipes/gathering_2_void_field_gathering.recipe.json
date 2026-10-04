@@ -1,0 +1,47 @@
+{
+  "schema": "erosion-recipe/2",
+  "name": "gathering_2_void_field_gathering",
+  "engine_version": "7.0",
+  "meta": {"category": "gathering", "typology": "void field gathering", "slot": 2},
+  "sim": {"tile_w": 20.0, "tile_h": 20.0, "cell": 0.5, "steps": 170, "gravity": 0.5, "drain": false, "n_frames": 8, "smooth": 0.8, "seed": 21},
+  "cleanup": {"min_void_ft3": 6.0, "min_foam_ft3": 8.0, "weld": "xy"},
+  "foam": {"v": 1, "noise": 0.55, "scale": 3.6, "grain": 0.22, "seed": 102, "web": 0.0, "web_open": 0.3, "web_thickness": 0.5, "layers": false, "layer_count": 3, "layer_axis": 2, "layer_thickness": 0.75, "layer_strength": 0.85},
+  "plates": [
+    {"v": 1, "kind": "plates", "name": "ground slab", "thickness": 2.0, "resistance": 2.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "auto_support": false, "min_support": 8.0, "max_span": 10.0, "strut_size": 1.5, "verticality": 0.3, "branch_from_top": false, "support_pts": [],
+     "shapes": [
+       {"type": "box", "min": [0.0, 0.0, 0.0], "max": [20.0, 20.0, 2.0]}
+     ]},
+    {"v": 1, "kind": "plates", "name": "waist floor", "thickness": 1.7, "resistance": 2.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "auto_support": false, "min_support": 6.0, "max_span": 10.0, "strut_size": 1.5, "verticality": 0.3, "branch_from_top": false, "support_pts": [],
+     "shapes": [
+       {"type": "poly", "pts": [[14.233, 10.0, 10.6], [14.467, 10.615, 10.6], [14.618, 11.305, 10.6], [14.547, 12.015, 10.6], [14.183, 12.643, 10.6], [13.564, 13.099, 10.6], [12.815, 13.37, 10.6], [12.068, 13.529, 10.6], [11.378, 13.688, 10.6], [10.712, 13.908, 10.6], [10.0, 14.15, 10.6], [9.219, 14.286, 10.6], [8.437, 14.182, 10.6], [7.781, 13.787, 10.6], [7.349, 13.173, 10.6], [7.133, 12.493, 10.6], [7.006, 11.892, 10.6], [6.8, 11.418, 10.6], [6.409, 11.015, 10.6], [5.862, 10.57, 10.6], [5.312, 10.0, 10.6], [4.953, 9.305, 10.6], [4.918, 8.564, 10.6], [5.225, 7.884, 10.6], [5.791, 7.341, 10.6], [6.491, 6.948, 10.6], [7.223, 6.677, 10.6], [7.938, 6.481, 10.6], [8.629, 6.332, 10.6], [9.311, 6.22, 10.6], [10.0, 6.15, 10.6], [10.703, 6.138, 10.6], [11.418, 6.206, 10.6], [12.118, 6.385, 10.6], [12.756, 6.702, 10.6], [13.268, 7.159, 10.6], [13.613, 7.718, 10.6], [13.803, 8.315, 10.6], [13.912, 8.895, 10.6], [14.037, 9.444, 10.6]]}
+     ]}
+  ],
+  "sources": [
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [10.0, 10.0, 5.6], "dose": 486, "spread": 5.4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [10.0, 10.0, 14.8], "dose": 386, "spread": 5.0, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [4.0, 4.5, 15.2], "dose": 121, "spread": 3.4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [16.5, 4.0, 15.2], "dose": 156, "spread": 3.7, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [4.5, 16.0, 15.2], "dose": 132, "spread": 3.5, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [16.0, 16.5, 15.0], "dose": 101, "spread": 3.2, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [3.5, 3.5, 5.6], "dose": 111, "spread": 3.3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [16.8, 16.4, 5.6], "dose": 132, "spread": 3.5, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [0.0, 10.0, 6.0], "dose": 198, "spread": 4.0, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [0.0, 10.0, 16.0], "dose": 198, "spread": 4.0, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [20.0, 10.0, 6.0], "dose": 198, "spread": 4.0, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [20.0, 10.0, 16.0], "dose": 198, "spread": 4.0, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [10.0, 0.0, 6.0], "dose": 198, "spread": 4.0, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [10.0, 0.0, 16.0], "dose": 198, "spread": 4.0, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [10.0, 20.0, 6.0], "dose": 198, "spread": 4.0, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "inject", "kind": "pt", "pt": [10.0, 20.0, 16.0], "dose": 198, "spread": 4.0, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 10.0, 5.6], [9.102, 10.0, 5.636], [7.812, 10.0, 5.687], [6.367, 10.0, 5.745], [5.0, 10.0, 5.8], [3.633, 10.0, 5.855], [2.188, 10.0, 5.913], [0.898, 10.0, 5.964], [0.0, 10.0, 6.0]], "dose": 96, "spread": 2.3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 10.0, 14.8], [9.102, 10.0, 14.863], [7.812, 10.0, 14.95], [6.367, 10.0, 15.062], [5.0, 10.0, 15.2], [3.633, 10.0, 15.391], [2.188, 10.0, 15.625], [0.898, 10.0, 15.847], [0.0, 10.0, 16.0]], "dose": 97, "spread": 2.3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 10.0, 5.6], [10.898, 10.0, 5.636], [12.188, 10.0, 5.687], [13.633, 10.0, 5.745], [15.0, 10.0, 5.8], [16.367, 10.0, 5.855], [17.812, 10.0, 5.913], [19.102, 10.0, 5.964], [20.0, 10.0, 6.0]], "dose": 96, "spread": 2.3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 10.0, 14.8], [10.898, 10.0, 14.863], [12.188, 10.0, 14.95], [13.633, 10.0, 15.062], [15.0, 10.0, 15.2], [16.367, 10.0, 15.391], [17.812, 10.0, 15.625], [19.102, 10.0, 15.847], [20.0, 10.0, 16.0]], "dose": 97, "spread": 2.3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 10.0, 5.6], [10.0, 9.102, 5.636], [10.0, 7.812, 5.687], [10.0, 6.367, 5.745], [10.0, 5.0, 5.8], [10.0, 3.633, 5.855], [10.0, 2.188, 5.913], [10.0, 0.898, 5.964], [10.0, 0.0, 6.0]], "dose": 96, "spread": 2.3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 10.0, 14.8], [10.0, 9.102, 14.863], [10.0, 7.812, 14.95], [10.0, 6.367, 15.062], [10.0, 5.0, 15.2], [10.0, 3.633, 15.391], [10.0, 2.188, 15.625], [10.0, 0.898, 15.847], [10.0, 0.0, 16.0]], "dose": 97, "spread": 2.3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 10.0, 5.6], [10.0, 10.898, 5.636], [10.0, 12.188, 5.687], [10.0, 13.633, 5.745], [10.0, 15.0, 5.8], [10.0, 16.367, 5.855], [10.0, 17.812, 5.913], [10.0, 19.102, 5.964], [10.0, 20.0, 6.0]], "dose": 96, "spread": 2.3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 10.0, 14.8], [10.0, 10.898, 14.863], [10.0, 12.188, 14.95], [10.0, 13.633, 15.062], [10.0, 15.0, 15.2], [10.0, 16.367, 15.391], [10.0, 17.812, 15.625], [10.0, 19.102, 15.847], [10.0, 20.0, 16.0]], "dose": 97, "spread": 2.3, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false}
+  ],
+  "frame": null,
+  "expect": {"tile_id": "436212f7f4f41f70"}
+}

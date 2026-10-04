@@ -7,7 +7,7 @@ import { ratingFor } from "@/lib/arrange/joints";
 import type { Joint } from "@/lib/arrange/types";
 
 const RATING_COLOR: Record<ReturnType<typeof ratingFor>, string> = {
-  interlocks: "text-emerald-400",
+  interlocks: "text-pink",
   partial: "text-orange",
   poor: "text-destructive",
   sealed: "text-muted-foreground",
@@ -61,7 +61,7 @@ export function JointsPanel({
                 <button
                   aria-label="Mark good"
                   onClick={() => onRate(j.id, j.rating === "good" ? null : "good")}
-                  className={cn("rounded-full p-1.5 hover:bg-white/10", j.rating === "good" && "bg-emerald-400/20 text-emerald-400")}
+                  className={cn("rounded-full p-1.5 hover:bg-white/10", j.rating === "good" && "bg-pink/20 text-pink")}
                 >
                   <ThumbsUp className="h-3.5 w-3.5" />
                 </button>

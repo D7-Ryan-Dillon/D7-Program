@@ -16,7 +16,9 @@ import { squareGridLayout, squareGridCells, fixedGridLayout, type GridCell } fro
 import { fitText, wrapToWidth } from "./textFit";
 import { planCatalogue } from "./catalogue";
 import { resolveTag, tileLabelText } from "./tileLabel";
-import { CATALOGUE_COLUMNS, DPI, type BoardConfig, type BoardSlot } from "./types";
+import { CATALOGUE_COLUMNS, DPI, type BoardConfig, type BoardDrawing, type BoardSlot, type BoardTextBox } from "./types";
+import { drawingFromState } from "@/lib/drawing/state";
+import { drawToCanvas, drawingSize, drawingStyle, groundFor } from "@/lib/drawing/render";
 
 export function ptToPx(pt: number, dpi: number = DPI): number {
   return (pt / 72) * dpi;
@@ -176,7 +178,9 @@ export function computeGeometry(config: BoardConfig, dpi: number = DPI, tileById
     }
   }
 
-  const captionOffset = config.textBox.enabled ? 1 : 0;
+  // one caption cell is held on both pages when either page has a caption, so the tiles stay in the same place on page 1 and page 2
+  const hasCaption = config.textBox.enabled || config.textBox2.enabled;
+  const captionOffset = hasCaption ? 1 : 0;
   const totalCells = config.slots.length + captionOffset;
   const layout = squareGridLayout(totalCells || 1, availableWidth, availableHeight, gapX, gapY, tag.height);
   const cells = squareGridCells(layout, gapX, gapY).map((cell) => ({ x: cell.x + margin, y: cell.y + titleBottom, size: cell.size }));
@@ -187,7 +191,7 @@ export function computeGeometry(config: BoardConfig, dpi: number = DPI, tileById
     slotCellIndex: config.slots.map((_, i) => i + captionOffset),
     placeholders: [],
     labels: [],
-    captionCellIndex: config.textBox.enabled ? 0 : null,
+    captionCellIndex: hasCaption ? 0 : null,
   };
 }
 
@@ -200,13 +204,13 @@ function drawBackgroundAndTitle(ctx: CanvasRenderingContext2D, config: BoardConf
   ctx.fillText(config.name.toUpperCase(), geo.margin, geo.margin);
 }
 
-function drawCaptionCell(ctx: CanvasRenderingContext2D, cell: GridCell, config: BoardConfig, dpi: number) {
+function drawCaptionCell(ctx: CanvasRenderingContext2D, cell: GridCell, config: BoardConfig, dpi: number, box: BoardTextBox) {
   ctx.save();
-  ctx.fillStyle = config.textBox.color;
+  ctx.fillStyle = box.color;
   const padding = cell.size * 0.04;
   const maxWidth = cell.size - padding * 2;
   const maxHeight = cell.size - padding * 2;
-  const text = config.textBox.text || "";
+  const text = box.text || "";
   let fontSize: number;
   let lines: string[];
   if (config.captionFontSizePt) {
@@ -222,6 +226,12 @@ function drawCaptionCell(ctx: CanvasRenderingContext2D, cell: GridCell, config: 
   ctx.textBaseline = "top";
   lines.forEach((line, i) => ctx.fillText(line, cell.x + padding, cell.y + padding + i * fontSize * 1.3));
   ctx.restore();
+}
+
+/** The caption box of the page being drawn, when that page has one on. */
+function drawPageCaption(ctx: CanvasRenderingContext2D, geo: PageGeometry, config: BoardConfig, dpi: number, page: 1 | 2) {
+  const box = page === 1 ? config.textBox : config.textBox2;
+  if (box.enabled && geo.captionCellIndex !== null) drawCaptionCell(ctx, geo.cells[geo.captionCellIndex], config, dpi, box);
 }
 
 /** The credit line along the bottom: a rule spanning the full content
@@ -331,6 +341,38 @@ function tileRenderOptions(slot: BoardSlot, tile: ParsedTile, config: BoardConfi
   };
 }
 
+/** What a slot shows: the board's setting with the slot's own changes on top. */
+export function slotDrawing(slot: BoardSlot, config: BoardConfig): BoardDrawing {
+  return { ...config.drawing, ...slot.drawing };
+}
+
+/** The slot's plan or section drawn to fill a module image, on the board's own background (ink and poche contrast with it);
+ * null when the slot shows the 3D render. */
+function drawingImage(slot: BoardSlot, tile: ParsedTile, config: BoardConfig, width: number, height: number): HTMLCanvasElement | null {
+  const bd = slotDrawing(slot, config);
+  if (bd.mode === "model") return null;
+  const levels = tile.spaces?.levels ?? [];
+  const level = bd.level === 0 ? levels[levels.length - 1]?.id : (bd.level ?? levels[0]?.id ?? null);
+  const ground = groundFor(config.backgroundColor);
+  const d = drawingFromState(tile, { mode: bd.mode, level: level ?? null, axis: bd.axis, pos: bd.pos, ground, labels: bd.labels, route: false });
+  if (!d) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(2, Math.round(width));
+  canvas.height = Math.max(2, Math.round(height));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = config.backgroundColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const style = { ...drawingStyle(ground) };
+  if (ground === "dark") style.foam = config.foamColor;
+  const opts = { pxPerFt: 1, caption: false, ruler: false, background: false, labels: bd.labels };
+  const unit = drawingSize(d, opts);
+  const pxPerFt = Math.min((canvas.width * 0.9) / unit.width, (canvas.height * 0.9) / unit.height);
+  const fitted = drawingSize(d, { ...opts, pxPerFt });
+  drawToCanvas(ctx, d, style, { ...opts, pxPerFt }, { x: (canvas.width - fitted.width) / 2, y: (canvas.height - fitted.height) / 2 });
+  return canvas;
+}
+
 /** Lays a rendered tile into its module, clipped to the module's square.
  * (Page 2 first fills the square with the board colour, as the descriptor
  * column to the right of the image has none of its own.) */
@@ -425,11 +467,29 @@ function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile:
     ctx.font = `${fit.fontSize}px "${config.fontFamily}"`;
     ctx.textBaseline = "middle";
     ctx.fillText(String(r.score), descX + padding + barWidth + fit.fontSize * 0.4, barY + barHeight / 2);
+
+    // the measured quantity under the bar (switched on in the descriptor page settings), when the row is tall enough to hold it
+    const small = fit.fontSize * 0.62;
+    const textY = barY + barHeight + small * 0.55;
+    if (config.descriptorHeadlines && small >= 5 && textY + small < rowTop + rowHeight) {
+      ctx.font = `${small}px "${config.fontFamily}"`;
+      ctx.fillStyle = `${color}b3`;
+      ctx.textBaseline = "top";
+      let text = r.quant.headline;
+      while (text.length > 4 && ctx.measureText(text).width > labelMaxWidth) text = text.slice(0, -2);
+      ctx.fillText(text === r.quant.headline ? text : `${text.trimEnd()}…`, descX + padding, textY);
+    }
   });
 }
 
 async function drawModule(ctx: CanvasRenderingContext2D, cell: GridCell, slot: BoardSlot, tile: ParsedTile, config: BoardConfig, dpi: number, page: 1 | 2) {
   const { width, height } = moduleImageSize(cell, page);
+  const flat = drawingImage(slot, tile, config, width, height);
+  if (flat) {
+    paintModuleImage(ctx, cell, flat, page, config);
+    drawModuleChrome(ctx, cell, slot, tile, config, dpi, page);
+    return;
+  }
   const dataUrl = await renderTileToDataUrl(tileRenderOptions(slot, tile, config, dpi, Math.round(width), Math.round(height)));
   const img = await loadImage(dataUrl);
   paintModuleImage(ctx, cell, img, page, config);
@@ -520,7 +580,7 @@ export async function drawBoardPage(
   const geo = computeGeometry(config, dpi, tileById);
   drawBackgroundAndTitle(ctx, config, geo);
   drawCatalogueFurniture(ctx, config, geo, dpi);
-  if (page === 1 && geo.captionCellIndex !== null) drawCaptionCell(ctx, geo.cells[geo.captionCellIndex], config, dpi);
+  drawPageCaption(ctx, geo, config, dpi, page);
   for (const m of boardModules(config, geo, tileById)) await drawModule(ctx, m.cell, m.slot, m.tile, config, dpi, page);
   await drawFooter(ctx, config, geo);
   return geo;
@@ -603,7 +663,7 @@ export async function createBoardAnimation(
   under.ctx.fillRect(0, 0, width, height);
   drawBackgroundAndTitle(under.ctx, config, geo);
   drawCatalogueFurniture(under.ctx, config, geo, dpi);
-  if (page === 1 && geo.captionCellIndex !== null) drawCaptionCell(under.ctx, geo.cells[geo.captionCellIndex], config, dpi);
+  drawPageCaption(under.ctx, geo, config, dpi, page);
   await drawFooter(under.ctx, config, geo);
 
   const over = newCanvas(width, height);
@@ -611,16 +671,20 @@ export async function createBoardAnimation(
 
   const size = moduleImageSize(modules[0].cell, page);
   const renderer = createTileRenderer(Math.round(size.width), Math.round(size.height), false);
-  const rigs: TileRig[] = [];
+  const rigs: (TileRig | null)[] = [];
+  const statics: (HTMLCanvasElement | null)[] = [];
   const release = () => {
-    rigs.forEach((r) => r.dispose());
+    rigs.forEach((r) => r?.dispose());
     renderer.dispose();
     renderer.forceContextLoss();
   };
   try {
     for (const m of modules) {
       if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
-      rigs.push(await createTileRig(renderer, tileRenderOptions(m.slot, m.tile, config, dpi, Math.round(size.width), Math.round(size.height))));
+      // a plan or section does not turn: it is drawn once and held for every frame
+      const flat = drawingImage(m.slot, m.tile, config, size.width, size.height);
+      statics.push(flat);
+      rigs.push(flat ? null : await createTileRig(renderer, tileRenderOptions(m.slot, m.tile, config, dpi, Math.round(size.width), Math.round(size.height))));
       onProgress?.(rigs.length, modules.length);
     }
   } catch (err) {
@@ -638,8 +702,11 @@ export async function createBoardAnimation(
       const angle = (360 * i) / frameCount;
       frame.ctx.drawImage(under.canvas, 0, 0);
       modules.forEach((m, k) => {
-        rigs[k].renderAt(angle);
-        paintModuleImage(frame.ctx, m.cell, renderer.domElement, page, config);
+        const rig = rigs[k];
+        if (rig) {
+          rig.renderAt(angle);
+          paintModuleImage(frame.ctx, m.cell, renderer.domElement, page, config);
+        } else if (statics[k]) paintModuleImage(frame.ctx, m.cell, statics[k]!, page, config);
       });
       frame.ctx.drawImage(over.canvas, 0, 0);
     },

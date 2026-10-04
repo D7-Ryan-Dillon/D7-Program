@@ -44,6 +44,7 @@
   --color-magenta: var(--magenta);
   --color-magenta-foreground: var(--magenta-foreground);
   --color-orange: var(--orange);
+  --color-pink: var(--pink);
   --color-orange-foreground: var(--orange-foreground);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
@@ -62,7 +63,7 @@
 :root {
   --font-sans: var(--font-geist-sans);
 
-  --background: oklch(0.085 0 0);
+  --background: oklch(0 0 0);
   --foreground: oklch(0.94 0 0);
 
   --surface: oklch(0.125 0 0);
@@ -76,6 +77,8 @@
   --magenta: #c43383;
   --magenta-foreground: oklch(0.98 0 0);
   --orange: #db7228;
+  /* the soft foam pink: the third accent, used for "fine / lifts it" marks where other apps would use green */
+  --pink: #e8a6c8;
   --orange-foreground: oklch(0.12 0 0);
 
   --primary: var(--magenta);
@@ -86,7 +89,7 @@
   --muted-foreground: oklch(0.6 0 0);
   --accent: oklch(0.2 0 0);
   --accent-foreground: oklch(0.96 0 0);
-  --destructive: oklch(0.6 0.22 25);
+  --destructive: #ff269e;
 
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 12%);

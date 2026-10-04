@@ -101,7 +101,15 @@ function noise(xFt: number, zFt: number, seed: number): number {
 }
 
 /** Applies the plates to a copy of `volume`; never mutates the input. */
-export function applyPlates(volume: VolumeField, settings: PlateSettings, shape: "cube" | "hex-prism", tileFt = 20): { volume: VolumeField; stats: PlateStats } {
+export interface PlateResult {
+  volume: VolumeField;
+  stats: PlateStats;
+  /** Foam plates only: each node's strongest slab value (positive = inside a plate) and which plate (1..) it belongs to. Absent for void plates or none. */
+  plateField?: Float32Array;
+  plateIds?: Uint8Array;
+}
+
+export function applyPlates(volume: VolumeField, settings: PlateSettings, shape: "cube" | "hex-prism", tileFt = 20): PlateResult {
   const stats: PlateStats = { elevations: [], withOpenings: 0 };
   if (!arePlatesActive(settings)) return { volume, stats };
 
@@ -169,6 +177,9 @@ export function applyPlates(volume: VolumeField, settings: PlateSettings, shape:
   const g = new Float32Array(src.length);
   for (let i = 0; i < g.length; i++) g[i] = sgn * src[i];
   const out = new Float32Array(g); // g with the slabs unioned in
+  const trackPlates = settings.side === "foam";
+  const plateField = trackPlates ? new Float32Array(src.length).fill(-1e6) : undefined;
+  const plateIds = trackPlates ? new Uint8Array(src.length) : undefined;
 
   const openingRadiusFt = (settings.openingPct / 100) * half;
 
@@ -273,13 +284,18 @@ export function applyPlates(volume: VolumeField, settings: PlateSettings, shape:
           const slab = (Math.min(vert, p) / cellFt) * slope;
           const i = idx(x, y, z);
           if (slab > out[i]) out[i] = slab;
+          if (plateField && plateIds && slab > plateField[i]) {
+            plateField[i] = slab;
+            plateIds[i] = k + 1;
+          }
         }
       }
     stats.elevations.push(Math.round(elev * 100) / 100);
     if (hasOpening) stats.withOpenings++;
   }
 
+  if (plateField) for (let i = 0; i < plateField.length; i++) if (plateField[i] < -4 * slope) plateField[i] = -4 * slope; // nodes no slab reached: a mild negative, so a marched surface lands where the slab ends
   const field = new Float32Array(src.length);
   for (let i = 0; i < field.length; i++) field[i] = sgn * out[i];
-  return { volume: { ...volume, field }, stats };
+  return { volume: { ...volume, field }, stats, plateField, plateIds };
 }

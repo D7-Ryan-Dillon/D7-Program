@@ -4,6 +4,7 @@ import { LogOut, Loader2, Check, CloudOff } from "lucide-react";
 import { Logo } from "@/components/shared/Logo";
 import { TabNav, type WorkspaceTabKey } from "@/components/shared/TabNav";
 import { AddTilesButtons } from "@/components/shared/AddTilesButtons";
+import { TileSwitcher } from "@/components/shared/TileSwitcher";
 import { Button } from "@/components/ui/button";
 import { useProject } from "@/lib/project-store";
 
@@ -32,7 +33,7 @@ export function Header({ activeTab, onTabChange }: { activeTab: WorkspaceTabKey;
             title={saveStatus === "error" && saveError ? saveError : undefined}
           >
             {(saveStatus === "loading" || saveStatus === "saving") && <Loader2 className="h-3 w-3 animate-spin" />}
-            {saveStatus === "saved" && <Check className="h-3 w-3 text-emerald-400" />}
+            {saveStatus === "saved" && <Check className="h-3 w-3 text-pink" />}
             {saveStatus === "error" && <CloudOff className="h-3 w-3 text-destructive" />}
             {SAVE_STATUS_LABEL[saveStatus]}
           </span>
@@ -50,6 +51,13 @@ export function Header({ activeTab, onTabChange }: { activeTab: WorkspaceTabKey;
           Switch project
         </Button>
       </div>
+
+      {/* the loaded tiles stay in the top bar (always on screen) on the tabs that work on one tile at a time */}
+      {(activeTab === "viewer" || activeTab === "analysis") && (
+        <div className="order-last w-full min-w-0">
+          <TileSwitcher />
+        </div>
+      )}
     </header>
   );
 }

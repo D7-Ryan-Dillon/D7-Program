@@ -24,6 +24,17 @@ Five tabs, in order:
    rendered/ghosted, visibility with opacity, its own clipping plane, rotation
    and export -- plus "Sync all" to copy one viewport's settings onto the rest.
    With several viewports the right panel shows one aligned specs table.
+   Each viewport can show the tile in **3D, as a Plan or as a Section**: the
+   plans and sections draw themselves from the tile (foam and floor plates cut
+   solid, void open, a floor tinted below the cut, rooms labelled, a 10 ft
+   ruler) and export as SVG or PNG at a chosen scale. The **Layers** button
+   colours the floor plates and support branches apart from the foam and tints
+   the void room by room or floor by floor; the right panel reads the tile as
+   architecture (floors, rooms, light, route, floor plates) and checks whether
+   it will print (one piece, wall thickness against a 0.4 mm nozzle, overhang,
+   contact with the bed). **Print (STL)** writes a print-ready STL at a chosen
+   scale (1 in = 10 ft by default) of the foam, the void, the plates or the
+   branches.
 2. **Builder** (formerly "Sections") -- build a tile a different way: pick (or upload) face
    photos, assign one to each face of a cube or hexagonal prism, and
    generate a tile entirely in the browser, no Grasshopper needed. The
@@ -33,7 +44,11 @@ Five tabs, in order:
    swaps which side is foam and
    which is void, cleans up floating specks and thin branches, and keeps
    every piece you generate under the project code (the "Saved objects"
-   list), whether or not you add it to the tile bank. **Floor plates**
+   list), whether or not you add it to the tile bank. A tile built here is
+   measured by the same code that reads a Grasshopper export (levels, rooms,
+   routes, light, structure, floor plates), "Export _analysis" writes the same
+   folder the engine does (including drawings and STL), and **Print STL** has
+   parts and scale. **Floor plates**
    (optional): flat slabs at set heights, made of foam or void (its own
    switch, independent of Swap), with footprints (full / pulled in / L / T /
    plus), openings, and erosion that makes a plate recede wherever a void
@@ -41,7 +56,15 @@ Five tabs, in order:
 3. **Analysis** -- score any tile against the 12 studio descriptors
    (carved, stepped, porous, continuous, resistant, threaded, graduated,
    non-hierarchical circulation, force-driven, light-filled, monumental,
-   spatial density), beside a slowly turning axo view of the tile. Compare
+   spatial density), beside a slowly turning axo view of the tile. Each
+   descriptor shows its score, a **quantitative** headline with the measures
+   behind it, a **qualitative** reading on a named scale, and a sentence about
+   *this* tile's spaces ("the tallest space is the middle shaft, 18 ft clear
+   over 7 ft across..."), with what lifts it and what holds it back; the
+   **Evidence** button lights what the sentence is about in the 3D view or on
+   a plan or section. A **Results** panel gives every tile against the carried
+   criteria as a table (CSV or image) and an annotated diagram per descriptor.
+   Compare
    2 tiles (3 on wide screens) side by side with the biggest differences
    marked. The **criteria carried forward** panel picks the 6-12 strongest
    descriptors for the tiles in the project (editable, with a written reason
@@ -60,6 +83,11 @@ Five tabs, in order:
    text are settable (short / typology / full / custom template), an optional
    top-N descriptor highlight, board presets, auto-sort, "copy settings to
    other tiles", and per-group reset. Everything saves with the project.
+   **Tile views** show every tile (or one, from the tile list) as a plan or a
+   section instead of the 3D render, on the board's own background.
+   The optional **caption box** is per page (page 1 and page 2 each have their own
+   switch and text), and the descriptor page can print each measured value under
+   its bar (off by default, because it does not always fit).
    **Animated export** turns the board into a seamlessly looping GIF (or
    MP4): every tile makes one full 360-degree turn from the view it is set
    to, all in sync. Pick which pages to export (board / descriptors), the
@@ -71,6 +99,10 @@ Clipping planes (X/Y/Z, reversible, optional cut-face highlight) are in the
 Viewer, the Sections builder and the Boards popup. The layout works from a
 phone up to a desktop; on a phone or half-screen laptop the viewport (or the
 board) stays pinned to the top of the tab while you scroll the controls.
+The loaded tiles sit in the top bar on Viewer and Analysis, so they stay on
+screen. The whole app is black with pink, orange and gray only; new viewports
+and boards start in the same look (ghosted foam, magenta void, peach floor
+plates, orange branches).
 
 Every viewport (Viewer, Analysis, Arrange, the cube builder) has an
 **Export** button: current view as a high-resolution PNG (pixels or print size
@@ -116,6 +148,7 @@ project code.
 ```bash
 npm run lint       # eslint
 npx tsc --noEmit   # typecheck
+npm run check:parity   # lib/tiles agrees with the Grasshopper engine's own analysis on the 15 typology tiles
 npm run build      # production build
 ```
 
@@ -133,7 +166,9 @@ components/
 lib/
   types.ts                Typed shapes for a tile (ParsedTile) and its faces/sections
   ingest.ts               Turns a dropped Grasshopper folder/.zip into a ParsedTile
-  scoring/                The 12-descriptor scoring engine (Analysis tab)
+  tiles/                  How a tile is read from its voxels (levels, rooms, routes, light, structure, plates): the ONE shared pipeline
+  drawing/                Plan and section drawings (canvas + SVG), used by the Viewer, Boards, Analysis and the exports
+  scoring/                The 12-descriptor scoring (measures, drivers, sentences, results exports)
   arrange/                Auto-generate, matching, joints, regrowth (Arrange tab)
   sections/               Photo -> trace -> lofted volume -> ParsedTile (Sections tab)
   boards/                 Grid layout, frame shape, text fitting, canvas export, GIF/MP4 turntable export (Boards tab)
@@ -148,6 +183,7 @@ lib/
   presets.ts              Saved presets (boards / viewer / compare), per project
   renderTile.ts           Headless tile renderer + Boards line decorations (outlines, facet lines)
   supabase/               Supabase client setup (browser + server-only)
+engine/                    Grasshopper erosion engine 7 (floor plates, any-geometry input, loop), recipes, headless tests -- see engine/README.md
 supabase/setup.sql         Run once in the Supabase SQL Editor for a fresh project
 docs/DATA_FORMAT.md        Exact Grasshopper export data contract
 HANDOFF.md                 Full project context for a new AI session or contributor

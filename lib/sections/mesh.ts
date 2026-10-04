@@ -188,7 +188,7 @@ export function buildTileScene(field: Float32Array, resolution: number, tileFt: 
   foam.name = "foam";
   group.add(foam);
 
-  const voidMesh = new THREE.Mesh(marchGrid(grid.void, grid), new THREE.MeshStandardMaterial({ color: "#1c1c1f", side: THREE.DoubleSide }));
+  const voidMesh = new THREE.Mesh(marchGrid(grid.void, grid), new THREE.MeshStandardMaterial({ color: "#1c1c1c", side: THREE.DoubleSide }));
   voidMesh.name = "void";
   group.add(voidMesh);
 

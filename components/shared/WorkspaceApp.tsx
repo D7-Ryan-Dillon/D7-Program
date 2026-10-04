@@ -17,7 +17,15 @@ function Workspace() {
   const [{ tab }, setWorkspaceUi] = useProjectUi<WorkspaceUi>("workspace", defaultWorkspaceUi);
   const setTab = (next: WorkspaceUi["tab"]) => setWorkspaceUi((prev) => ({ ...prev, tab: next }));
 
-  if (!projectCode) return <ProjectGate />;
+  // the animated backdrop belongs to the project-code screen only; the workspace itself is plain black
+  if (!projectCode) {
+    return (
+      <>
+        <ErosionBackdrop />
+        <ProjectGate />
+      </>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -36,7 +44,6 @@ function Workspace() {
 export function WorkspaceApp() {
   return (
     <ProjectProvider>
-      <ErosionBackdrop />
       <Workspace />
     </ProjectProvider>
   );

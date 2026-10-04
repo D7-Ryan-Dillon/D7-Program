@@ -42,7 +42,7 @@ const defaultArrangeUi = (): ArrangeUi => ({
   selected: [],
   settings: DEFAULT_SETTINGS,
   visibility: { foam: true, void: true },
-  colors: { foam: "#e8a6c8", void: "#1c1c1f" },
+  colors: { foam: "#e8a6c8", void: "#1c1c1c" },
   autoRotate: false,
   rotateSecs: 24,
 });
