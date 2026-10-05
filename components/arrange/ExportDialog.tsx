@@ -30,10 +30,9 @@ import { glbToFt, pieceMatrix } from "@/lib/arrange/placement";
 import { fineGeometry, QUALITY_CHOICES, refineByTileId, type Quality } from "@/lib/fineGeometry";
 import { buildRhinoZip } from "@/lib/arrange/exportRhino";
 import { buildReport } from "@/lib/arrange/report";
-import { applyTourLook, buildUpHooks, capturePosePng, createPoseAnimation, toScene, type PoseFt } from "@/lib/arrange/capture";
+import { applyTourLook, capturePosePng, createPoseAnimation, toScene, type PoseFt } from "@/lib/arrange/capture";
 import { findViews } from "@/lib/arrange/views";
 import type { Vec3 } from "@/lib/arrange/types";
-import { toFt, type PlacedBox } from "@/lib/arrange/geometry";
 import { planDrone, type DronePlan } from "@/lib/arrange/drone";
 import { namesFor } from "@/lib/arrange/whole";
 import { CATEGORY_LABEL } from "@/lib/arrange/types";
@@ -41,7 +40,7 @@ import { categoryOf } from "@/lib/arrange/orient";
 import { useArrange } from "@/components/arrange/useArrange";
 import { cn } from "@/lib/utils";
 
-type Key = "stl" | "obj" | "plans" | "report" | "png" | "views" | "drone" | "buildup" | "rhino" | "sheet";
+type Key = "stl" | "obj" | "plans" | "report" | "png" | "views" | "drone" | "turntable" | "rhino" | "sheet";
 interface Out {
   name: string;
   blob: Blob;
@@ -49,23 +48,6 @@ interface Out {
 
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_.+-]+/g, "_") || "arrangement";
 const text = (s: string, type = "text/plain") => new Blob([s], { type });
-
-/** The order blocks are placed in a build-up: the entrance block first, then always one that touches a block already down (route order, then low to high). */
-function growOrder(boxes: PlacedBox[], sequence: string[]): string[] {
-  const rank = new Map(sequence.map((id, i) => [id, i]));
-  const left = [...boxes];
-  const first = left.findIndex((b) => b.piece.id === sequence[0]);
-  const done: PlacedBox[] = [];
-  done.push(...left.splice(first >= 0 ? first : 0, 1));
-  const touches = (a: PlacedBox, b: PlacedBox) => a.min[0] <= b.max[0] + 1 && b.min[0] <= a.max[0] + 1 && a.min[1] <= b.max[1] + 1 && b.min[1] <= a.max[1] + 1 && a.min[2] <= b.max[2] + 1 && b.min[2] <= a.max[2] + 1;
-  while (left.length) {
-    const cand = left.map((b, i) => ({ b, i })).filter((x) => done.some((d) => touches(d, x.b)));
-    const pool = cand.length ? cand : left.map((b, i) => ({ b, i }));
-    pool.sort((p, q) => (rank.get(p.b.piece.id) ?? 999) - (rank.get(q.b.piece.id) ?? 999) || p.b.min[2] - q.b.min[2]);
-    done.push(...left.splice(pool[0].i, 1));
-  }
-  return done.map((b) => b.piece.id);
-}
 
 /** Turns the camera about the vertical axis through its target. */
 function orbitPose(base: PoseFt, deg: number, closer = 1): PoseFt {
@@ -121,7 +103,7 @@ const Heading = ({ children }: { children: ReactNode }) => <div className="pt-2 
 /** One window for everything the arrangement can become. Tick what you want, press Export: one file, or one zip when there are several. */
 export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: boolean; onOpenChange: (o: boolean) => void; onPreviewTour: (plan: DronePlan, seconds: number) => void }) {
   const A = useArrange();
-  const [sel, setSel] = useState<Record<Key, boolean>>({ stl: false, obj: false, plans: false, report: false, png: false, views: false, drone: false, buildup: false, rhino: false, sheet: false });
+  const [sel, setSel] = useState<Record<Key, boolean>>({ stl: false, obj: false, plans: false, report: false, png: false, views: false, drone: false, turntable: false, rhino: false, sheet: false });
   const [stl, setStl] = useState({ ratio: "120", merge: false, parts: { foam: true, void: false, plates: false, struts: false } as Record<StlPart, boolean> });
   const [palette] = usePalette();
   const [plans, setPlans] = useState<"board" | "png" | "svg">("board");
@@ -131,7 +113,7 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
   const [plansCfg, setPlansCfg] = useState({ dpi: 150, ftPerIn: 10 });
   const [rep, setRep] = useState({ width: 1654, height: 1169, autoH: true });
   const [drone, setDrone] = useState({ kind: "full" as "full" | "highlights", spaces: 4, approach: true, seconds: 0, fps: 24, width: 1280, height: 720, fov: 78, format: "mp4" as "mp4" | "gif" });
-  const [build, setBuild] = useState({ style: "place" as "place" | "turn", seconds: 20, fps: 20, width: 1280, height: 720, format: "mp4" as "mp4" | "gif" });
+  const [build, setBuild] = useState({ seconds: 20, fps: 20, width: 1280, height: 720, format: "mp4" as "mp4" | "gif" });
   const [quality, setQuality] = useState<Quality>(3);
   /** an edited tour: the spaces to visit, in order (null = the automatic tour) */
   const [stops, setStops] = useState<string[] | null>(null);
@@ -201,7 +183,7 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
     }
   };
 
-  const film = async (kind: "drone" | "buildup"): Promise<Out> => {
+  const film = async (kind: "drone" | "turntable"): Promise<Out> => {
     const h = A.viewportHandle.current;
     if (!h) throw new Error("The viewport isn't ready yet.");
     const cfg = kind === "drone" ? drone : build;
@@ -237,51 +219,15 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
       } else {
         const base = A.viewportApi.current?.getPose();
         if (!base) throw new Error("The viewport isn't ready yet.");
-        const order = A.sequence.steps.map((s) => s.pieceId).concat(A.layout.boxes.map((b) => b.piece.id).filter((id) => !A.sequence.steps.some((s) => s.pieceId === id)));
-        // grows outward from the entrance block: each new block is one that touches the blocks already standing
-        const grown = growOrder(A.layout.boxes, A.sequence.steps.map((st) => st.pieceId));
-        const boxFt: Record<string, { min: Vec3; max: Vec3 }> = {};
-        for (const b of A.layout.boxes) boxFt[b.piece.id] = { min: [toFt(b.min[0]), toFt(b.min[1]), toFt(b.min[2])], max: [toFt(b.max[0]), toFt(b.max[1]), toFt(b.max[2])] };
-        const placing = build.style === "place" ? buildUpHooks(snap.scene, grown, boxFt) : null;
-        if (placing) {
-          const dir0 = [base.pos[0] - base.target[0], base.pos[1] - base.target[1], base.pos[2] - base.target[2]];
-          const flat = Math.hypot(dir0[0], dir0[1]) || 1;
-          const elev = Math.atan2(Math.max(dir0[2], flat * 0.25), flat);
-          const az0 = Math.atan2(dir0[1], dir0[0]);
-          const half = Math.atan(Math.tan((base.fov * Math.PI) / 360) * Math.min(1, width / height));
-          source = createPoseAnimation(
-            h,
-            (i, n) => {
-              const t = i / Math.max(1, n - 1);
-              const ext = placing.extent(t) ?? { center: base.target, radius: 10 };
-              const az = az0 + (50 * Math.PI) / 180 * t;
-              const dist = (ext.radius / Math.sin(half)) * 1.08;
-              const pos: Vec3 = [ext.center[0] + Math.cos(az) * Math.cos(elev) * dist, ext.center[1] + Math.sin(az) * Math.cos(elev) * dist, ext.center[2] + Math.sin(elev) * dist];
-              return { pos, target: ext.center, fov: base.fov };
-            },
-            frames,
-            { width, height, background: "#000000" },
-            { before: (i) => placing.before(i, frames), after: placing.after },
-          );
-        } else {
-          const names = order.map((id) => `piece-${id}`);
-          const hide = (visibleCount: number) =>
-            names.forEach((n, i) => {
-              const o = snap.scene.getObjectByName(n);
-              if (o) o.visible = i < visibleCount;
-            });
-          source = createPoseAnimation(h, (i, n) => orbitPose(base, (120 * i) / n, 0.85), frames, { width, height, background: "#000000" }, {
-            before: (i) => hide(Math.max(1, Math.ceil(((i + 1) / (frames * 0.75)) * names.length))),
-            after: () => hide(names.length),
-          });
-        }
+        // the finished model turning once round, from the current view
+        source = createPoseAnimation(h, (i, n) => orbitPose(base, (360 * i) / n, 0.9), frames, { width, height, background: "#000000" });
       }
       const settings = { ...defaultAnimationSettings(), fps: cfg.fps, widthPx: width };
       const blob =
         cfg.format === "mp4"
-          ? await encodeMp4(source, cfg.fps, (done, total) => setProgress({ label: kind === "drone" ? "recording the tour" : "recording the build-up", done, total }), abort.current.signal)
+          ? await encodeMp4(source, cfg.fps, (done, total) => setProgress({ label: kind === "drone" ? "recording the tour" : "recording the turntable", done, total }), abort.current.signal)
           : (await encodeGif(source, settings, (phase, done, total) => setProgress({ label: phase === "palette" ? "choosing colours" : "encoding frames", done, total }), abort.current.signal)).blob;
-      return { name: `${name}_${kind === "drone" ? "drone_tour" : "build_up"}.${cfg.format}`, blob };
+      return { name: `${name}_${kind === "drone" ? "drone_tour" : "turntable"}.${cfg.format}`, blob };
     } finally {
       source?.dispose();
       look?.restore();
@@ -417,8 +363,8 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
       }
             case "drone":
         return [await film("drone")];
-      case "buildup":
-        return [await film("buildup")];
+      case "turntable":
+        return [await film("turntable")];
       case "rhino": {
         const comp = buildComposite(A.layout.boxes)!;
         const r = await buildRhinoZip(A.ui.smoothOn ? smoothComposite(comp, A.layout.joints, A.ui.smooth).comp : comp, A.ui.currentName);
@@ -444,7 +390,7 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
       const outs: Out[] = [];
       for (const k of keys) {
         setProgress({ label: `making ${k}`, done: 0, total: 1 });
-        outs.push(...(await (["png", "views", "report", "drone", "buildup"].includes(k) ? withFine(() => make(k)) : make(k))));
+        outs.push(...(await (["png", "views", "report", "drone", "turntable"].includes(k) ? withFine(() => make(k)) : make(k))));
       }
       if (outs.length === 1) downloadBlob(outs[0].name, outs[0].blob);
       else {
@@ -789,14 +735,7 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
               </Button>
             </div>
           </Row>
-          <Row id="x-build" label="Build-up animation" hint="the blocks placed one by one and the spaces made, or the finished model turning" on={sel.buildup} set={toggle("buildup")}>
-            <label className="space-y-0.5 text-[10px] text-muted-foreground">
-              Style
-              <Select className="h-7 text-[11px]" value={build.style} onChange={(e) => setBuild((b) => ({ ...b, style: e.target.value as "place" | "turn" }))} aria-label="Build-up style">
-                <option value="place">Place the blocks one by one</option>
-                <option value="turn">Turn the finished model</option>
-              </Select>
-            </label>
+          <Row id="x-build" label="Turntable" hint="the model turning once round from the current view (MP4 or GIF)" on={sel.turntable} set={toggle("turntable")}>
             <SizeFields width={build.width} height={build.height} onChange={(w, h) => setBuild((b) => ({ ...b, width: w, height: h }))} />
             <div className="grid grid-cols-3 gap-2">
               <Select className="h-7 text-[11px]" value={String(build.seconds)} onChange={(e) => setBuild((b) => ({ ...b, seconds: Number(e.target.value) }))} aria-label="Seconds">
