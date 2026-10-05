@@ -241,28 +241,33 @@ const FACE_NORMAL: Record<string, Vec3> = { "x-": [-1, 0, 0], "x+": [1, 0, 0], "
 const FACE_WORD: Record<string, string> = { "x-": "west", "x+": "east", "y-": "south", "y+": "north", "z+": "roof" };
 
 /** Distinct pieces seen from a point looking along `yaw`, with how far the rays travel (a fan of rays across the lens). */
-function whatIsSeen(c: Composite, from: Vec3, yaw: number): { pieces: number; meanDist: number; skyShare: number; nearest: number } {
+function whatIsSeen(c: Composite, from: Vec3, yaw: number, half = 40): { pieces: number; meanDist: number; skyShare: number; nearest: number; spread: number } {
   const [nx, ny, nz] = c.grid;
   const seen = new Set<number>();
   let total = 0;
   let n = 0;
   let sky = 0;
   let nearest = 99;
-  for (let dyaw = -40; dyaw <= 40; dyaw += 8)
+  const dists: number[] = [];
+  for (let dyaw = -half; dyaw <= half; dyaw += half / 5)
     for (const pitch of [-6, 0, 6]) {
       const a = yaw + (dyaw * Math.PI) / 180;
       const p = (pitch * Math.PI) / 180;
       const d: Vec3 = [Math.cos(a) * Math.cos(p), Math.sin(a) * Math.cos(p), Math.sin(p)];
       let t = 1;
       let hit = false;
-      for (; t < 90; t += 1) {
+      let entered = false;
+      for (; t < 110; t += 1) {
         const x = Math.floor((from[0] + d[0] * t - c.origin[0]) / c.cell);
         const y = Math.floor((from[1] + d[1] * t - c.origin[1]) / c.cell);
         const z = Math.floor((from[2] + d[2] * t - c.origin[2]) / c.cell);
         if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) {
+          // a camera outside the box: the rays have not arrived yet, so only count sky once they have been in and left
+          if (!entered) continue;
           sky++;
           break;
         }
+        entered = true;
         const i = (x * ny + y) * nz + z;
         if (c.mask[i] === 1 && c.void[i] === 0) {
           seen.add(c.owner[i]);
@@ -272,9 +277,12 @@ function whatIsSeen(c: Composite, from: Vec3, yaw: number): { pieces: number; me
       }
       if (hit && t < nearest) nearest = t;
       total += t;
+      dists.push(t);
       n++;
     }
-  return { pieces: seen.size, meanDist: total / n, skyShare: sky / n, nearest };
+  const mean = total / n;
+  const spread = Math.sqrt(dists.reduce((a, b) => a + (b - mean) ** 2, 0) / n);
+  return { pieces: seen.size, meanDist: mean, skyShare: sky / n, nearest, spread };
 }
 
 /**
@@ -290,33 +298,49 @@ export function findViews(
   const { counts } = opts;
   if (counts.exterior > 0) out.push(...findNiceViews(boxes, { comp: null, route: null, entrance: opts.entrance, exteriorCount: counts.exterior }).filter((v) => v.kind === "exterior").slice(0, counts.exterior));
 
-  if (counts.closeups > 0) {
-    const sides = opts.exposed.filter((e) => FACE_NORMAL[e.face]).sort((a, b) => b.patch.cells - a.patch.cells);
-    const chosen: typeof sides = [];
-    for (const e of sides) {
-      if (chosen.length >= counts.closeups) break;
-      if (chosen.some((c) => Math.hypot(c.point[0] - e.point[0], c.point[1] - e.point[1], c.point[2] - e.point[2]) < 18)) continue;
-      chosen.push(e);
-    }
-    chosen.forEach((e, i) => {
+  if (counts.closeups > 0 && opts.comp) {
+    // a close-up looks through a small opening in the outside wall into the space behind it: from a little way out, along the opening, so the frame shows the window's edge and the room beyond
+    const comp = opts.comp;
+    const options: { e: (typeof opts.exposed)[number]; pos: Vec3; target: Vec3; score: number }[] = [];
+    for (const e of opts.exposed) {
       const nrm = FACE_NORMAL[e.face];
-      const side: Vec3 = nrm[2] ? [1, 0, 0] : [-nrm[1], nrm[0], 0]; // a little to one side, so it is not square on
-      const pos: Vec3 = [e.point[0] + nrm[0] * 22 + side[0] * 7, e.point[1] + nrm[1] * 22 + side[1] * 7, e.point[2] + nrm[2] * 22 + (nrm[2] ? 0 : 4)];
-      out.push({ id: `close-${i}`, label: `Close-up at a ${FACE_WORD[e.face]} opening${opts.nameOf ? ` of ${opts.nameOf(e.pieceId)}` : ""}`, kind: "exterior", pose: { pos, target: e.point, fov: 50 }, score: e.patch.cells });
-    });
+      if (!nrm || nrm[2]) continue;
+      const side: Vec3 = [-nrm[1], nrm[0], 0];
+      let best: (typeof options)[number] | null = null;
+      for (const off of [-3, 0, 3])
+        for (const out of [5, 8]) {
+          const pos: Vec3 = [e.point[0] + nrm[0] * out + side[0] * off, e.point[1] + nrm[1] * out + side[1] * off, e.point[2] + 0.5];
+          const yaw = Math.atan2(e.point[1] - nrm[1] * 20 - pos[1], e.point[0] - nrm[0] * 20 - pos[0]);
+          const s = whatIsSeen(comp, pos, yaw, 18);
+          // the long view through the opening, over how far the window itself is: a deep room behind a small hole
+          const depth = Math.min(60, s.meanDist - out);
+          const score = depth + s.pieces * 3 + s.spread * 0.5 - s.skyShare * 20 - (s.nearest < out + 1 ? 6 : 0);
+          if (!best || score > best.score) best = { e, pos, target: [e.point[0] - nrm[0] * 20, e.point[1] - nrm[1] * 20, e.point[2] - 0.3], score };
+        }
+      if (best) options.push(best);
+    }
+    options.sort((a, b) => b.score - a.score);
+    const chosen: typeof options = [];
+    for (const o of options) {
+      if (chosen.length >= counts.closeups) break;
+      if (chosen.some((c) => Math.hypot(c.pos[0] - o.pos[0], c.pos[1] - o.pos[1], c.pos[2] - o.pos[2]) < 14)) continue;
+      chosen.push(o);
+    }
+    chosen.forEach((o, i) => out.push({ id: `close-${i}`, label: `Through the ${FACE_WORD[o.e.face]} opening of ${opts.nameOf ? opts.nameOf(o.e.pieceId) : "a block"}`, kind: "exterior", pose: { pos: o.pos, target: o.target, fov: 62 }, score: o.score }));
   }
 
   if (counts.interior > 0 && opts.comp && opts.path && opts.path.length > 4) {
     const cands: { pos: Vec3; yaw: number; score: number }[] = [];
-    const step = Math.max(1, Math.round(opts.path.length / 60));
+    const step = Math.max(1, Math.round(opts.path.length / 90));
     for (let i = 0; i < opts.path.length; i += step) {
       const pos = opts.path[i];
+      if (!isOpen(opts.comp, pos)) continue; // only from inside a space (the flight's way in and out are outdoors)
       let best: { yaw: number; score: number } | null = null;
-      for (let k = 0; k < 16; k++) {
-        const yaw = (k * Math.PI * 2) / 16;
+      for (let k = 0; k < 24; k++) {
+        const yaw = (k * Math.PI * 2) / 24;
         const s = whatIsSeen(opts.comp, pos, yaw);
-        // many different blocks in view, a long view, little sky, nothing pressed against the lens
-        const score = s.pieces * 4 + Math.min(40, s.meanDist) / 10 - s.skyShare * 5 - (s.nearest < 3 ? 3 : 0);
+        // a big open view: many different blocks in it, near and far layers (depth), openings letting the far light through, nothing pressed against the lens
+        const score = s.pieces * 4 + Math.min(40, s.meanDist) / 5 + Math.min(18, s.spread) / 2 + Math.min(0.35, s.skyShare) * 8 - (s.nearest < 4 ? 8 : 0) - (s.meanDist < 10 ? 8 : 0);
         if (!best || score > best.score) best = { yaw, score };
       }
       if (best) cands.push({ pos, ...best });
@@ -325,7 +349,7 @@ export function findViews(
     const picked: typeof cands = [];
     for (const c of cands) {
       if (picked.length >= counts.interior) break;
-      if (picked.some((p) => Math.hypot(p.pos[0] - c.pos[0], p.pos[1] - c.pos[1], p.pos[2] - c.pos[2]) < 16 && Math.abs(Math.atan2(Math.sin(p.yaw - c.yaw), Math.cos(p.yaw - c.yaw))) < 0.7)) continue;
+      if (picked.some((p) => Math.hypot(p.pos[0] - c.pos[0], p.pos[1] - c.pos[1], p.pos[2] - c.pos[2]) < 14)) continue;
       picked.push(c);
     }
     picked.forEach((c, i) => {

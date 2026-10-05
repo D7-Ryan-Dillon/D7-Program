@@ -27,8 +27,8 @@ export interface DronePlan {
   visited: string[];
   /** piece ids it could not reach with enough room */
   skipped: string[];
-  /** the camera at t in 0..1 of the film */
-  pose(t: number): DronePose;
+  /** the camera at t in 0..1 of the film; `seconds` is the film's length (it sets how long the opening turn takes) */
+  pose(t: number, seconds?: number): DronePose;
 }
 
 const OUTSIDE_COST = 6; // open air outside the building is this many times dearer than a way through the voids
@@ -454,6 +454,8 @@ export interface DroneOptions {
   highlights?: number;
   /** begin outside and fly in through the entrance (default true) */
   approach?: boolean;
+  /** an edited tour: exactly these spaces, in this order (nothing added, nothing dropped) */
+  only?: string[];
 }
 
 /** Plans the tour. Null when there is nothing to fly through. */
@@ -535,9 +537,15 @@ export function planDrone(comp: Composite, opts: DroneOptions): DronePlan | null
     at = centre(next);
   }
 
+  if (opts.only) {
+    ordered.length = 0;
+    ordered.push(...opts.only.filter((id) => spots.has(id)));
+    if (!ordered.length) return null;
+  }
+
   // a short tour keeps only the highlights: the way in, then the spaces with the most to show (room, height), in route order
   const upper = new Set<string>(ordered);
-  if (opts.highlights && opts.highlights < ordered.length) {
+  if (!opts.only && opts.highlights && opts.highlights < ordered.length) {
     const headroom = (id: string) => {
       const [x, y, z0] = spots.get(id)!.main;
       let z = z0;
@@ -628,12 +636,40 @@ export function planDrone(comp: Composite, opts: DroneOptions): DronePlan | null
     candidates.push({
       score: frac - 1.6 * outShare + 0.04 * r,
       build: () => {
-        const raw = cells.map((c) => centerOf(g, ...c));
+        // the way out: from the last space to the nearest opening to the outside and on to the edge of the free air
+        let exitCells: [number, number, number][] = [];
+        let exitLen = Infinity;
+        for (const d of [[1, 0], [-1, 0], [0, 1], [0, -1]] as [number, number][]) {
+          const last = cur.cell;
+          const goal: [number, number, number] = [d[0] > 0 ? g.nx - 2 : d[0] < 0 ? 1 : last[0], d[1] > 0 ? g.ny - 2 : d[1] < 0 ? 1 : last[1], last[2]];
+          const leg = search(g, last, goal, r, used, 2);
+          if (!leg) continue;
+          let L = 0;
+          for (let q = 1; q < leg.length; q++) L += Math.hypot(leg[q][0] - leg[q - 1][0], leg[q][1] - leg[q - 1][1], leg[q][2] - leg[q - 1][2]);
+          if (L < exitLen) {
+            exitLen = L;
+            exitCells = leg;
+          }
+        }
+        const raw = [...cells, ...exitCells.slice(1)].map((c) => centerOf(g, ...c));
         const { path: dense, glances } = dropSpurs(g, r, resample(raw, 1));
         // the smoothed path has to clear the foam in the fine voxels too (the coarse cells can hide a corner); stricter smoothing, then the plain cell centres, are the fallbacks
         const tries = [resample(relax(g, dense, r), 0.5), resample(relax(g, dense, r, 1.5), 0.5), resample(dense, 0.5)];
         const smooth = tries.find((t) => pathClear(comp, t)) ?? tries[tries.length - 1];
-        return finish(g, smooth, r, visited, ordered.filter((id) => !visited.includes(id)), fov, !!start, glances);
+        // and straight on out, into nothing: the film ends in empty black
+        const tail = smooth.slice(-Math.min(smooth.length, 24));
+        let ex = tail[tail.length - 1][0] - tail[0][0];
+        let ey = tail[tail.length - 1][1] - tail[0][1];
+        let ez = Math.max(0, tail[tail.length - 1][2] - tail[0][2]);
+        const el = Math.hypot(ex, ey, ez) || 1;
+        ex /= el;
+        ey /= el;
+        ez /= el;
+        const end = smooth[smooth.length - 1];
+        const extFrom = smooth.length;
+        const full = smooth.slice();
+        for (let q = 1; q <= 140; q++) full.push([end[0] + ex * q * 0.5, end[1] + ey * q * 0.5, end[2] + ez * q * 0.5]);
+        return finish(g, full, r, visited, ordered.filter((id) => !visited.includes(id)), fov, !!start, glances, extFrom);
       },
     });
     if (frac >= 0.99 && outShare < 0.08) break;
@@ -642,7 +678,7 @@ export function planDrone(comp: Composite, opts: DroneOptions): DronePlan | null
   return candidates.length ? candidates[0].build() : null;
 }
 
-function finish(g: Grid, path: Vec3[], r: number, visited: string[], skipped: string[], fov: number, hasIntro: boolean, glances: Glance[] = []): DronePlan {
+function finish(g: Grid, path: Vec3[], r: number, visited: string[], skipped: string[], fov: number, hasIntro: boolean, glances: Glance[] = [], extFrom = Infinity): DronePlan {
   const n = path.length;
   // arc length at each sample
   const arc = [0];
@@ -722,10 +758,23 @@ function finish(g: Grid, path: Vec3[], r: number, visited: string[], skipped: st
     return Math.min(0.9, turn * 0.5 + vert * 0.6 + tall + 0.5 * glance[i]);
   });
   const cum = [0];
-  for (let i = 1; i < n; i++) cum.push(cum[i - 1] + (arc[i] - arc[i - 1]) * (1 + slow[i]));
+  for (let i = 1; i < n; i++) cum.push(cum[i - 1] + (arc[i] - arc[i - 1]) * (i >= extFrom ? 0.55 : 1 + slow[i]));
   const T = cum[n - 1];
 
-  const pose = (t: number): DronePose => {
+  const pose = (t: number, seconds = 30): DronePose => {
+    // the opening turn: parked outside facing away from the building (nothing but black), it swings round to the entrance, then the tour starts
+    const spin = hasIntro ? Math.min(0.2, 2.8 / Math.max(4, seconds)) : 0;
+    if (spin > 0 && t < spin) {
+      const k = Math.max(0, t / spin);
+      const e = k * k * (3 - 2 * k);
+      const from = yawS[0] + Math.PI;
+      const yy = from + (yawS[0] - from) * e;
+      const pp = pitchS[0] * e;
+      const pos0 = path[0];
+      const dir0: Vec3 = [Math.cos(pp) * Math.cos(yy), Math.cos(pp) * Math.sin(yy), Math.sin(pp)];
+      return { pos: pos0, target: [pos0[0] + dir0[0] * 10, pos0[1] + dir0[1] * 10, pos0[2] + dir0[2] * 10], fov, roll: 0 };
+    }
+    t = spin > 0 ? (t - spin) / (1 - spin) : t;
     const u = Math.max(0, Math.min(1, t));
     // a gentle ease at both ends, near-constant between
     const e = u * u * (3 - 2 * u) * 0.35 + u * 0.65;

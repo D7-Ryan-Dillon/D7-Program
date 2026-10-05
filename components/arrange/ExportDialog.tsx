@@ -4,7 +4,7 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import JSZip from "jszip";
 import { toast } from "sonner";
 import * as THREE from "three";
-import { Loader2, Play, Square } from "lucide-react";
+import { ArrowDown, ArrowUp, Loader2, Pencil, Play, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
@@ -30,9 +30,10 @@ import { glbToFt, pieceMatrix } from "@/lib/arrange/placement";
 import { fineGeometry, QUALITY_CHOICES, refineByTileId, type Quality } from "@/lib/fineGeometry";
 import { buildRhinoZip } from "@/lib/arrange/exportRhino";
 import { buildReport } from "@/lib/arrange/report";
-import { applyTourLook, buildUpHooks, capturePosePng, createPoseAnimation, loopFade, toScene, type PoseFt } from "@/lib/arrange/capture";
+import { applyTourLook, buildUpHooks, capturePosePng, createPoseAnimation, toScene, type PoseFt } from "@/lib/arrange/capture";
 import { findViews } from "@/lib/arrange/views";
 import type { Vec3 } from "@/lib/arrange/types";
+import { toFt, type PlacedBox } from "@/lib/arrange/geometry";
 import { planDrone, type DronePlan } from "@/lib/arrange/drone";
 import { namesFor } from "@/lib/arrange/whole";
 import { CATEGORY_LABEL } from "@/lib/arrange/types";
@@ -48,6 +49,23 @@ interface Out {
 
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_.+-]+/g, "_") || "arrangement";
 const text = (s: string, type = "text/plain") => new Blob([s], { type });
+
+/** The order blocks are placed in a build-up: the entrance block first, then always one that touches a block already down (route order, then low to high). */
+function growOrder(boxes: PlacedBox[], sequence: string[]): string[] {
+  const rank = new Map(sequence.map((id, i) => [id, i]));
+  const left = [...boxes];
+  const first = left.findIndex((b) => b.piece.id === sequence[0]);
+  const done: PlacedBox[] = [];
+  done.push(...left.splice(first >= 0 ? first : 0, 1));
+  const touches = (a: PlacedBox, b: PlacedBox) => a.min[0] <= b.max[0] + 1 && b.min[0] <= a.max[0] + 1 && a.min[1] <= b.max[1] + 1 && b.min[1] <= a.max[1] + 1 && a.min[2] <= b.max[2] + 1 && b.min[2] <= a.max[2] + 1;
+  while (left.length) {
+    const cand = left.map((b, i) => ({ b, i })).filter((x) => done.some((d) => touches(d, x.b)));
+    const pool = cand.length ? cand : left.map((b, i) => ({ b, i }));
+    pool.sort((p, q) => (rank.get(p.b.piece.id) ?? 999) - (rank.get(q.b.piece.id) ?? 999) || p.b.min[2] - q.b.min[2]);
+    done.push(...left.splice(pool[0].i, 1));
+  }
+  return done.map((b) => b.piece.id);
+}
 
 /** Turns the camera about the vertical axis through its target. */
 function orbitPose(base: PoseFt, deg: number, closer = 1): PoseFt {
@@ -73,6 +91,31 @@ function Row({ id, label, hint, on, set, children, disabled }: { id: string; lab
   );
 }
 
+/** Size of a board: width and height each on their own, or the height following the content; the layout inside works itself out to fit. */
+const BOARD_SIZES = [
+  { w: 3300, h: 2550, label: "Letter landscape, 300 dpi · 3300 × 2550" },
+  { w: 5100, h: 3300, label: "Tabloid landscape, 300 dpi · 5100 × 3300" },
+  { w: 3600, h: 2400, label: "36 × 24 in, 100 dpi · 3600 × 2400" },
+  { w: 2400, h: 3600, label: "24 × 36 in portrait, 100 dpi · 2400 × 3600" },
+  { w: 3370, h: 2384, label: "A1 landscape, 100 dpi · 3370 × 2384" },
+  { w: 2384, h: 3370, label: "A1 portrait, 100 dpi · 2384 × 3370" },
+  { w: 4768, h: 3370, label: "A0 landscape, 100 dpi · 4768 × 3370" },
+  { w: 1654, h: 1169, label: "A4 landscape, 200 dpi · 1654 × 1169" },
+  { w: 1169, h: 1654, label: "A4 portrait, 200 dpi · 1169 × 1654" },
+  { w: 3000, h: 3000, label: "Square · 3000 × 3000" },
+];
+function BoardSize({ width, height, autoH, onChange }: { width: number; height: number; autoH: boolean; onChange: (w: number, h: number, autoH: boolean) => void }) {
+  return (
+    <div className="space-y-1.5">
+      <SizeFields width={width} height={height} presets={BOARD_SIZES} min={400} max={12000} onChange={(w, h) => onChange(w, h, false)} />
+      <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+        <Switch checked={autoH} onCheckedChange={(v) => onChange(width, height, v)} />
+        Height follows the content{autoH ? " (the width is set, the height is worked out)" : " (off: the layout fills exactly this width × height)"}
+      </label>
+    </div>
+  );
+}
+
 const Heading = ({ children }: { children: ReactNode }) => <div className="pt-2 font-mono text-[10px] uppercase tracking-label text-muted-foreground">{children}</div>;
 
 /** One window for everything the arrangement can become. Tick what you want, press Export: one file, or one zip when there are several. */
@@ -82,14 +125,16 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
   const [stl, setStl] = useState({ ratio: "120", merge: false, parts: { foam: true, void: false, plates: false, struts: false } as Record<StlPart, boolean> });
   const [palette] = usePalette();
   const [plans, setPlans] = useState<"board" | "png" | "svg">("board");
-  const [board, setBoard] = useState({ width: 3300, columns: 3, labels: true });
+  const [board, setBoard] = useState({ width: 3300, height: 2400, autoH: true, columns: 0, labels: true });
   const [views, setViews] = useState({ w: 1920, h: 1080, exterior: 3, closeups: 3, interior: 4, clear: false });
   const [pic, setPic] = useState({ w: 1920, h: 1080, clear: false });
   const [plansCfg, setPlansCfg] = useState({ dpi: 150, ftPerIn: 10 });
-  const [rep, setRep] = useState({ scale: 1 });
+  const [rep, setRep] = useState({ width: 1654, height: 1169, autoH: true });
   const [drone, setDrone] = useState({ kind: "full" as "full" | "highlights", spaces: 4, approach: true, seconds: 0, fps: 24, width: 1280, height: 720, fov: 78, format: "mp4" as "mp4" | "gif" });
   const [build, setBuild] = useState({ style: "place" as "place" | "turn", seconds: 20, fps: 20, width: 1280, height: 720, format: "mp4" as "mp4" | "gif" });
   const [quality, setQuality] = useState<Quality>(3);
+  /** an edited tour: the spaces to visit, in order (null = the automatic tour) */
+  const [stops, setStops] = useState<string[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(null);
   const [note, setNote] = useState<string[]>([]);
@@ -123,14 +168,14 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
   const getPlan = async (): Promise<DronePlan> => {
     const comp = A.whole.comp;
     if (!comp) throw new Error("The building is still being read: try again in a moment.");
-    const key = [comp, A.entrance, A.sequence.steps.map((s) => s.pieceId).join(), drone.fov, drone.kind, drone.spaces, drone.approach];
+    const key = [comp, A.entrance, A.sequence.steps.map((s) => s.pieceId).join(), drone.fov, drone.kind, drone.spaces, drone.approach, stops?.join("|") ?? ""];
     const c = planCache.current;
     if (c && (c.key as unknown[]).every((v, i) => v === key[i])) {
       if (c.plan) return c.plan;
       throw new Error("There is no way through this arrangement wide enough for the drone.");
     }
     await new Promise((r) => setTimeout(r, 20));
-    const plan = planDrone(comp, { order: A.sequence.steps.map((s) => s.pieceId), entrance: A.entrance, fov: drone.fov, highlights: drone.kind === "highlights" ? drone.spaces : undefined, approach: drone.approach });
+    const plan = planDrone(comp, { order: A.sequence.steps.map((s) => s.pieceId), entrance: A.entrance, fov: drone.fov, highlights: drone.kind === "highlights" ? drone.spaces : undefined, approach: drone.approach, only: stops ?? undefined });
     planCache.current = { key, plan };
     if (!plan) throw new Error("There is no way through this arrangement wide enough for the drone.");
     return plan;
@@ -182,25 +227,42 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
         source = createPoseAnimation(
           h,
           (i, n) => {
-            const p = flight!.pose(i / Math.max(1, n - 1));
+            const p = flight!.pose(i / Math.max(1, n - 1), seconds);
             light.position.copy(toScene(p.pos));
             return p;
           },
           frames,
           { width, height, background: "#000000" },
-          // starts and ends on black, so the film loops without a visible join
-          { fade: loopFade(cfg.fps) },
         );
       } else {
         const base = A.viewportApi.current?.getPose();
         if (!base) throw new Error("The viewport isn't ready yet.");
         const order = A.sequence.steps.map((s) => s.pieceId).concat(A.layout.boxes.map((b) => b.piece.id).filter((id) => !A.sequence.steps.some((s) => s.pieceId === id)));
-        // low pieces first, so the building rises; the route order breaks ties
-        const at = new Map(A.sequence.steps.map((st, i) => [st.pieceId, i]));
-        const lowFirst = [...A.layout.boxes].sort((a, b) => a.min[2] - b.min[2] || (at.get(a.piece.id) ?? 99) - (at.get(b.piece.id) ?? 99)).map((b) => b.piece.id);
-        const placing = build.style === "place" ? buildUpHooks(snap.scene, lowFirst) : null;
+        // grows outward from the entrance block: each new block is one that touches the blocks already standing
+        const grown = growOrder(A.layout.boxes, A.sequence.steps.map((st) => st.pieceId));
+        const boxFt: Record<string, { min: Vec3; max: Vec3 }> = {};
+        for (const b of A.layout.boxes) boxFt[b.piece.id] = { min: [toFt(b.min[0]), toFt(b.min[1]), toFt(b.min[2])], max: [toFt(b.max[0]), toFt(b.max[1]), toFt(b.max[2])] };
+        const placing = build.style === "place" ? buildUpHooks(snap.scene, grown, boxFt) : null;
         if (placing) {
-          source = createPoseAnimation(h, (i, n) => orbitPose(base, (75 * i) / Math.max(1, n - 1), 0.78), frames, { width, height, background: "#000000" }, { before: (i) => placing.before(i, frames), after: placing.after });
+          const dir0 = [base.pos[0] - base.target[0], base.pos[1] - base.target[1], base.pos[2] - base.target[2]];
+          const flat = Math.hypot(dir0[0], dir0[1]) || 1;
+          const elev = Math.atan2(Math.max(dir0[2], flat * 0.25), flat);
+          const az0 = Math.atan2(dir0[1], dir0[0]);
+          const half = Math.atan(Math.tan((base.fov * Math.PI) / 360) * Math.min(1, width / height));
+          source = createPoseAnimation(
+            h,
+            (i, n) => {
+              const t = i / Math.max(1, n - 1);
+              const ext = placing.extent(t) ?? { center: base.target, radius: 10 };
+              const az = az0 + (50 * Math.PI) / 180 * t;
+              const dist = (ext.radius / Math.sin(half)) * 1.08;
+              const pos: Vec3 = [ext.center[0] + Math.cos(az) * Math.cos(elev) * dist, ext.center[1] + Math.sin(az) * Math.cos(elev) * dist, ext.center[2] + Math.sin(elev) * dist];
+              return { pos, target: ext.center, fov: base.fov };
+            },
+            frames,
+            { width, height, background: "#000000" },
+            { before: (i) => placing.before(i, frames), after: placing.after },
+          );
         } else {
           const names = order.map((id) => `piece-${id}`);
           const hide = (visibleCount: number) =>
@@ -296,7 +358,7 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
           const w = A.whole.summary;
           const info: [string, string][] = [["Pieces", String(A.layout.boxes.length)]];
           if (w) info.push(["Floor levels", String(w.levels)], ["Height · footprint", `${w.heightFt.toFixed(0)} ft · ${w.footprintFt[0].toFixed(0)} × ${w.footprintFt[1].toFixed(0)} ft`], ["Longest route", w.mainRouteFt === null ? "none" : `${w.mainRouteFt.toFixed(0)} ft`], ["Rooms", String(w.rooms)], ["Void share", `${Math.round(w.voidShare * 100)}%`], ["Floor in daylight", `${Math.round(w.litFloor * 100)}%`]);
-          const blob = await buildDrawingBoard(tile, { title: A.ui.currentName, info, palette, widthPx: board.width, columns: board.columns, labels: board.labels });
+          const blob = await buildDrawingBoard(tile, { title: A.ui.currentName, info, palette, widthPx: board.width, heightPx: board.autoH ? 0 : board.height, columns: board.columns, labels: board.labels });
           if (!blob) throw new Error("There are no plans or sections to draw for this arrangement.");
           out.push({ name: `${name}_plans_and_sections.png`, blob });
         } else {
@@ -315,9 +377,10 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
         return out;
       }
             case "report": {
-        const picture = h && pose ? await capturePosePng(h, pose, { width: Math.round(1520 * rep.scale), height: Math.round(940 * rep.scale), background: "#000000" }) : null;
+        const pw = Math.min(3600, Math.max(600, Math.round(rep.width * 0.5)));
+        const picture = h && pose ? await capturePosePng(h, pose, { width: pw, height: Math.round(pw * 0.62), background: "#000000" }) : null;
         const seq = A.sequence.steps.map((s) => ({ name: A.nameOf(s.pieceId), category: CATEGORY_LABEL[categoryOf(A.layout.byId.get(s.pieceId)!.tile)], score: s.joint?.score ?? null }));
-        return [{ name: `${name}_report.png`, blob: await buildReport({ scale: rep.scale, title: A.ui.currentName, picture, summary: A.whole.summary, sequence: seq, joints: A.joints, warnings: A.warnings, names: A.nameOf, palette }) }];
+        return [{ name: `${name}_report.png`, blob: await buildReport({ widthPx: rep.width, heightPx: rep.autoH ? undefined : rep.height, title: A.ui.currentName, picture, summary: A.whole.summary, sequence: seq, joints: A.joints, warnings: A.warnings, names: A.nameOf, palette }) }];
       }
       case "png": {
         if (!h || !pose) throw new Error("The viewport isn't ready yet.");
@@ -457,31 +520,25 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
               <option value="svg">Separate SVGs (vector, white paper)</option>
             </Select>
             {plans === "board" && (
-              <div className="grid grid-cols-3 items-end gap-2">
-                <label className="space-y-0.5 text-[10px] text-muted-foreground">
-                  Board width
-                  <Select className="h-7 text-[11px]" value={String(board.width)} onChange={(e) => setBoard((b) => ({ ...b, width: Number(e.target.value) }))} aria-label="Board width">
-                    {[2400, 3300, 4800, 6600].map((v) => (
-                      <option key={v} value={String(v)}>
-                        {v} px
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-                <label className="space-y-0.5 text-[10px] text-muted-foreground">
-                  Drawings per row
-                  <Select className="h-7 text-[11px]" value={String(board.columns)} onChange={(e) => setBoard((b) => ({ ...b, columns: Number(e.target.value) }))} aria-label="Drawings per row">
-                    {[2, 3, 4, 5].map((v) => (
-                      <option key={v} value={String(v)}>
-                        {v}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-                <label className="flex items-center gap-1.5 pb-1 text-[10px] text-muted-foreground">
-                  <Switch checked={board.labels} onCheckedChange={(v) => setBoard((b) => ({ ...b, labels: v }))} />
-                  Room labels
-                </label>
+              <div className="space-y-2">
+                <BoardSize width={board.width} height={board.height} autoH={board.autoH} onChange={(w, h, auto) => setBoard((b) => ({ ...b, width: w, height: h, autoH: auto }))} />
+                <div className="grid grid-cols-2 items-end gap-2">
+                  <label className="space-y-0.5 text-[10px] text-muted-foreground">
+                    Drawings per row
+                    <Select className="h-7 text-[11px]" value={String(board.columns)} onChange={(e) => setBoard((b) => ({ ...b, columns: Number(e.target.value) }))} aria-label="Drawings per row">
+                      <option value="0">Automatic (fits the board)</option>
+                      {[1, 2, 3, 4, 5, 6].map((v) => (
+                        <option key={v} value={String(v)}>
+                          {v}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="flex items-center gap-1.5 pb-1 text-[10px] text-muted-foreground">
+                    <Switch checked={board.labels} onCheckedChange={(v) => setBoard((b) => ({ ...b, labels: v }))} />
+                    Room labels
+                  </label>
+                </div>
               </div>
             )}
             {plans === "png" && (
@@ -510,14 +567,7 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
             )}
           </Row>
           <Row id="x-report" label="One-page report" hint="picture, numbers, every space and every warning, as one PNG" on={sel.report} set={toggle("report")}>
-            <label className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-              Resolution
-              <Select className="h-7 w-44 text-[11px]" value={String(rep.scale)} onChange={(e) => setRep({ scale: Number(e.target.value) })} aria-label="Report resolution">
-                <option value="1">1× (1654 px wide)</option>
-                <option value="2">2× (3308 px wide)</option>
-                <option value="3">3× (4962 px wide)</option>
-              </Select>
-            </label>
+            <BoardSize width={rep.width} height={rep.height} autoH={rep.autoH} onChange={(w, h, auto) => setRep({ width: w, height: h, autoH: auto })} />
           </Row>
           <details className="rounded-md border-hair px-3 py-2">
             <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Colours of the report and the drawings</summary>
@@ -628,6 +678,66 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
                   />
                   Start outside
                 </label>
+              </div>
+            )}
+            {stops ? (
+              <div className="space-y-1 rounded-md border-hair p-2">
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>Your route: the tour goes to these spaces in this order, then out.</span>
+                  <Button size="sm" variant="ghost" className="h-6 px-2 text-[10px]" onClick={() => { setPlan(null); setStops(null); }}>
+                    Back to automatic
+                  </Button>
+                </div>
+                {stops.map((id, i) => (
+                  <div key={id} className="flex items-center gap-1 text-[11px]">
+                    <span className="w-4 text-right font-mono text-[10px] text-muted-foreground">{i + 1}</span>
+                    <span className="min-w-0 flex-1 truncate">{A.nameOf(id)}</span>
+                    <Button size="icon" variant="ghost" className="h-6 w-6" disabled={i === 0} aria-label="Earlier" onClick={() => { setPlan(null); setStops((s) => { const n = [...s!]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; }); }}>
+                      <ArrowUp className="h-3 w-3" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-6 w-6" disabled={i === stops.length - 1} aria-label="Later" onClick={() => { setPlan(null); setStops((s) => { const n = [...s!]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; return n; }); }}>
+                      <ArrowDown className="h-3 w-3" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-6 w-6" disabled={stops.length <= 1} aria-label="Leave out" onClick={() => { setPlan(null); setStops((s) => s!.filter((x) => x !== id)); }}>
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+                {A.layout.boxes.some((b) => !stops.includes(b.piece.id)) && (
+                  <Select className="h-7 text-[11px]" value="" aria-label="Add a space" onChange={(e) => { if (e.target.value) { setPlan(null); setStops((s) => [...s!, e.target.value]); } }}>
+                    <option value="">Add a space to the route…</option>
+                    {A.layout.boxes.filter((b) => !stops.includes(b.piece.id)).map((b) => (
+                      <option key={b.piece.id} value={b.piece.id}>
+                        {A.nameOf(b.piece.id)}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                <span>Planned automatically. Edit it to choose the spaces and their order.</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 shrink-0"
+                  disabled={busy !== null || none || !A.whole.comp}
+                  onClick={async () => {
+                    setBusy("plan");
+                    try {
+                      const p = await getPlan();
+                      setPlan(p);
+                      setStops(p.visited.length ? p.visited : A.sequence.steps.map((s) => s.pieceId));
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : "Couldn't plan the tour.");
+                    } finally {
+                      setBusy(null);
+                    }
+                  }}
+                >
+                  <Pencil className="mr-1 h-3 w-3" />
+                  Edit route
+                </Button>
               </div>
             )}
             <div className="grid grid-cols-2 gap-2">

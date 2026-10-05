@@ -12,9 +12,11 @@ export interface DrawingBoardOptions {
   /** key numbers shown beside the title, as [label, value] */
   info: [string, string][];
   palette: Palette;
-  /** board width in pixels (the height follows the content) */
+  /** board width in pixels */
   widthPx: number;
-  /** drawings per row */
+  /** board height in pixels; 0 or left out = as tall as the content needs. With a height the drawings are arranged (columns and one common scale) to fill the board */
+  heightPx?: number;
+  /** drawings per row; 0 = work it out from the board's shape */
   columns: number;
   /** room labels on the plans */
   labels: boolean;
@@ -47,35 +49,66 @@ export async function buildDrawingBoard(tile: ParsedTile, o: DrawingBoardOptions
   if (!plans.length && !sections.length) return null;
   const P = o.palette;
   const style = paletteStyle(P);
-  const W = Math.max(1200, o.widthPx);
-  const k = W / 3300; // everything is laid out for 3300 px and scaled with the board
+  const W = Math.max(600, Math.round(o.widthPx));
+  const fixedH = o.heightPx && o.heightPx > 0 ? Math.max(400, Math.round(o.heightPx)) : 0;
+  // everything is laid out for 3300 px and scaled with the board (a short board also shrinks the header, so it keeps its share)
+  const k = fixedH ? Math.min(W / 3300, fixedH / 2300) : W / 3300;
   const M = 90 * k;
   const gap = 36 * k;
-  const cols = Math.max(1, Math.min(6, Math.round(o.columns)));
-  const cellW = (W - 2 * M - (cols - 1) * gap) / cols;
-  // one scale for every drawing: the widest drawing fills its cell
   const all = [...plans, ...sections];
   const widest = Math.max(...all.map((d) => drawingSize(d, { pxPerFt: 1, ruler: true, caption: false }).width));
-  const s = cellW / widest;
   const captionH = 96 * k;
-
-  type Row = { drawings: Drawing[]; h: number };
-  const rowsOf = (list: Drawing[]): Row[] => {
-    const rows: Row[] = [];
-    for (let i = 0; i < list.length; i += cols) {
-      const drawings = list.slice(i, i + cols);
-      rows.push({ drawings, h: Math.max(...drawings.map((d) => drawingSize(d, { pxPerFt: s, ruler: true, caption: false }).height)) + captionH });
-    }
-    return rows;
-  };
-  const planRows = rowsOf(plans);
-  const sectionRows = rowsOf(sections);
   const headerH = 330 * k;
   const bandH = 90 * k;
-  const H = Math.ceil(headerH + (plans.length ? bandH + planRows.reduce((a, r) => a + r.h + gap, 0) : 0) + (sections.length ? bandH + sectionRows.reduce((a, r) => a + r.h + gap, 0) : 0) + M);
+  type Row = { drawings: Drawing[]; h: number };
+  type Layout = { cols: number; cellW: number; s: number; planRows: Row[]; sectionRows: Row[]; H: number };
+  // one scale for every drawing: the widest drawing fills its cell (times f when the board has to be squeezed to a height)
+  const layout = (cols: number, f: number): Layout => {
+    const cellW = (W - 2 * M - (cols - 1) * gap) / cols;
+    const s = (cellW / widest) * f;
+    const rowsOf = (list: Drawing[]): Row[] => {
+      const rows: Row[] = [];
+      for (let i = 0; i < list.length; i += cols) {
+        const drawings = list.slice(i, i + cols);
+        rows.push({ drawings, h: Math.max(...drawings.map((d) => drawingSize(d, { pxPerFt: s, ruler: true, caption: false }).height)) + captionH });
+      }
+      return rows;
+    };
+    const planRows = rowsOf(plans);
+    const sectionRows = rowsOf(sections);
+    const H = Math.ceil(headerH + (plans.length ? bandH + planRows.reduce((a, r) => a + r.h + gap, 0) : 0) + (sections.length ? bandH + sectionRows.reduce((a, r) => a + r.h + gap, 0) : 0) + M);
+    return { cols, cellW, s, planRows, sectionRows, H };
+  };
+  let lay: Layout;
+  if (!fixedH) {
+    lay = layout(Math.max(1, Math.min(6, Math.round(o.columns || 3))), 1);
+  } else {
+    // the board has a height: for each number of columns, shrink the drawings just enough to fit it, and keep the layout that leaves the drawings largest
+    let best: Layout | null = null;
+    const tryCols = o.columns ? [Math.max(1, Math.min(6, Math.round(o.columns)))] : [1, 2, 3, 4, 5, 6];
+    for (const cols of tryCols) {
+      let lo = 0.1;
+      let hi = 1;
+      if (layout(cols, hi).H <= fixedH) lo = hi;
+      else for (let i = 0; i < 14; i++) {
+        const mid = (lo + hi) / 2;
+        if (layout(cols, mid).H <= fixedH) lo = mid;
+        else hi = mid;
+      }
+      const cand = layout(cols, lo);
+      if (!best || cand.s > best.s * 1.0001) best = cand;
+    }
+    lay = best!;
+  }
+  const { cellW, s, planRows, sectionRows } = lay;
+  // spare height (a tall board) goes into the spaces between rows instead of leaving a hole at the bottom
+  const rowCount = planRows.length + sectionRows.length;
+  const spare = fixedH ? Math.max(0, fixedH - lay.H) : 0;
+  const rowGap = gap + Math.min(spare / Math.max(1, rowCount + 1), gap * 3);
+  const H = fixedH || lay.H;
 
   const c = document.createElement("canvas");
-  c.width = Math.round(W);
+  c.width = W;
   c.height = H;
   const ctx = c.getContext("2d")!;
   ctx.fillStyle = P.bg;
@@ -138,7 +171,7 @@ export async function buildDrawingBoard(tile: ParsedTile, o: DrawingBoardOptions
         drawBlock(ctx, d.title, x, y + sz.height + 6 * k, cellW, 44 * k, { max: 38 * k, min: 12 * k, weight: "600", color: P.text });
         drawBlock(ctx, d.subtitle, x, y + sz.height + 6 * k + 44 * k, cellW, 38 * k, { max: 28 * k, min: 11 * k, color: P.muted, maxLines: 1 });
       });
-      y += r.h + gap;
+      y += r.h + rowGap;
     }
   };
   if (plans.length) {

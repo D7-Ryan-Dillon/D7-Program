@@ -373,7 +373,7 @@ function TourPlayer({ tour, onStop }: { tour: { plan: DronePlan; seconds: number
     let id = 0;
     const tick = (now: number) => {
       const k = Math.min(1, (now - t0) / (tour.seconds * 1000));
-      view?.setPose(tour.plan.pose(k));
+      view?.setPose(tour.plan.pose(k, tour.seconds));
       setU(k);
       if (k < 1) id = requestAnimationFrame(tick);
       else setTimeout(() => stop.current(), 600);

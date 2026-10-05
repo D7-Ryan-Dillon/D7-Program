@@ -218,8 +218,7 @@ for (const s of SHAPES) {
     let hits = 0;
     let moved = 0;
     let wentIn = false;
-    let outsideFrames = 0;
-    let frames = 0;
+    const flags: boolean[] = [];
     const inMask = (p: [number, number, number]) => {
       const x = Math.floor((p[0] - comp.origin[0]) / comp.cell);
       const y = Math.floor((p[1] - comp.origin[1]) / comp.cell);
@@ -240,9 +239,14 @@ for (const s of SHAPES) {
       moved += d;
       prev = p.pos;
       if (inMask(p.pos)) wentIn = true;
-      else if (wentIn) outsideFrames++;
-      if (wentIn) frames++;
+      if (wentIn) flags.push(inMask(p.pos));
     }
+    // the way out at the end (through an opening and on into empty air) is meant to be outdoors: count the tour up to its last frame inside
+    const lastIn = flags.lastIndexOf(true);
+    const frames = lastIn + 1;
+    const outsideFrames = flags.slice(0, lastIn + 1).filter((v) => !v).length;
+    const endP = plan.pose(1).pos;
+    ok(!inMask(endP) && Math.hypot(endP[0] - comp.origin[0], endP[1] - comp.origin[1]) > 0, `drone tour in "${key}" does not end outside the building`);
     ok(hits === 0, `drone tour in "${key}" passes through foam (${hits} samples)`);
     ok(plan.visited.length >= Math.max(2, Math.floor(doc.pieces.length * 0.5)), `drone tour in "${key}" visits only ${plan.visited.length} of ${doc.pieces.length} pieces`);
     ok(moved > 10, `drone tour in "${key}" barely moves`);
