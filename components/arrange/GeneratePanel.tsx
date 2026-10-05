@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { NumberSlider } from "@/components/shared/NumberSlider";
-import { ShuffleSeedButton } from "@/components/shared/ShuffleSeedButton";
 import type { Priorities, ShapeKind } from "@/lib/arrange/types";
 import { Cap, Chip, Num } from "@/components/arrange/ui";
 import { useArrange } from "@/components/arrange/useArrange";
@@ -35,10 +34,7 @@ export function GeneratePanel() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <Num label="Pieces" value={gen.amount} min={1} max={60} step={1} decimals={0} onChange={(v) => setGen({ amount: Math.round(v) })} className="flex-1" />
-        <ShuffleSeedButton onShuffle={(seed) => setGen({ seed, direction: seed % 4 })} />
-      </div>
+      <Num label="Pieces" value={gen.amount} min={1} max={60} step={1} decimals={0} onChange={(v) => setGen({ amount: Math.round(v) })} />
 
       <div className="space-y-1.5">
         <Cap>Kind of building</Cap>
@@ -86,6 +82,7 @@ export function GeneratePanel() {
         </div>
         {!A.bank.length && <p className="text-[11px] text-muted-foreground">Check the tiles it may use in the Bank first.</p>}
         {A.why && <p className="text-[11px] text-pink">{A.why}</p>}
+        <p className="font-mono text-[10px] text-muted-foreground">{gen.seedLocked ? `seed ${gen.seed} (kept)` : `last seed ${gen.seed} · a new one each press`}</p>
         {A.notes.map((n, i) => (
           <p key={i} className="text-[11px] text-orange">
             {n}
@@ -97,8 +94,15 @@ export function GeneratePanel() {
         <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-label text-muted-foreground hover:text-foreground">More options</summary>
         <div className="space-y-3 pt-3">
           <div className="grid grid-cols-2 gap-2">
-            <Num label="Seed" value={gen.seed} min={0} max={9_999_999} decimals={0} onChange={(v) => setGen({ seed: Math.round(v) })} />
+            <Num label="Seed" value={gen.seed} min={0} max={9_999_999} decimals={0} onChange={(v) => setGen({ seed: Math.round(v), seedLocked: true })} />
             <Num label="Min joint" value={gen.minScore} min={0} max={95} step={5} decimals={0} onChange={(v) => setGen({ minScore: Math.round(v) })} />
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Keep this seed</Label>
+              <p className="text-[10px] text-muted-foreground">Off: every Generate picks a new random seed. Typing a seed turns this on.</p>
+            </div>
+            <Switch checked={!!gen.seedLocked} onCheckedChange={(v) => setGen({ seedLocked: v })} />
           </div>
           <div className="flex items-center justify-between">
             <div>

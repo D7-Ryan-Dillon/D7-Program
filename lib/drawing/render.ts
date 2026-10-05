@@ -207,11 +207,21 @@ export function drawToCanvas(ctx: CanvasRenderingContext2D, d: Drawing, style: D
   if (o.caption !== false) {
     const base = y0 + d.heightFt * s + (o.ruler !== false ? 2.4 : 0.5) * s;
     ctx.textAlign = "left";
+    // the captions shrink to the width of the drawing instead of running past it
+    const room = Math.max(40, d.widthFt * s + 1.5 * s);
+    const fitPx = (txt: string, px: number, weight: string) => {
+      let size = px;
+      ctx.font = `${weight}${size}px system-ui, sans-serif`;
+      while (size > 7 && ctx.measureText(txt).width > room) {
+        size -= 0.5;
+        ctx.font = `${weight}${size}px system-ui, sans-serif`;
+      }
+    };
     ctx.fillStyle = style.text;
-    ctx.font = `600 ${fontPx * 1.1}px system-ui, sans-serif`;
+    fitPx(d.title, fontPx * 1.1, "600 ");
     ctx.fillText(d.title, x0, base + 1.2 * s);
     ctx.fillStyle = style.muted;
-    ctx.font = `${fontPx}px system-ui, sans-serif`;
+    fitPx(d.subtitle, fontPx, "");
     ctx.fillText(d.subtitle, x0, base + 2.7 * s);
   }
   ctx.restore();

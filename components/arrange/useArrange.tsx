@@ -647,7 +647,24 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
     [bank.length, finish],
   );
 
-  const generate = useCallback(() => runGen("Generating", () => generateArrangement(genContext(), { ...emptyDoc(), entranceId: null }), true), [runGen, genContext]);
+  const generate = useCallback(() => {
+    // unless a seed is being kept, every press picks a new one (and turns the building a new way)
+    let seed = ui.gen.seed;
+    let direction = ui.gen.direction;
+    if (!ui.gen.seedLocked) {
+      seed = Math.floor(Math.random() * 9_999_999);
+      direction = seed % 4;
+      patchUi({ gen: { ...ui.gen, seed, direction } });
+    }
+    runGen(
+      "Generating",
+      () => {
+        const c = genContext();
+        return generateArrangement({ ...c, settings: { ...c.settings, seed, direction } }, { ...emptyDoc(), entranceId: null });
+      },
+      true,
+    );
+  }, [runGen, genContext, ui.gen, patchUi]);
   const growMore = useCallback(
     () =>
       runGen(

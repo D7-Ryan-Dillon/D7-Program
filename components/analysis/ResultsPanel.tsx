@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { downloadTextFile } from "@/lib/exporters/objExport";
 import { downloadBlob } from "@/lib/boards/exportBoard";
+import { paletteStyle, usePalette } from "@/lib/boardPalette";
+import { PaletteEditor } from "@/components/shared/PaletteEditor";
 import type { Ground } from "@/lib/drawing/render";
 import { shortName } from "@/lib/scoring/compare";
 import { DESCRIPTOR_META, type DescriptorKey } from "@/lib/scoring/descriptors";
@@ -22,6 +24,8 @@ export function ResultsPanel({ tiles, keys, activeTile }: { tiles: ParsedTile[];
   const [ground, setGround] = useState<Ground>("paper");
   const [which, setWhich] = useState<string>("all");
   const [imgScale, setImgScale] = useState(2);
+  const [palette] = usePalette();
+  const [custom, setCustom] = useState(false);
   const [busy, setBusy] = useState(false);
   const rows = useMemo(() => tiles.map((tile) => ({ tile, results: scoreTileCached(tile) })), [tiles]);
   const labels = new Map(DESCRIPTOR_META.map((m) => [m.key, m.label]));
@@ -88,11 +92,15 @@ export function ResultsPanel({ tiles, keys, activeTile }: { tiles: ParsedTile[];
             <Download className="mr-1.5 h-3.5 w-3.5" />
             Table (CSV)
           </Button>
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(async () => downloadBlob("results_table.png", await resultsImage(rows, keys, ground, imgScale)))}>
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => void run(async () => downloadBlob("results_table.png", await resultsImage(rows, keys, custom ? paletteStyle(palette) : ground, imgScale)))}>
             <Download className="mr-1.5 h-3.5 w-3.5" />
             Table (image)
           </Button>
           <Segmented value={ground} options={[{ value: "paper", label: "Paper" }, { value: "dark", label: "Dark" }]} onChange={setGround} />
+          <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground" title="Use the project's own colours (set under Colours) instead of Paper / Dark">
+            <input type="checkbox" className="accent-[var(--magenta)]" checked={custom} onChange={(e) => setCustom(e.target.checked)} />
+            My colours
+          </label>
           <Select className="h-7 w-28 text-[11px]" value={String(imgScale)} onChange={(e) => setImgScale(Number(e.target.value))} aria-label="Image resolution">
             <option value="1">1× size</option>
             <option value="2">2× size</option>
@@ -100,6 +108,13 @@ export function ResultsPanel({ tiles, keys, activeTile }: { tiles: ParsedTile[];
             <option value="4">4× size</option>
           </Select>
         </div>
+
+        <details className="rounded-md border-hair px-3 py-2">
+          <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">Colours for the images (turn on “My colours”)</summary>
+          <div className="pt-2">
+            <PaletteEditor />
+          </div>
+        </details>
 
         <Section id="analysis.diagrams" variant="inline" title="Annotated diagrams" summary={shortName(active.tile)} bodyClassName="space-y-2">
           <p className="text-[11px] text-muted-foreground">
@@ -121,10 +136,10 @@ export function ResultsPanel({ tiles, keys, activeTile }: { tiles: ParsedTile[];
               onClick={() =>
                 void run(async () => {
                   const stem = active.tile.name;
-                  if (which === "all") downloadBlob(`${stem}_diagrams.png`, await diagramSheet(active.tile, active.results, ground, imgScale));
+                  if (which === "all") downloadBlob(`${stem}_diagrams.png`, await diagramSheet(active.tile, active.results, custom ? paletteStyle(palette) : ground, imgScale));
                   else {
                     const r = active.results.find((x) => x.key === which);
-                    if (r) downloadBlob(`${stem}_${r.key}.png`, await descriptorDiagram(active.tile, r, ground, imgScale));
+                    if (r) downloadBlob(`${stem}_${r.key}.png`, await descriptorDiagram(active.tile, r, custom ? paletteStyle(palette) : ground, imgScale));
                   }
                 })
               }

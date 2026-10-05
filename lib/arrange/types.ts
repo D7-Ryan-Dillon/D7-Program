@@ -156,6 +156,8 @@ export interface GenSettings {
   direction: number;
   /** The lowest joint score accepted (relaxed in steps when nothing fits). */
   minScore: number;
+  /** true: Generate keeps using `seed` (same settings, same result). Default: every Generate picks a new random seed. */
+  seedLocked?: boolean;
 }
 
 export const defaultGen = (): GenSettings => ({ amount: 8, seed: 1, shape: "compact", direction: 0, minScore: 40 });

@@ -61,7 +61,7 @@ function fitDistance(dirFromCenter: THREE.Vector3, center: Vec3, pts: Vec3[], fo
 }
 
 /** The best few exterior views (corner and bird's-eye angles) and interior views along the route, scored on composition. */
-export function findNiceViews(boxes: PlacedBox[], opts: { comp: Composite | null; route: Vec3[] | null; entrance: Vec3 | null }): ViewCandidate[] {
+export function findNiceViews(boxes: PlacedBox[], opts: { comp: Composite | null; route: Vec3[] | null; entrance: Vec3 | null; exteriorCount?: number }): ViewCandidate[] {
   if (!boxes.length) return [];
   const pts = boxes.flatMap(boxCorners);
   const lo: Vec3 = [Infinity, Infinity, Infinity];
@@ -109,7 +109,7 @@ export function findNiceViews(boxes: PlacedBox[], opts: { comp: Composite | null
     const az = Number(c.id.split("-")[1]);
     if (picked.some((p) => Math.min(Math.abs(Number(p.id.split("-")[1]) - az), 360 - Math.abs(Number(p.id.split("-")[1]) - az)) < 60)) continue;
     picked.push(c);
-    if (picked.length >= 4) break;
+    if (picked.length >= (opts.exteriorCount ?? 4)) break;
   }
 
   const inside: ViewCandidate[] = [];
@@ -224,4 +224,114 @@ export function walkPose(path: Vec3[], t: number, fov = FOV_INT): PoseFt {
   const ahead = path[Math.min(n, i + 7)];
   const aim: Vec3 = ahead === a || (ahead[0] === pos[0] && ahead[1] === pos[1]) ? [pos[0] + (b[0] - a[0]) * 10, pos[1] + (b[1] - a[1]) * 10, pos[2]] : [ahead[0], ahead[1], pos[2] - 0.3];
   return { pos, target: aim, fov };
+}
+
+// ---- the three kinds of picture --------------------------------------------------------------------------------------------------
+
+export interface ViewCounts {
+  /** the whole building from outside */
+  exterior: number;
+  /** close to the openings on the outside */
+  closeups: number;
+  /** inside, where many blocks face each other */
+  interior: number;
+}
+
+const FACE_NORMAL: Record<string, Vec3> = { "x-": [-1, 0, 0], "x+": [1, 0, 0], "y-": [0, -1, 0], "y+": [0, 1, 0], "z+": [0, 0, 1] };
+const FACE_WORD: Record<string, string> = { "x-": "west", "x+": "east", "y-": "south", "y+": "north", "z+": "roof" };
+
+/** Distinct pieces seen from a point looking along `yaw`, with how far the rays travel (a fan of rays across the lens). */
+function whatIsSeen(c: Composite, from: Vec3, yaw: number): { pieces: number; meanDist: number; skyShare: number; nearest: number } {
+  const [nx, ny, nz] = c.grid;
+  const seen = new Set<number>();
+  let total = 0;
+  let n = 0;
+  let sky = 0;
+  let nearest = 99;
+  for (let dyaw = -40; dyaw <= 40; dyaw += 8)
+    for (const pitch of [-6, 0, 6]) {
+      const a = yaw + (dyaw * Math.PI) / 180;
+      const p = (pitch * Math.PI) / 180;
+      const d: Vec3 = [Math.cos(a) * Math.cos(p), Math.sin(a) * Math.cos(p), Math.sin(p)];
+      let t = 1;
+      let hit = false;
+      for (; t < 90; t += 1) {
+        const x = Math.floor((from[0] + d[0] * t - c.origin[0]) / c.cell);
+        const y = Math.floor((from[1] + d[1] * t - c.origin[1]) / c.cell);
+        const z = Math.floor((from[2] + d[2] * t - c.origin[2]) / c.cell);
+        if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) {
+          sky++;
+          break;
+        }
+        const i = (x * ny + y) * nz + z;
+        if (c.mask[i] === 1 && c.void[i] === 0) {
+          seen.add(c.owner[i]);
+          hit = true;
+          break;
+        }
+      }
+      if (hit && t < nearest) nearest = t;
+      total += t;
+      n++;
+    }
+  return { pieces: seen.size, meanDist: total / n, skyShare: sky / n, nearest };
+}
+
+/**
+ * Pictures in three kinds, each with its own count: the whole building from outside, close to the openings on the outside, and
+ * inside, from places where the view takes in as many different blocks facing each other as possible (a void with blocks round it).
+ */
+export function findViews(
+  boxes: PlacedBox[],
+  opts: { comp: Composite | null; path: Vec3[] | null; entrance: Vec3 | null; exposed: { pieceId: string; face: string; point: Vec3; patch: { cells: number } }[]; counts: ViewCounts; nameOf?: (id: string) => string },
+): ViewCandidate[] {
+  const out: ViewCandidate[] = [];
+  if (!boxes.length) return out;
+  const { counts } = opts;
+  if (counts.exterior > 0) out.push(...findNiceViews(boxes, { comp: null, route: null, entrance: opts.entrance, exteriorCount: counts.exterior }).filter((v) => v.kind === "exterior").slice(0, counts.exterior));
+
+  if (counts.closeups > 0) {
+    const sides = opts.exposed.filter((e) => FACE_NORMAL[e.face]).sort((a, b) => b.patch.cells - a.patch.cells);
+    const chosen: typeof sides = [];
+    for (const e of sides) {
+      if (chosen.length >= counts.closeups) break;
+      if (chosen.some((c) => Math.hypot(c.point[0] - e.point[0], c.point[1] - e.point[1], c.point[2] - e.point[2]) < 18)) continue;
+      chosen.push(e);
+    }
+    chosen.forEach((e, i) => {
+      const nrm = FACE_NORMAL[e.face];
+      const side: Vec3 = nrm[2] ? [1, 0, 0] : [-nrm[1], nrm[0], 0]; // a little to one side, so it is not square on
+      const pos: Vec3 = [e.point[0] + nrm[0] * 22 + side[0] * 7, e.point[1] + nrm[1] * 22 + side[1] * 7, e.point[2] + nrm[2] * 22 + (nrm[2] ? 0 : 4)];
+      out.push({ id: `close-${i}`, label: `Close-up at a ${FACE_WORD[e.face]} opening${opts.nameOf ? ` of ${opts.nameOf(e.pieceId)}` : ""}`, kind: "exterior", pose: { pos, target: e.point, fov: 50 }, score: e.patch.cells });
+    });
+  }
+
+  if (counts.interior > 0 && opts.comp && opts.path && opts.path.length > 4) {
+    const cands: { pos: Vec3; yaw: number; score: number }[] = [];
+    const step = Math.max(1, Math.round(opts.path.length / 60));
+    for (let i = 0; i < opts.path.length; i += step) {
+      const pos = opts.path[i];
+      let best: { yaw: number; score: number } | null = null;
+      for (let k = 0; k < 16; k++) {
+        const yaw = (k * Math.PI * 2) / 16;
+        const s = whatIsSeen(opts.comp, pos, yaw);
+        // many different blocks in view, a long view, little sky, nothing pressed against the lens
+        const score = s.pieces * 4 + Math.min(40, s.meanDist) / 10 - s.skyShare * 5 - (s.nearest < 3 ? 3 : 0);
+        if (!best || score > best.score) best = { yaw, score };
+      }
+      if (best) cands.push({ pos, ...best });
+    }
+    cands.sort((a, b) => b.score - a.score);
+    const picked: typeof cands = [];
+    for (const c of cands) {
+      if (picked.length >= counts.interior) break;
+      if (picked.some((p) => Math.hypot(p.pos[0] - c.pos[0], p.pos[1] - c.pos[1], p.pos[2] - c.pos[2]) < 16 && Math.abs(Math.atan2(Math.sin(p.yaw - c.yaw), Math.cos(p.yaw - c.yaw))) < 0.7)) continue;
+      picked.push(c);
+    }
+    picked.forEach((c, i) => {
+      const target: Vec3 = [c.pos[0] + Math.cos(c.yaw) * 12, c.pos[1] + Math.sin(c.yaw) * 12, c.pos[2] - 0.3];
+      out.push({ id: `int-${i}`, label: `Inside, blocks facing each other (${i + 1})`, kind: "interior", pose: { pos: c.pos, target, fov: 78 }, score: c.score });
+    });
+  }
+  return out;
 }

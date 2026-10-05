@@ -24,7 +24,7 @@ import { suggestNext, betterTiles } from "../lib/arrange/suggest";
 import { snapPosition } from "../lib/arrange/snap";
 import { evaluateProgram, ruleBetween } from "../lib/arrange/program";
 import { buildSequence, autoNames } from "../lib/arrange/whole";
-import { findNiceViews, walkPath } from "../lib/arrange/views";
+import { findNiceViews, findViews, walkPath } from "../lib/arrange/views";
 import { getOriented } from "../lib/arrange/orient";
 import { SHAPES, defaultGen, defaultPriorities, defaultRules, defaultSite, defaultSmooth, emptyDoc, pairKey, type ArrangementDoc, type ProgramRules } from "../lib/arrange/types";
 
@@ -275,6 +275,23 @@ for (const s of SHAPES) {
     ok(short.visited.length <= 3 && short.visited.length >= 2, `the highlights tour visits ${short.visited.length} spaces, not about 3`);
     ok(short.lengthFt < full.lengthFt, "the highlights tour is not shorter than the full one");
     console.log(`  highlights: ${short.visited.length} spaces, ${short.lengthFt.toFixed(0)} ft against ${full.lengthFt.toFixed(0)} ft for the full tour`);
+  }
+}
+
+// ---- 5b3. the three kinds of picture ------------------------------------------------------------------------------------------------
+{
+  for (const key of ["compact", "courtyard", "stepped"]) {
+    const doc = docs.get(key)!;
+    const l = analyzeLayout(doc, tileById, rules);
+    const comp = buildComposite(l.boxes)!;
+    const seq = buildSequence(l, rules);
+    const plan = planDrone(comp, { order: seq.steps.map((s) => s.pieceId), entrance: entrancePoint(l), approach: false });
+    const v = findViews(l.boxes, { comp, path: plan?.path ?? null, entrance: entrancePoint(l), exposed: l.exposed, counts: { exterior: 3, closeups: 3, interior: 4 } });
+    const kinds = { exterior: v.filter((x) => x.id.startsWith("ext")).length, closeup: v.filter((x) => x.id.startsWith("close")).length, interior: v.filter((x) => x.id.startsWith("int")).length };
+    ok(kinds.exterior >= 1 && kinds.closeup >= 1 && kinds.interior >= 1, `views for "${key}": ${JSON.stringify(kinds)}`);
+    const none = findViews(l.boxes, { comp, path: plan?.path ?? null, entrance: null, exposed: l.exposed, counts: { exterior: 0, closeups: 0, interior: 0 } });
+    ok(none.length === 0, "views with every count at 0 are not empty");
+    console.log(`  views ${key}: ${JSON.stringify(kinds)}`);
   }
 }
 

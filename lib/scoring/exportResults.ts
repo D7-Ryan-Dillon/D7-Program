@@ -3,7 +3,8 @@
 // sentence beside it), as one sheet or one image each.
 
 import { buildDrawing, planSpecs, type Drawing, type DrawingSpec } from "@/lib/drawing/build";
-import { drawToCanvas, drawingSize, drawingStyle, type Ground } from "@/lib/drawing/render";
+import { drawToCanvas, drawingSize, drawingStyle, type Ground, type DrawingStyle } from "@/lib/drawing/render";
+import { drawBlock } from "@/lib/textBlock";
 import type { DescriptorResult } from "@/lib/scoring/descriptors";
 import { shortName } from "@/lib/scoring/compare";
 import type { DescriptorKey } from "@/lib/scoring/descriptors";
@@ -35,25 +36,15 @@ export function resultsCsv(rows: ResultRow[], keys: DescriptorKey[]): string {
   return lines.join("\n") + "\n";
 }
 
-function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-  const out: string[] = [];
-  let line = "";
-  for (const word of text.split(/\s+/)) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      out.push(line);
-      line = word;
-    } else line = test;
-  }
-  if (line) out.push(line);
-  return out;
-}
-
 const toBlob = (canvas: HTMLCanvasElement) => new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't write the image."))), "image/png"));
 
 /** The results table as an image: tiles down the side, carried criteria across, score and reading in each cell. */
-export async function resultsImage(rows: ResultRow[], keys: DescriptorKey[], ground: Ground, scale = 1): Promise<Blob> {
-  const style = drawingStyle(ground);
+const MONO = "ui-monospace, Menlo, monospace";
+const SANS = "system-ui, sans-serif";
+const styleOf = (g: Ground | DrawingStyle): DrawingStyle => (typeof g === "string" ? drawingStyle(g) : g);
+
+export async function resultsImage(rows: ResultRow[], keys: DescriptorKey[], ground: Ground | DrawingStyle, scale = 1): Promise<Blob> {
+  const style = styleOf(ground);
   const labels = new Map(rows[0]?.results.map((r) => [r.key, r.label]) ?? []);
   const nameW = 300;
   const colW = 190;
@@ -74,8 +65,7 @@ export async function resultsImage(rows: ResultRow[], keys: DescriptorKey[], gro
   ctx.font = "600 13px ui-monospace, Menlo, monospace";
   ctx.fillStyle = style.muted;
   keys.forEach((k, i) => {
-    const lines = wrap(ctx, (labels.get(k) ?? k).toUpperCase(), colW - 14);
-    lines.slice(0, 3).forEach((l, n) => ctx.fillText(l, pad + nameW + i * colW + 6, pad + 8 + n * 16));
+    drawBlock(ctx, (labels.get(k) ?? k).toUpperCase(), pad + nameW + i * colW + 6, pad + 4, colW - 14, headH - 12, { max: 13, min: 7, maxLines: 4, weight: "600", family: MONO, color: style.muted });
   });
   ctx.strokeStyle = style.frame;
   ctx.globalAlpha = 0.4;
@@ -86,25 +76,15 @@ export async function resultsImage(rows: ResultRow[], keys: DescriptorKey[], gro
   ctx.globalAlpha = 1;
   rows.forEach(({ tile, results }, r) => {
     const y = pad + headH + r * rowH;
-    ctx.fillStyle = style.text;
-    ctx.font = "600 15px system-ui, sans-serif";
-    wrap(ctx, shortName(tile), nameW - 16).slice(0, 2).forEach((l, n) => ctx.fillText(l, pad, y + 10 + n * 19));
-    ctx.font = "11px ui-monospace, Menlo, monospace";
-    ctx.fillStyle = style.muted;
-    ctx.fillText(tile.meta?.variant ?? "", pad, y + 52);
+    drawBlock(ctx, shortName(tile), pad, y + 8, nameW - 16, 44, { max: 15, min: 8, maxLines: 3, weight: "600", family: SANS, color: style.text });
+    drawBlock(ctx, tile.meta?.variant ?? "", pad, y + 56, nameW - 16, 18, { max: 11, min: 7, family: MONO, color: style.muted });
     keys.forEach((k, i) => {
       const res = results.find((x) => x.key === k);
       if (!res) return;
       const x = pad + nameW + i * colW + 6;
-      ctx.fillStyle = style.text;
-      ctx.font = "600 26px system-ui, sans-serif";
-      ctx.fillText(String(res.score), x, y + 6);
-      ctx.fillStyle = style.accent;
-      ctx.font = "13px system-ui, sans-serif";
-      ctx.fillText(res.qualitative.reading, x + 52, y + 12);
-      ctx.fillStyle = style.muted;
-      ctx.font = "11px ui-monospace, Menlo, monospace";
-      wrap(ctx, res.quant.headline, colW - 16).slice(0, 3).forEach((l, n) => ctx.fillText(l, x, y + 42 + n * 14));
+      drawBlock(ctx, String(res.score), x, y + 4, 48, 34, { max: 26, min: 14, weight: "600", family: SANS, color: style.text });
+      drawBlock(ctx, res.qualitative.reading, x + 52, y + 10, colW - 66, 30, { max: 13, min: 7, maxLines: 2, family: SANS, color: style.accent });
+      drawBlock(ctx, res.quant.headline, x, y + 40, colW - 16, rowH - 46, { max: 11, min: 6, maxLines: 5, family: MONO, color: style.muted });
     });
   });
   return toBlob(canvas);
@@ -135,7 +115,7 @@ export function diagramDrawing(tile: ParsedTile, result: DescriptorResult): Draw
 }
 
 /** One annotated diagram: the drawing with the measure lit, then the descriptor, its score, the quantity and the sentence. */
-export async function descriptorDiagram(tile: ParsedTile, result: DescriptorResult, ground: Ground, scale = 1): Promise<Blob> {
+export async function descriptorDiagram(tile: ParsedTile, result: DescriptorResult, ground: Ground | DrawingStyle, scale = 1): Promise<Blob> {
   const sheet = document.createElement("canvas");
   sheet.width = Math.round(1200 * scale);
   sheet.height = Math.round(520 * scale);
@@ -143,8 +123,8 @@ export async function descriptorDiagram(tile: ParsedTile, result: DescriptorResu
   return toBlob(sheet);
 }
 
-function paintDiagram(canvas: HTMLCanvasElement, tile: ParsedTile, result: DescriptorResult, ground: Ground, scale: number, at = { x: 0, y: 0 }, width = 1200, height = 520) {
-  const style = drawingStyle(ground);
+function paintDiagram(canvas: HTMLCanvasElement, tile: ParsedTile, result: DescriptorResult, ground: Ground | DrawingStyle, scale: number, at = { x: 0, y: 0 }, width = 1200, height = 520) {
+  const style = styleOf(ground);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D context unavailable");
   ctx.save();
@@ -161,50 +141,31 @@ function paintDiagram(canvas: HTMLCanvasElement, tile: ParsedTile, result: Descr
   }
   const tx = at.x + drawW + 8;
   const tw = width - drawW - 28;
+  const bottom = at.y + height - 14;
   let y = at.y + 22;
   ctx.textBaseline = "top";
-  ctx.fillStyle = style.muted;
-  ctx.font = "11px ui-monospace, Menlo, monospace";
-  ctx.fillText(`${shortName(tile).toUpperCase()}${tile.meta?.variant ? "  ·  " + tile.meta.variant : ""}`, tx, y);
-  y += 22;
-  ctx.fillStyle = style.text;
-  ctx.font = "600 26px system-ui, sans-serif";
-  ctx.fillText(result.label, tx, y);
-  const scoreW = ctx.measureText(result.label).width;
-  ctx.fillStyle = style.accent;
-  ctx.fillText(String(result.score), tx + scoreW + 16, y);
-  y += 40;
-  ctx.fillStyle = style.accent;
-  ctx.font = "14px system-ui, sans-serif";
-  ctx.fillText(`${result.qualitative.reading}   (${result.qualitative.scale.join("  ›  ")})`, tx, y);
-  y += 26;
-  ctx.fillStyle = style.text;
-  ctx.font = "600 13px ui-monospace, Menlo, monospace";
-  wrap(ctx, result.quant.headline, tw).forEach((l) => {
-    ctx.fillText(l, tx, y);
-    y += 18;
-  });
-  y += 6;
-  ctx.fillStyle = style.muted;
-  ctx.font = "11px ui-monospace, Menlo, monospace";
-  for (const s of result.quant.supporting) {
-    wrap(ctx, `${s.label}: ${s.value}`, tw).forEach((l) => {
-      ctx.fillText(l, tx, y);
-      y += 15;
-    });
-  }
-  y += 10;
-  ctx.fillStyle = style.text;
-  ctx.font = "13px system-ui, sans-serif";
-  wrap(ctx, result.explanation, tw).forEach((l) => {
-    if (y < at.y + height - 14) ctx.fillText(l, tx, y);
-    y += 18;
-  });
+  y += drawBlock(ctx, `${shortName(tile).toUpperCase()}${tile.meta?.variant ? "  ·  " + tile.meta.variant : ""}`, tx, y, tw, 20, { max: 11, min: 7, family: MONO, color: style.muted }) + 6;
+  // the name of the measure and its score on one line: the name takes the room the score leaves
+  const scoreText = String(result.score);
+  ctx.font = `600 26px ${SANS}`;
+  const scoreW = ctx.measureText(scoreText).width;
+  const nameH = drawBlock(ctx, result.label, tx, y, tw - scoreW - 20, 64, { max: 26, min: 12, maxLines: 2, weight: "600", family: SANS, color: style.text });
+  drawBlock(ctx, scoreText, tx + tw - scoreW, y, scoreW + 2, 34, { max: 26, min: 26, weight: "600", family: SANS, color: style.accent, align: "right" });
+  y += Math.max(nameH, 34) + 8;
+  y += drawBlock(ctx, `${result.qualitative.reading}   (${result.qualitative.scale.join("  ›  ")})`, tx, y, tw, 48, { max: 14, min: 7, maxLines: 2, family: SANS, color: style.accent }) + 10;
+  y += drawBlock(ctx, result.quant.headline, tx, y, tw, 70, { max: 13, min: 7, maxLines: 3, weight: "600", family: MONO, color: style.text }) + 8;
+  const budget = bottom - y;
+  // the supporting numbers get at most 40% of what is left, the explanation the rest
+  const sup = result.quant.supporting.map((s) => `${s.label}: ${s.value}`);
+  const perLine = sup.length ? Math.min(30, (budget * 0.4) / sup.length) : 0;
+  for (const line of sup) y += drawBlock(ctx, line, tx, y, tw, perLine, { max: 11, min: 6, maxLines: 2, family: MONO, color: style.muted }) + 3;
+  y += 8;
+  drawBlock(ctx, result.explanation, tx, y, tw, Math.max(20, bottom - y), { max: 13, min: 6, maxLines: 14, family: SANS, color: style.text });
   ctx.restore();
 }
 
 /** Every descriptor's annotated diagram on one sheet (two columns). */
-export async function diagramSheet(tile: ParsedTile, results: DescriptorResult[], ground: Ground, scale = 1): Promise<Blob> {
+export async function diagramSheet(tile: ParsedTile, results: DescriptorResult[], ground: Ground | DrawingStyle, scale = 1): Promise<Blob> {
   const w = 1200;
   const h = 520;
   const cols = 2;

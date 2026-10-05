@@ -10,13 +10,16 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { SizeFields } from "@/components/shared/SizeFields";
+import { PaletteEditor } from "@/components/shared/PaletteEditor";
+import { paletteStyle, usePalette } from "@/lib/boardPalette";
+import { buildDrawingBoard } from "@/lib/arrange/drawingBoard";
 import type { ParsedTile } from "@/lib/types";
 import { groupToObjText } from "@/lib/exporters/objExport";
 import { buildStl, STL_PARTS, availableParts, type StlPart } from "@/lib/exporters/stl";
 import { buildManifestText } from "@/lib/exporters/recipeManifest";
 import { buildDrawing } from "@/lib/drawing/build";
 import { drawingSet } from "@/lib/drawing/exportSet";
-import { drawingStyle, drawingToPng } from "@/lib/drawing/render";
+import { drawingToPng } from "@/lib/drawing/render";
 import { downloadBlob } from "@/lib/boards/exportBoard";
 import { encodeGif } from "@/lib/boards/gifExport";
 import { encodeMp4, mp4Supported } from "@/lib/boards/mp4Export";
@@ -27,8 +30,9 @@ import { glbToFt, pieceMatrix } from "@/lib/arrange/placement";
 import { fineGeometry, QUALITY_CHOICES, refineByTileId, type Quality } from "@/lib/fineGeometry";
 import { buildRhinoZip } from "@/lib/arrange/exportRhino";
 import { buildReport } from "@/lib/arrange/report";
-import { applyTourLook, capturePosePng, createPoseAnimation, toScene, type PoseFt } from "@/lib/arrange/capture";
-import { findNiceViews } from "@/lib/arrange/views";
+import { applyTourLook, buildUpHooks, capturePosePng, createPoseAnimation, loopFade, toScene, type PoseFt } from "@/lib/arrange/capture";
+import { findViews } from "@/lib/arrange/views";
+import type { Vec3 } from "@/lib/arrange/types";
 import { planDrone, type DronePlan } from "@/lib/arrange/drone";
 import { namesFor } from "@/lib/arrange/whole";
 import { CATEGORY_LABEL } from "@/lib/arrange/types";
@@ -46,11 +50,12 @@ const safe = (s: string) => s.replace(/[^A-Za-z0-9_.+-]+/g, "_") || "arrangement
 const text = (s: string, type = "text/plain") => new Blob([s], { type });
 
 /** Turns the camera about the vertical axis through its target. */
-function orbitPose(base: PoseFt, deg: number): PoseFt {
+function orbitPose(base: PoseFt, deg: number, closer = 1): PoseFt {
   const a = (deg * Math.PI) / 180;
-  const dx = base.pos[0] - base.target[0];
-  const dy = base.pos[1] - base.target[1];
-  return { ...base, pos: [base.target[0] + dx * Math.cos(a) - dy * Math.sin(a), base.target[1] + dx * Math.sin(a) + dy * Math.cos(a), base.pos[2]] };
+  const dx = (base.pos[0] - base.target[0]) * closer;
+  const dy = (base.pos[1] - base.target[1]) * closer;
+  const dz = (base.pos[2] - base.target[2]) * closer;
+  return { ...base, pos: [base.target[0] + dx * Math.cos(a) - dy * Math.sin(a), base.target[1] + dx * Math.sin(a) + dy * Math.cos(a), base.target[2] + dz] };
 }
 
 function Row({ id, label, hint, on, set, children, disabled }: { id: string; label: string; hint: string; on: boolean; set: (v: boolean) => void; children?: ReactNode; disabled?: boolean }) {
@@ -75,12 +80,15 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
   const A = useArrange();
   const [sel, setSel] = useState<Record<Key, boolean>>({ stl: false, obj: false, plans: false, report: false, png: false, views: false, drone: false, buildup: false, rhino: false, sheet: false });
   const [stl, setStl] = useState({ ratio: "120", merge: false, parts: { foam: true, void: false, plates: false, struts: false } as Record<StlPart, boolean> });
-  const [plans, setPlans] = useState<"png" | "svg">("png");
+  const [palette] = usePalette();
+  const [plans, setPlans] = useState<"board" | "png" | "svg">("board");
+  const [board, setBoard] = useState({ width: 3300, columns: 3, labels: true });
+  const [views, setViews] = useState({ w: 1920, h: 1080, exterior: 3, closeups: 3, interior: 4, clear: false });
   const [pic, setPic] = useState({ w: 1920, h: 1080, clear: false });
   const [plansCfg, setPlansCfg] = useState({ dpi: 150, ftPerIn: 10 });
   const [rep, setRep] = useState({ scale: 1 });
   const [drone, setDrone] = useState({ kind: "full" as "full" | "highlights", spaces: 4, approach: true, seconds: 0, fps: 24, width: 1280, height: 720, fov: 78, format: "mp4" as "mp4" | "gif" });
-  const [build, setBuild] = useState({ seconds: 10, fps: 20, width: 1280, height: 720, format: "mp4" as "mp4" | "gif" });
+  const [build, setBuild] = useState({ style: "place" as "place" | "turn", seconds: 20, fps: 20, width: 1280, height: 720, format: "mp4" as "mp4" | "gif" });
   const [quality, setQuality] = useState<Quality>(3);
   const [busy, setBusy] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(null);
@@ -180,21 +188,31 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
           },
           frames,
           { width, height, background: "#000000" },
+          // starts and ends on black, so the film loops without a visible join
+          { fade: loopFade(cfg.fps) },
         );
       } else {
         const base = A.viewportApi.current?.getPose();
         if (!base) throw new Error("The viewport isn't ready yet.");
         const order = A.sequence.steps.map((s) => s.pieceId).concat(A.layout.boxes.map((b) => b.piece.id).filter((id) => !A.sequence.steps.some((s) => s.pieceId === id)));
-        const names = order.map((id) => `piece-${id}`);
-        const hide = (visibleCount: number) =>
-          names.forEach((n, i) => {
-            const o = snap.scene.getObjectByName(n);
-            if (o) o.visible = i < visibleCount;
+        // low pieces first, so the building rises; the route order breaks ties
+        const at = new Map(A.sequence.steps.map((st, i) => [st.pieceId, i]));
+        const lowFirst = [...A.layout.boxes].sort((a, b) => a.min[2] - b.min[2] || (at.get(a.piece.id) ?? 99) - (at.get(b.piece.id) ?? 99)).map((b) => b.piece.id);
+        const placing = build.style === "place" ? buildUpHooks(snap.scene, lowFirst) : null;
+        if (placing) {
+          source = createPoseAnimation(h, (i, n) => orbitPose(base, (75 * i) / Math.max(1, n - 1), 0.78), frames, { width, height, background: "#000000" }, { before: (i) => placing.before(i, frames), after: placing.after });
+        } else {
+          const names = order.map((id) => `piece-${id}`);
+          const hide = (visibleCount: number) =>
+            names.forEach((n, i) => {
+              const o = snap.scene.getObjectByName(n);
+              if (o) o.visible = i < visibleCount;
+            });
+          source = createPoseAnimation(h, (i, n) => orbitPose(base, (120 * i) / n, 0.85), frames, { width, height, background: "#000000" }, {
+            before: (i) => hide(Math.max(1, Math.ceil(((i + 1) / (frames * 0.75)) * names.length))),
+            after: () => hide(names.length),
           });
-        source = createPoseAnimation(h, (i, n) => orbitPose(base, (120 * i) / n), frames, { width, height, background: "#000000" }, {
-          before: (i) => hide(Math.max(1, Math.ceil(((i + 1) / (frames * 0.75)) * names.length))),
-          after: () => hide(names.length),
-        });
+        }
       }
       const settings = { ...defaultAnimationSettings(), fps: cfg.fps, widthPx: width };
       const blob =
@@ -274,8 +292,15 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
         const tile = await buildTile();
         const out: Out[] = [];
         if (plans === "svg") for (const f of drawingSet(tile)) out.push({ name: `drawings/${f.path.replace("vector/drawings/", "")}`, blob: text(f.svg, "image/svg+xml") });
-        else {
-          const style = drawingStyle("dark");
+        else if (plans === "board") {
+          const w = A.whole.summary;
+          const info: [string, string][] = [["Pieces", String(A.layout.boxes.length)]];
+          if (w) info.push(["Floor levels", String(w.levels)], ["Height · footprint", `${w.heightFt.toFixed(0)} ft · ${w.footprintFt[0].toFixed(0)} × ${w.footprintFt[1].toFixed(0)} ft`], ["Longest route", w.mainRouteFt === null ? "none" : `${w.mainRouteFt.toFixed(0)} ft`], ["Rooms", String(w.rooms)], ["Void share", `${Math.round(w.voidShare * 100)}%`], ["Floor in daylight", `${Math.round(w.litFloor * 100)}%`]);
+          const blob = await buildDrawingBoard(tile, { title: A.ui.currentName, info, palette, widthPx: board.width, columns: board.columns, labels: board.labels });
+          if (!blob) throw new Error("There are no plans or sections to draw for this arrangement.");
+          out.push({ name: `${name}_plans_and_sections.png`, blob });
+        } else {
+          const style = paletteStyle(palette);
           for (const lv of tile.spaces?.levels ?? []) {
             const d = buildDrawing(tile, { kind: "plan", level: lv.id });
             if (d) out.push({ name: `drawings/plan_level_${String(lv.id).padStart(2, "0")}.png`, blob: await drawingToPng(d, style, { feetPerInch: plansCfg.ftPerIn, dpi: plansCfg.dpi }) });
@@ -289,10 +314,10 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
         }
         return out;
       }
-      case "report": {
+            case "report": {
         const picture = h && pose ? await capturePosePng(h, pose, { width: Math.round(1520 * rep.scale), height: Math.round(940 * rep.scale), background: "#000000" }) : null;
         const seq = A.sequence.steps.map((s) => ({ name: A.nameOf(s.pieceId), category: CATEGORY_LABEL[categoryOf(A.layout.byId.get(s.pieceId)!.tile)], score: s.joint?.score ?? null }));
-        return [{ name: `${name}_report.png`, blob: await buildReport({ scale: rep.scale, title: A.ui.currentName, picture, summary: A.whole.summary, sequence: seq, joints: A.joints, warnings: A.warnings, names: A.nameOf }) }];
+        return [{ name: `${name}_report.png`, blob: await buildReport({ scale: rep.scale, title: A.ui.currentName, picture, summary: A.whole.summary, sequence: seq, joints: A.joints, warnings: A.warnings, names: A.nameOf, palette }) }];
       }
       case "png": {
         if (!h || !pose) throw new Error("The viewport isn't ready yet.");
@@ -302,14 +327,32 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
       }
       case "views": {
         if (!h) throw new Error("The viewport isn't ready yet.");
-        const w = pic.w;
-        const hh = pic.h;
-        const found = findNiceViews(A.layout.boxes, { comp: A.whole.comp, route: null, entrance: A.entrance });
+        const comp = A.whole.comp;
+        let path: Vec3[] | null = null;
+        if (views.interior > 0 && comp) {
+          setProgress({ label: "finding the inside views", done: 0, total: 1 });
+          await new Promise((r) => setTimeout(r, 20));
+          path = planDrone(comp, { order: A.sequence.steps.map((st) => st.pieceId), entrance: A.entrance, fov: 78, approach: false })?.path ?? null;
+        }
+        const found = findViews(A.layout.boxes, { comp, path, entrance: A.entrance, exposed: A.layout.exposed, counts: { exterior: views.exterior, closeups: views.closeups, interior: views.interior }, nameOf: A.nameOf });
+        if (!found.length) throw new Error("Pictures: no views were found (raise one of the counts above 0, or the building has no inside route).");
+        const n = { exterior: 0, closeup: 0, interior: 0 };
         const out: Out[] = [];
-        for (const [i, v] of found.entries()) out.push({ name: `views/${name}_view${i + 1}_${v.kind}.png`, blob: await capturePosePng(h, v.pose, { width: w, height: hh, background: "#000000", transparent: pic.clear }) });
+        for (const v of found) {
+          const kind = v.id.startsWith("int") ? "interior" : v.id.startsWith("close") ? "closeup" : "exterior";
+          n[kind]++;
+          // inside, the void is hidden and the foam solid with a light at the camera, so the rooms and the blocks round them read (as in the drone tour)
+          const inside = kind === "interior" ? applyTourLook(h.snapshot()!.scene) : null;
+          inside?.light.position.copy(toScene(v.pose.pos));
+          try {
+            out.push({ name: `views/${name}_${kind}_${n[kind]}.png`, blob: await capturePosePng(h, v.pose, { width: views.w, height: views.h, background: "#000000", transparent: views.clear }) });
+          } finally {
+            inside?.restore();
+          }
+        }
         return out;
       }
-      case "drone":
+            case "drone":
         return [await film("drone")];
       case "buildup":
         return [await film("buildup")];
@@ -407,11 +450,40 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
           <Row id="x-obj" label="OBJ model" hint="foam, void, plates and branches as groups" on={sel.obj} set={toggle("obj")} />
 
           <Heading>Drawings and report</Heading>
-          <Row id="x-plans" label="Plans and sections" hint="every level, and three sections each way" on={sel.plans} set={toggle("plans")}>
-            <Select className="h-7 text-[11px]" value={plans} onChange={(e) => setPlans(e.target.value as "png" | "svg")} aria-label="Drawing format">
-              <option value="png">PNG (black ground)</option>
-              <option value="svg">SVG (vector)</option>
+          <Row id="x-plans" label="Plans and sections" hint="every level and three sections each way, on one board with the information, or as separate files" on={sel.plans} set={toggle("plans")}>
+            <Select className="h-7 text-[11px]" value={plans} onChange={(e) => setPlans(e.target.value as "board" | "png" | "svg")} aria-label="Drawing format">
+              <option value="board">One board with the information (PNG)</option>
+              <option value="png">Separate PNGs</option>
+              <option value="svg">Separate SVGs (vector, white paper)</option>
             </Select>
+            {plans === "board" && (
+              <div className="grid grid-cols-3 items-end gap-2">
+                <label className="space-y-0.5 text-[10px] text-muted-foreground">
+                  Board width
+                  <Select className="h-7 text-[11px]" value={String(board.width)} onChange={(e) => setBoard((b) => ({ ...b, width: Number(e.target.value) }))} aria-label="Board width">
+                    {[2400, 3300, 4800, 6600].map((v) => (
+                      <option key={v} value={String(v)}>
+                        {v} px
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="space-y-0.5 text-[10px] text-muted-foreground">
+                  Drawings per row
+                  <Select className="h-7 text-[11px]" value={String(board.columns)} onChange={(e) => setBoard((b) => ({ ...b, columns: Number(e.target.value) }))} aria-label="Drawings per row">
+                    {[2, 3, 4, 5].map((v) => (
+                      <option key={v} value={String(v)}>
+                        {v}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="flex items-center gap-1.5 pb-1 text-[10px] text-muted-foreground">
+                  <Switch checked={board.labels} onCheckedChange={(v) => setBoard((b) => ({ ...b, labels: v }))} />
+                  Room labels
+                </label>
+              </div>
+            )}
             {plans === "png" && (
               <div className="grid grid-cols-2 gap-2">
                 <label className="space-y-0.5 text-[10px] text-muted-foreground">
@@ -437,18 +509,24 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
               </div>
             )}
           </Row>
-          <Row id="x-report" label="One-page report" hint="picture, numbers, sequence and joints as one PNG" on={sel.report} set={toggle("report")}>
+          <Row id="x-report" label="One-page report" hint="picture, numbers, every space and every warning, as one PNG" on={sel.report} set={toggle("report")}>
             <label className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
               Resolution
               <Select className="h-7 w-44 text-[11px]" value={String(rep.scale)} onChange={(e) => setRep({ scale: Number(e.target.value) })} aria-label="Report resolution">
-                <option value="1">1× (1600 × 1000)</option>
-                <option value="2">2× (3200 × 2000)</option>
-                <option value="3">3× (4800 × 3000)</option>
+                <option value="1">1× (1654 px wide)</option>
+                <option value="2">2× (3308 px wide)</option>
+                <option value="3">3× (4962 px wide)</option>
               </Select>
             </label>
           </Row>
+          <details className="rounded-md border-hair px-3 py-2">
+            <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Colours of the report and the drawings</summary>
+            <div className="pt-2">
+              <PaletteEditor />
+            </div>
+          </details>
 
-          <Heading>Pictures</Heading>
+                    <Heading>Pictures</Heading>
           <Row id="x-png" label="Picture of the current view" hint="exactly what you see, without the helper marks" on={sel.png} set={toggle("png")}>
             <div className="flex items-center gap-2">
               <div className="flex-1"><SizeFields width={pic.w} height={pic.h} onChange={(w, h) => setPic((p) => ({ ...p, w, h }))} /></div>
@@ -458,11 +536,36 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
               </label>
             </div>
           </Row>
-          <Row id="x-views" label="The best views, found for you" hint="a few exterior corners and an interior view" on={sel.views} set={toggle("views")}>
-            <p className="text-[10px] text-muted-foreground">Uses the size and background above (set under “Picture of the current view”, or the defaults).</p>
+          <Row id="x-views" label="The best pictures, found for you" hint="the whole building, close-ups at the openings, and inside views where blocks face each other" on={sel.views} set={toggle("views")}>
+            <SizeFields width={views.w} height={views.h} onChange={(w, h) => setViews((v) => ({ ...v, w, h }))} />
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  ["exterior", "Whole building", 6],
+                  ["closeups", "Close-ups at openings", 6],
+                  ["interior", "Inside", 8],
+                ] as const
+              ).map(([k, label, max]) => (
+                <label key={k} className="space-y-0.5 text-[10px] text-muted-foreground">
+                  {label}
+                  <Select className="h-7 text-[11px]" value={String(views[k])} onChange={(e) => setViews((v) => ({ ...v, [k]: Number(e.target.value) }))} aria-label={label}>
+                    {Array.from({ length: max + 1 }, (_, i) => (
+                      <option key={i} value={String(i)}>
+                        {i === 0 ? "none" : i}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+              ))}
+            </div>
+            <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <Switch checked={views.clear} onCheckedChange={(v) => setViews((x) => ({ ...x, clear: v }))} />
+              Clear background
+            </label>
+            <p className="text-[10px] text-muted-foreground">One zip with the three kinds in separate files (exterior, closeup, interior).</p>
           </Row>
 
-          <Heading>Films</Heading>
+                    <Heading>Films</Heading>
           <Row id="x-drone" label="Drone house tour" hint="flies in at the entrance and glides through the voids, never through a wall" on={sel.drone} set={toggle("drone")}>
             <div className="grid grid-cols-2 gap-2">
               <label className="space-y-0.5 text-[10px] text-muted-foreground">
@@ -576,17 +679,30 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
               </Button>
             </div>
           </Row>
-          <Row id="x-build" label="Build-up animation" hint="the pieces arrive one by one while the camera turns" on={sel.buildup} set={toggle("buildup")}>
+          <Row id="x-build" label="Build-up animation" hint="the blocks placed one by one and the spaces made, or the finished model turning" on={sel.buildup} set={toggle("buildup")}>
+            <label className="space-y-0.5 text-[10px] text-muted-foreground">
+              Style
+              <Select className="h-7 text-[11px]" value={build.style} onChange={(e) => setBuild((b) => ({ ...b, style: e.target.value as "place" | "turn" }))} aria-label="Build-up style">
+                <option value="place">Place the blocks one by one</option>
+                <option value="turn">Turn the finished model</option>
+              </Select>
+            </label>
             <SizeFields width={build.width} height={build.height} onChange={(w, h) => setBuild((b) => ({ ...b, width: w, height: h }))} />
             <div className="grid grid-cols-3 gap-2">
               <Select className="h-7 text-[11px]" value={String(build.seconds)} onChange={(e) => setBuild((b) => ({ ...b, seconds: Number(e.target.value) }))} aria-label="Seconds">
-                {[6, 10, 15, 20].map((f) => (
+                {[8, 12, 20, 30, 45, 60].map((f) => (
                   <option key={f} value={String(f)}>
                     {f} s
                   </option>
                 ))}
               </Select>
-              
+              <Select className="h-7 text-[11px]" value={String(build.fps)} onChange={(e) => setBuild((b) => ({ ...b, fps: Number(e.target.value) }))} aria-label="Frames per second">
+                {[12, 20, 24, 30].map((f) => (
+                  <option key={f} value={String(f)}>
+                    {f} fps
+                  </option>
+                ))}
+              </Select>
               <Select className="h-7 text-[11px]" value={build.format} onChange={(e) => setBuild((b) => ({ ...b, format: e.target.value as "mp4" | "gif" }))} aria-label="Format">
                 {formats.map((f) => (
                   <option key={f.v} value={f.v} disabled={f.v === "mp4" && !mp4}>
@@ -597,7 +713,7 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
             </div>
           </Row>
 
-          <Heading>For Rhino</Heading>
+                    <Heading>For Rhino</Heading>
           <Row id="x-rhino" label="Mass for the engine" hint="a second pass: add sources where joints dead-end, run, and drop the result into the Viewer" on={sel.rhino} set={toggle("rhino")} />
           <Row id="x-sheet" label="Rebuild sheet" hint="a text list of every piece, position and orientation, to rebuild by hand" on={sel.sheet} set={toggle("sheet")} />
         </div>

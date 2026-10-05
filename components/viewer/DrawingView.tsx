@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { downloadTextFile } from "@/lib/exporters/objExport";
 import { downloadBlob } from "@/lib/boards/exportBoard";
+import { paletteStyle, usePalette } from "@/lib/boardPalette";
+import { PaletteEditor } from "@/components/shared/PaletteEditor";
 import { drawingFromState, type DrawState } from "@/lib/drawing/state";
 import type { DrawingHighlight } from "@/lib/drawing/build";
 import { drawToCanvas, drawingSize, drawingStyle, drawingToPng, drawingToSvg } from "@/lib/drawing/render";
@@ -62,7 +64,7 @@ const SCALES = [
 export function DrawingExport({ tile, draw, highlight }: { tile: ParsedTile; draw: DrawState; highlight?: DrawingHighlight }) {
   const [feetPerInch, setFeetPerInch] = useState(10);
   const [dpi, setDpi] = useState(200);
-  const [paper, setPaper] = useState(false);
+  const [palette, , preset] = usePalette();
   const [busy, setBusy] = useState(false);
   const stem = () => {
     const d = drawingFromState(tile, draw, highlight);
@@ -70,7 +72,7 @@ export function DrawingExport({ tile, draw, highlight }: { tile: ParsedTile; dra
     const tag = d.spec.kind === "plan" ? `plan_${(d.subtitle.split(":")[1] ?? "").trim().replace(/[^a-z0-9]+/gi, "_").toLowerCase()}` : `section_${d.spec.axis}_${Math.round(d.spec.positionFt ?? 0)}ft`;
     return { d, name: `${tile.name}_${tag}` };
   };
-  const style = () => drawingStyle(paper ? "paper" : "dark");
+  const style = () => paletteStyle(palette);
 
   const svg = () => {
     const s = stem();
@@ -112,10 +114,20 @@ export function DrawingExport({ tile, draw, highlight }: { tile: ParsedTile; dra
           ))}
         </Select>
       </div>
-      <label className="flex items-center gap-2 text-xs">
-        <input type="checkbox" checked={paper} onChange={(e) => setPaper(e.target.checked)} />
-        White paper (for printing; off = black ground)
-      </label>
+      <div className="flex items-center gap-1.5">
+        <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => preset("dark")}>
+          Black ground
+        </Button>
+        <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => preset("paper")}>
+          White paper
+        </Button>
+      </div>
+      <details>
+        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">Colours</summary>
+        <div className="pt-2">
+          <PaletteEditor />
+        </div>
+      </details>
       <div className="flex gap-1.5">
         <Button variant="outline" size="sm" onClick={svg}>
           <Download className="mr-1.5 h-3.5 w-3.5" />
