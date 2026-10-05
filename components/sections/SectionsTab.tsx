@@ -16,6 +16,7 @@ import { CubeHexBuilder } from "@/components/sections/CubeHexBuilder";
 const CorrectionEditor = dynamic(() => import("@/components/sections/CorrectionEditor").then((m) => m.CorrectionEditor), { ssr: false });
 import { addNewTile, loadTileBank, nextTileNumber, renameTile, saveCorrection, type BankTile } from "@/lib/sections/tileLibrary";
 import { autoTraceImage } from "@/lib/sections/autoTrace";
+import { useShortcuts } from "@/lib/shortcuts";
 
 export function SectionsTab() {
   const [tiles, setTiles] = useState<BankTile[] | null>(null);
@@ -32,6 +33,11 @@ export function SectionsTab() {
   useEffect(refresh, []);
 
   const editingTile = tiles?.find((t) => t.name === editingName) ?? null;
+  useShortcuts("sections", [
+    { keys: "B", label: "Bank and cleanup", group: "View", run: () => setView("bank") },
+    { keys: "U", label: "Cube / hex builder", group: "View", run: () => setView("builder") },
+    ...(editingName ? [{ keys: "Escape", label: "Close the editor", group: "Editor", run: () => setEditingName(null) }] : []),
+  ]);
 
   const handleSelect = (name: string, mode: "edit" | "toggle") => {
     if (mode === "edit") {

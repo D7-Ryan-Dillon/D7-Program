@@ -29,7 +29,7 @@ export function ExportPanel({ tile, visibility }: { tile: ParsedTile; visibility
   const exportObj = async () => {
     setBusy(true);
     try {
-      const text = await tileToObjText(tile.glbUrl, visibility);
+      const text = await tileToObjText(tile.glbUrl, visibility, tile);
       downloadTextFile(`${tile.name}.obj`, text);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Couldn't export that mesh.");

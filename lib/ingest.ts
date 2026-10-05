@@ -14,7 +14,7 @@ const CATEGORY_NAMES = ["gathering", "office", "lobby"] as const;
 
 /** The engine's own category / typology (recipe meta) when it wrote one; otherwise guessed from the name. */
 function identityOf(name: string, meta: TileMeta | undefined): GuessedIdentity {
-  if (meta?.category) return { category: meta.category, typology: meta.typology };
+  if (meta?.category && meta.category !== "assembly") return { category: meta.category, typology: meta.typology };
   return guessIdentity(name);
 }
 

@@ -18,20 +18,23 @@ import { encodeGif } from "@/lib/boards/gifExport";
 import { encodeMp4, mp4Supported } from "@/lib/boards/mp4Export";
 import { AXO_VIEWS } from "@/lib/faceViews";
 import { FPS_OPTIONS, defaultAnimationSettings, type AnimationSettings, type DitherMode } from "@/lib/boards/types";
-import { useProjectUi } from "@/lib/project-store";
+import { useProject, useProjectUi } from "@/lib/project-store";
+import { QUALITY_CHOICES, refineByTileId, type Quality } from "@/lib/fineGeometry";
 import { captureViewportPng, createViewportAnimation, previewViewport, setPngDpi, type ViewportHandle } from "@/lib/viewportCapture";
 
-type Aspect = "view" | "1:1" | "4:3" | "16:9" | "3:2";
+type Aspect = "view" | "1:1" | "4:3" | "16:9" | "3:2" | "custom";
 const ASPECTS: { value: Aspect; label: string }[] = [
   { value: "view", label: "As viewed" },
   { value: "1:1", label: "1:1" },
   { value: "4:3", label: "4:3" },
   { value: "3:2", label: "3:2" },
   { value: "16:9", label: "16:9" },
+  { value: "custom", label: "Custom" },
 ];
 
-function ratioOf(aspect: Aspect, live: number): number {
+function ratioOf(aspect: Aspect, live: number, custom = 1): number {
   if (aspect === "view") return live || 1;
+  if (aspect === "custom") return custom;
   const [w, h] = aspect.split(":").map(Number);
   return w / h;
 }
@@ -39,8 +42,10 @@ function ratioOf(aspect: Aspect, live: number): number {
 /** Remembered per project: the last choice and every setting behind it. */
 interface ExportUi {
   mode: "png" | "turntable";
-  png: { sizeBy: "px" | "print"; widthPx: number; widthIn: number; dpi: number; aspect: Aspect; transparent: boolean; background: string };
-  turntable: { format: "gif" | "mp4"; startView: string; spinSeconds: number; fps: number; widthPx: number; aspect: Aspect; background: string; colors: "auto" | "custom"; paletteSize: number; dither: DitherMode };
+  /** how finely the model is rebuilt for the export (the live view keeps the light mesh) */
+  quality?: Quality;
+  png: { sizeBy: "px" | "print"; heightPx?: number; widthPx: number; widthIn: number; dpi: number; aspect: Aspect; transparent: boolean; background: string };
+  turntable: { format: "gif" | "mp4"; heightPx?: number; startView: string; spinSeconds: number; fps: number; widthPx: number; aspect: Aspect; background: string; colors: "auto" | "custom"; paletteSize: number; dither: DitherMode };
 }
 const defaultExportUi = (): ExportUi => ({
   mode: "png",
@@ -59,6 +64,13 @@ export function ViewportExportButton({ handleRef, name, className }: { handleRef
   const [liveAspect, setLiveAspect] = useState(1);
   const [step, setStep] = useState<"choose" | "png" | "turntable">("choose");
   const [ui, setUi] = useProjectUi<ExportUi>("viewportExport", defaultExportUi);
+  const { tiles } = useProject();
+  const quality: Quality = ui.quality ?? 3;
+  /** Swaps the smooth, high-detail mesh into the live scene for the length of an export; returns the undo. */
+  const refine = () => {
+    const snap = handleRef.current?.snapshot();
+    return snap && quality ? refineByTileId(snap.scene, new Map(tiles.map((x) => [x.id, x])), quality) : () => {};
+  };
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ label: string; done: number; total: number } | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -82,8 +94,8 @@ export function ViewportExportButton({ handleRef, name, className }: { handleRef
   };
 
   const pngWidth = p.sizeBy === "print" ? Math.round(p.widthIn * p.dpi) : p.widthPx;
-  const pngHeight = Math.round(pngWidth / ratioOf(p.aspect, liveAspect));
-  const turnRatio = ratioOf(t.aspect, liveAspect);
+  const pngHeight = p.aspect === "custom" ? Math.round(p.heightPx ?? 1350) : Math.round(pngWidth / ratioOf(p.aspect, liveAspect));
+  const turnRatio = ratioOf(t.aspect, liveAspect, t.widthPx / (t.heightPx ?? 800));
 
   // First-frame preview: exactly what the turntable's frame 0 will look like.
   useEffect(() => {
@@ -103,7 +115,9 @@ export function ViewportExportButton({ handleRef, name, className }: { handleRef
 
   const exportPng = async () => {
     setBusy(true);
+    const restore = refine();
     try {
+      await new Promise((r) => setTimeout(r, 30));
       let blob = await captureViewportPng(handleRef.current ?? { snapshot: () => null }, { width: pngWidth, height: pngHeight, startView: "current", background: p.background, transparent: p.transparent });
       if (p.sizeBy === "print" || p.dpi !== 300) blob = await setPngDpi(blob, p.dpi);
       downloadBlob(`${slug(name)}-view.png`, blob);
@@ -112,6 +126,7 @@ export function ViewportExportButton({ handleRef, name, className }: { handleRef
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Couldn't export the view.");
     } finally {
+      restore();
       setBusy(false);
     }
   };
@@ -122,6 +137,7 @@ export function ViewportExportButton({ handleRef, name, className }: { handleRef
     setBusy(true);
     const frames = Math.max(2, Math.round(t.spinSeconds * t.fps));
     let source: ReturnType<typeof createViewportAnimation> | null = null;
+    const restore = refine();
     try {
       const width = t.widthPx;
       source = createViewportAnimation(handleRef.current ?? { snapshot: () => null }, { width, height: Math.round(width / turnRatio), startView: t.startView, background: t.background }, frames);
@@ -145,6 +161,7 @@ export function ViewportExportButton({ handleRef, name, className }: { handleRef
       else toast.error(err instanceof Error ? err.message : "Couldn't export the turntable.");
     } finally {
       source?.dispose();
+      restore();
       abortRef.current = null;
       setBusy(false);
       setProgress(null);
@@ -199,9 +216,20 @@ export function ViewportExportButton({ handleRef, name, className }: { handleRef
           {step === "png" && (
             <div className="space-y-3">
               <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Mesh quality</div>
+                <Select className="h-7 w-full text-[11px]" value={String(quality)} onChange={(e) => setUi((prev) => ({ ...prev, quality: Number(e.target.value) as Quality }))} aria-label="Mesh quality">
+                  {QUALITY_CHOICES.map((q) => (
+                    <option key={q.value} value={String(q.value)}>
+                      {q.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Shape</div>
                 <Segmented value={p.aspect} options={ASPECTS} onChange={(aspect) => setPng({ aspect })} />
               </div>
+              {p.aspect === "custom" && <NumberSlider label="Height" value={p.heightPx ?? 1350} min={256} max={10000} step={64} suffix="px" exact onChange={(heightPx) => setPng({ heightPx })} />}
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Size by</div>
                 <Segmented
@@ -270,9 +298,20 @@ export function ViewportExportButton({ handleRef, name, className }: { handleRef
                 />
               </div>
               <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Mesh quality</div>
+                <Select className="h-7 w-full text-[11px]" value={String(quality)} onChange={(e) => setUi((prev) => ({ ...prev, quality: Number(e.target.value) as Quality }))} aria-label="Mesh quality">
+                  {QUALITY_CHOICES.map((q) => (
+                    <option key={q.value} value={String(q.value)}>
+                      {q.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Shape</div>
                 <Segmented value={t.aspect} options={ASPECTS} onChange={(aspect) => setTurn({ aspect })} />
               </div>
+              {t.aspect === "custom" && <NumberSlider label="Height" value={t.heightPx ?? 800} min={200} max={4000} step={50} suffix="px" exact onChange={(heightPx) => setTurn({ heightPx })} />}
               <NumberSlider label="Spin time" value={t.spinSeconds} min={2} max={30} step={0.5} decimals={1} suffix="s" exact onChange={(spinSeconds) => setTurn({ spinSeconds })} />
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Frame rate</div>

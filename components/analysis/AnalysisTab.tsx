@@ -15,6 +15,7 @@ import { CriteriaPanel } from "@/components/analysis/CriteriaPanel";
 import { PresetBar } from "@/components/shared/PresetBar";
 import { Segmented } from "@/components/shared/Segmented";
 import { Section } from "@/components/shared/Section";
+import { useShortcuts } from "@/lib/shortcuts";
 import { SyncAllMenu } from "@/components/shared/SyncAllMenu";
 import { TilePane, defaultPane, normalizePane, syncPane, type PaneState, type SyncField } from "@/components/shared/TilePane";
 import type { ParsedTile } from "@/lib/types";
@@ -82,6 +83,16 @@ export function AnalysisTab() {
     }));
 
   const linkFor = (i: number): CameraLink | undefined => (match ? { id: `cmp-${i}`, hub, leader: i === 0 } : undefined);
+  useShortcuts("analysis", [
+    { keys: "S", label: "Single tile", group: "View", run: () => setUi((prev) => ({ ...prev, mode: "single" })) },
+    { keys: "C", label: "Compare tiles", group: "View", run: () => setUi((prev) => ({ ...prev, mode: "compare" })) },
+    ...(mode === "compare"
+      ? [
+          { keys: "M", label: match ? "Unmatch cameras" : "Match cameras", group: "Compare", run: () => setUi((prev) => ({ ...prev, match: !prev.match })) },
+          { keys: "3", label: count === 3 ? "Two tiles" : "Three tiles", group: "Compare", run: () => setUi((prev) => ({ ...prev, count: prev.count === 3 ? 2 : 3 })) },
+        ]
+      : []),
+  ]);
 
   if (!activeTile) {
     return (

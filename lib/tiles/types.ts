@@ -194,7 +194,7 @@ export interface PlateEntry {
 
 /** category / typology / variant, written by the engine from the recipe (no more guessing from the file name when present). */
 export interface TileMeta {
-  category?: "gathering" | "office" | "lobby";
+  category?: "gathering" | "office" | "lobby" | "assembly";
   typology?: string;
   variant?: string;
   slot?: number;

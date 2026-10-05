@@ -87,7 +87,11 @@ function applyMaterial(mesh: THREE.Mesh, color: string, visible: boolean, ghoste
 
 function Model({ tile, displayMode, visibility, colors, opacity, clip, tint, emphasis, onBounds }: ModelProps) {
   const gltf = useGLTF(tile.glbUrl);
-  const scene = useMemo(() => gltf.scene.clone(true), [gltf]);
+  const scene = useMemo(() => {
+    const c = gltf.scene.clone(true);
+    c.userData = { ...c.userData, tileId: tile.id }; // so an export can swap in the smooth mesh of this tile
+    return c;
+  }, [gltf, tile.id]);
   // the floor plates and branches live in a second GLB; without one this loads the main file again (cached) and ignores it
   const partsGltf = useGLTF(tile.partsUrl ?? tile.glbUrl);
   const parts = useMemo(() => (tile.partsUrl ? partsGltf.scene.clone(true) : null), [partsGltf, tile.partsUrl]);

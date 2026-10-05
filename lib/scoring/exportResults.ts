@@ -52,7 +52,7 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): st
 const toBlob = (canvas: HTMLCanvasElement) => new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't write the image."))), "image/png"));
 
 /** The results table as an image: tiles down the side, carried criteria across, score and reading in each cell. */
-export async function resultsImage(rows: ResultRow[], keys: DescriptorKey[], ground: Ground): Promise<Blob> {
+export async function resultsImage(rows: ResultRow[], keys: DescriptorKey[], ground: Ground, scale = 1): Promise<Blob> {
   const style = drawingStyle(ground);
   const labels = new Map(rows[0]?.results.map((r) => [r.key, r.label]) ?? []);
   const nameW = 300;
@@ -61,12 +61,15 @@ export async function resultsImage(rows: ResultRow[], keys: DescriptorKey[], gro
   const headH = 74;
   const pad = 24;
   const canvas = document.createElement("canvas");
-  canvas.width = pad * 2 + nameW + colW * keys.length;
-  canvas.height = pad * 2 + headH + rowH * rows.length;
+  const W = pad * 2 + nameW + colW * keys.length;
+  const H = pad * 2 + headH + rowH * rows.length;
+  canvas.width = Math.round(W * scale);
+  canvas.height = Math.round(H * scale);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas 2D context unavailable");
+  ctx.scale(scale, scale);
   ctx.fillStyle = style.bg;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, W, H);
   ctx.textBaseline = "top";
   ctx.font = "600 13px ui-monospace, Menlo, monospace";
   ctx.fillStyle = style.muted;
@@ -78,7 +81,7 @@ export async function resultsImage(rows: ResultRow[], keys: DescriptorKey[], gro
   ctx.globalAlpha = 0.4;
   ctx.beginPath();
   ctx.moveTo(pad, pad + headH);
-  ctx.lineTo(canvas.width - pad, pad + headH);
+  ctx.lineTo(W - pad, pad + headH);
   ctx.stroke();
   ctx.globalAlpha = 1;
   rows.forEach(({ tile, results }, r) => {
@@ -132,11 +135,11 @@ export function diagramDrawing(tile: ParsedTile, result: DescriptorResult): Draw
 }
 
 /** One annotated diagram: the drawing with the measure lit, then the descriptor, its score, the quantity and the sentence. */
-export async function descriptorDiagram(tile: ParsedTile, result: DescriptorResult, ground: Ground): Promise<Blob> {
+export async function descriptorDiagram(tile: ParsedTile, result: DescriptorResult, ground: Ground, scale = 1): Promise<Blob> {
   const sheet = document.createElement("canvas");
-  sheet.width = 1200;
-  sheet.height = 520;
-  paintDiagram(sheet, tile, result, ground, 1);
+  sheet.width = Math.round(1200 * scale);
+  sheet.height = Math.round(520 * scale);
+  paintDiagram(sheet, tile, result, ground, scale);
   return toBlob(sheet);
 }
 
@@ -201,13 +204,13 @@ function paintDiagram(canvas: HTMLCanvasElement, tile: ParsedTile, result: Descr
 }
 
 /** Every descriptor's annotated diagram on one sheet (two columns). */
-export async function diagramSheet(tile: ParsedTile, results: DescriptorResult[], ground: Ground): Promise<Blob> {
+export async function diagramSheet(tile: ParsedTile, results: DescriptorResult[], ground: Ground, scale = 1): Promise<Blob> {
   const w = 1200;
   const h = 520;
   const cols = 2;
   const canvas = document.createElement("canvas");
-  canvas.width = cols * w;
-  canvas.height = Math.ceil(results.length / cols) * h;
-  results.forEach((r, i) => paintDiagram(canvas, tile, r, ground, 1, { x: (i % cols) * w, y: Math.floor(i / cols) * h }, w, h));
+  canvas.width = Math.round(cols * w * scale);
+  canvas.height = Math.round(Math.ceil(results.length / cols) * h * scale);
+  results.forEach((r, i) => paintDiagram(canvas, tile, r, ground, scale, { x: (i % cols) * w, y: Math.floor(i / cols) * h }, w, h));
   return toBlob(canvas);
 }

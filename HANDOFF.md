@@ -102,7 +102,7 @@ downstream works with regardless of which tab created it.
 a private copy of a measurement. `lib/tiles/measure.ts` (metrics, faces, sections), `analyze.ts` (levels, rooms, connections, routes, profile,
 daylight, openings, structure; the TypeScript twin of `analyze_tile()` in `engine/erosion_engine_7.py`), `plates.ts` (plate facts from plate
 cells), `pipeline.ts` (`ensureAnalysis`: fills in what a loaded or built tile lacks; called by ingest, the builder and project load),
-`tint.ts`, `checks.ts` (print checks), `facts.ts` (groundwork for the Arrange overhaul, not imported by Arrange). Spec: `docs/DATA_FORMAT.md`
+`tint.ts`, `checks.ts` (print checks), (Arrange reads voxels directly through `lib/arrange/orient.ts`). Spec: `docs/DATA_FORMAT.md`
 section 13. **`npm run check:parity`** compares `analyze.ts` with the engine's own `spaces.json` / `structure.json` on the 15 typology tiles
 (`lib/tiles/fixtures`, regenerate with `engine/tiles/make_fixtures.py`); change the Python and the TypeScript together and keep it green.
 `ParsedTile` carries `spaces`, `structure`, `plates`, `meta`, `partsUrl` and extra voxel arrays (`plates`, `struts`, `mask`, `rooms`), all persisted.
@@ -299,11 +299,24 @@ computes ~20 architectural measures (branching, porosity, compression,
 layering, floor levels, etc.) from the raw tile data; `lib/scoring/
 descriptors.ts` blends those into the 12 named scores.
 
-### Arrange (`components/arrange/`, `lib/arrange/`)
-Auto-generates a connected, interlocking, branching arrangement of the
-tiles on the bank, with per-instance editing, joint scoring/marking, and a
-"smooth & seal" CSG export. **Second area the project owner is doing active
-work themselves -- see section 7.**
+### Arrange (`components/arrange/`, `lib/arrange/`) -- rebuilt 2026-10-05
+One connected, walkable building composed from the tiles, judged as
+architecture, saved with the project and added back as a tile. The full
+description, the rules, the keys, what was verified and what was not are in
+**`docs/ARRANGE.md`**. In short: a piece is a tile + a position (multiples of
+0.5 ft) + an orientation (mirror in X, quarter turns, optional scale); contacts
+become joints with four scored parts (`lib/arrange/joints.ts`); `layout.ts` is
+where the connected rule lives (biggest touching group = main set; islands;
+walkable reachability from the entrance); `ops.ts` holds the edits and the
+re-attach repair; `generate.ts` grows one arrangement and also powers
+`suggest.ts`; `composite.ts` pastes the pieces into one voxel model that
+`bundle.ts` reads (in a worker, `analysis.worker.ts`) and `smooth.ts` cleans;
+`useArrange.tsx` is the controller every panel reads (document with undo, derived
+layout / joints / warnings / whole, all actions, the shortcut list). The tab's
+saved state is `ui.arrange` (`ArrangeUi`: current arrangement, saved list,
+rules, priorities, site, smoothing). `npm run check:arrange` is its regression
+check (no browser).
+Exports live in one window (`ExportDialog.tsx`); the drone tour is `lib/arrange/drone.ts`. Project settings (every tab's remembered state) are saved in a small row `<code>~ui`, separate from the tiles (`lib/persistence.ts`), so an edit saves a few KB instead of every tile; the multi-block print export with labels sunk into the underside is `components/viewer/PrintBatchDialog.tsx` + `lib/exporters/printLabels.ts` (`docs/PLAN_PRINT_EXPORT.md`). Long jobs show `components/shared/LoadingCover.tsx` instead of a half-built result. **Mesh quality**: the engine meshes (cut from a 40-cell field) stay in the live viewports; pictures, films, turntables, board exports, OBJ and STL swap in smooth meshes rebuilt from the voxels (`lib/fineGeometry.ts` for scenes, `lib/exporters/printMesh.ts` for the mesher; cached, capped at 32 meshes; a quality choice in each export window). `components/shared/SizeFields.tsx` is the shared width / height control for exports.
 
 ### Boards (`components/boards/`, `lib/boards/`)
 Composes a presentation-plate layout -- an adaptive grid of tile renders
@@ -393,8 +406,9 @@ code string.
      "Save as tile".
 3. **Analysis tab**: pick a tile, check the descriptors to score (6 minimum
    per the assignment, up to all 12), read the scores.
-4. **Arrange tab**: auto-generate a connected composition from the tiles on
-   the bank; inspect/edit joints and instances; export.
+4. **Arrange tab**: build or generate one connected building from the tiles
+   on the bank (rules, priorities, shapes), edit it freely, judge it, save it,
+   add it back as a tile, export it (`docs/ARRANGE.md`).
 5. **Boards tab**: pick tiles, lay out a presentation board, export the two
    PNGs.
 
@@ -426,10 +440,10 @@ Provisioned 2026-09-30. Supabase project ref `rpzmpuyhudvdhxuehqit`.
 - **UI state** (`state.ui`, see the cross-cutting section above): Boards
   config, Viewer/Analysis layouts, Arrange bank + settings, builder settings,
   criteria and presets now save with the project.
-- **Not yet synced to Supabase**: the Arrange tab's generated composition
-  (`ArrangeTab.tsx`'s own `assembly` state) -- entering the same project code
-  elsewhere gets the same tiles and settings, but Arrange needs
-  "Auto-generate" run again (cheap).
+- **Arrangements save with the project**: the current one and every saved one
+  (pieces, names, ratings, rules, priorities, site, smoothing, a small JPEG
+  thumbnail) live in `ui.arrange`; an arrangement added as a tile is a normal
+  tile (its GLBs and voxels go to Storage like any other).
 
 **Env vars** (`.env.local`, gitignored -- this is a public repo, never
 commit real values): see `.env.example` for the three key names. Get actual
@@ -445,31 +459,17 @@ server.ts` or another server-only file.
 **Deploy**: Vercel, connected to this GitHub repo, auto-deploys on push to
 `master`.
 
-## 7. Off-limits for now: Arrange internals and the Sections lofting algorithm
+## 7. Off-limits for now: the Sections lofting algorithm
 
-**The project owner is working on these two themselves, with a
-higher-effort model, because the changes needed are architecturally
-significant.** Don't attempt deep fixes to either unless they explicitly
-ask -- small, clearly-scoped asks (a UI tweak, a slider range, a display
-label) are fine either way; it's the underlying algorithms that are
-off-limits by default.
-
-### Arrange tab
-Substantially reworked in an earlier session (branching multi-socket growth
-instead of linear chains, a real scale range, optional tilt rotation). Two
-pieces were never confirmed working after that rework and may still need a
-real by-hand test:
-
-- **"Smooth & seal" (CSG fuse)** -- `lib/exporters/csgFuse.ts`. Compiles and
-  reuses the same `instanceMatrix()` function the normal render path uses
-  (reasonable evidence it's correct), but repeated attempts to click-test it
-  through browser automation failed to produce a visible result or error --
-  automation coordinate drift was a recurring problem, so this isn't
-  necessarily broken, just unverified.
-- **"Mark joint bad -> Regenerate marked"** (`components/arrange/
-  JointsPanel.tsx`, `regenerateMarked()` in `lib/arrange/autoGenerate.ts`)
-  -- the logic for which faces get excluded from regrowth was written and
-  reasoned through carefully, but never exercised end-to-end in the browser.
+**The project owner is working on the Sections lofting algorithm themselves,
+with a higher-effort model, because the changes needed are architecturally
+significant.** Don't attempt deep fixes to it unless they explicitly ask --
+small, clearly-scoped asks (a UI tweak, a slider range, a display label) are
+fine; it's the underlying algorithm that is off-limits by default. Arrange was
+rebuilt on the owner's explicit go (2026-10-05, `docs/ARRANGE.md`); the old CSG
+fuse (`lib/exporters/csgFuse.ts`) and `lib/sections/volumeField.ts` blend maths
+were not edited and stay as they are (the CSG fuse survives as "Legacy smooth" in
+the Arrange export panel).
 
 ### Sections tab's cube/hex lofting algorithm
 `lib/sections/volumeField.ts` is a faithful, line-for-line port of
@@ -544,17 +544,11 @@ access to their filesystem. The Sections tab needs no external data at all
 
 ## 10. Suggested next steps (outside the off-limits areas in section 7)
 
-0. **The Arrange overhaul** is planned in `docs/PLAN_ARRANGE_OVERHAUL.md` (lattice placement, a joint score that also checks floors, an in-app interlock test and pair matrix, whole-assembly analysis, a better generator and a variations gallery, outputs). It starts only on the owner's go and answers to the questions at the end of that file.
-1. Sync the Arrange assembly to Supabase (everything else now saves with
-   the project). Arrange's tile reading, the interlock test (2/4/8 copies by
-   repeat, mirror, shift, with scale/rotate allowed) and an arrangement
-   build-up GIF are all waiting on the new Grasshopper script (floor plates and
-   geometry inputs) -- then re-read tiles architecturally (clear height, plate
-   coverage, spans, circulation graph) as new metrics for the criteria selector.
+0. Arrange follow-ups (see the end of `docs/ARRANGE.md`): a mesh cap on level cuts, a gallery that ranks several arrangements, browser tests of the GIF export and the Boards round trip, the engine's plate objects in the mass sent back to Rhino, per-tab shortcut sets beyond the first lists.
+1. Non-cubic tile sets: the engine side (recipes with `container` boxes of 20 x 40 x 20 and the like, floors every 10 ft, a standard port on every storey) so Arrange can use real ones; Arrange itself already handles any box.
 2. Persist Sections-tab corrections (currently `localStorage`-only) to
    Supabase if cross-device correction editing turns out to matter.
-3. Clipping planes in the Arrange tab, and a saved-objects history there
-   too (both planned, not built).
+3. (done) Arrange now has level cuts and a saved-arrangements list.
 4. Animated export ideas not built: a live in-app turntable preview, a worker
    for the GIF encode, per-tile spin offsets or counter-rotation, and
    transparent-background GIFs.

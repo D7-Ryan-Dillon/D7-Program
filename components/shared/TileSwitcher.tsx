@@ -8,18 +8,20 @@ import { useProject } from "@/lib/project-store";
 import type { ParsedTile } from "@/lib/types";
 import { TileThumbnail } from "./TileThumbnail";
 
-type TileFilter = "all" | "gathering" | "office" | "lobby" | "builder" | "other";
+type TileFilter = "all" | "gathering" | "office" | "lobby" | "builder" | "assembly" | "other";
 
 const FILTERS: { key: Exclude<TileFilter, "all">; label: string }[] = [
   { key: "gathering", label: "Gathering" },
   { key: "office", label: "Workspace" },
   { key: "lobby", label: "Lobby" },
   { key: "builder", label: "Cube builder" },
+  { key: "assembly", label: "Assemblies" },
   { key: "other", label: "Other" },
 ];
 
 /** Which filter chip a tile belongs to: pieces made in the cube / hex builder have their own chip; the rest go by the typology category. */
-function tileGroup(tile: ParsedTile): Exclude<TileFilter, "all"> {
+export function tileGroup(tile: ParsedTile): Exclude<TileFilter, "all"> {
+  if (tile.meta?.category === "assembly") return "assembly";
   if (tile.sectionRecipe) return "builder";
   return tile.guessed.category ?? "other";
 }

@@ -1,16 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownAZ, ChevronDown } from "lucide-react";
+import { ArrowDownAZ, Bookmark, Download, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { useProject, useProjectUi } from "@/lib/project-store";
+import { useShortcuts } from "@/lib/shortcuts";
 import { usePresets } from "@/lib/presets";
 import { useCriteria } from "@/lib/useCriteria";
 import { mergeDefaults } from "@/lib/mergeDefaults";
 import { GlowPanel } from "@/components/shared/GlowPanel";
 import { PresetBar } from "@/components/shared/PresetBar";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { PaneMenu } from "@/components/shared/PaneMenu";
+import { useSectionOpen } from "@/lib/workspaceUi";
 import { TilePicker } from "./TilePicker";
 import { SlotOrderList } from "./SlotOrderList";
 import { Section } from "@/components/shared/Section";
@@ -42,13 +45,16 @@ function newSlotId() {
 export function BoardsTab() {
   const { tiles } = useProject();
   const [ui, setUi] = useProjectUi<BoardsUi>("boards", defaultBoardsUi);
-  const { config, previewPage, animOpen } = ui;
+  const { config, previewPage } = ui;
   const criteria = useCriteria();
   const boardPresets = usePresets<BoardPresetData>("boards");
   const [presetWithTiles, setPresetWithTiles] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [animBusy, setAnimBusy] = useState(false);
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportDpi, setExportDpi] = useState(300);
+  const [settingsOpen, setSettingsOpen] = useSectionOpen("boards.settings", true);
   const previewAreaRef = useRef<HTMLDivElement>(null);
   const [previewAreaSize, setPreviewAreaSize] = useState({ width: 800, height: 600 });
 
@@ -148,7 +154,7 @@ export function BoardsTab() {
   const exportPngs = async () => {
     setExporting(true);
     try {
-      const [page1, page2] = await Promise.all([exportBoardPage1(renderConfig, tileById), exportBoardPage2(renderConfig, tileById)]);
+      const [page1, page2] = await Promise.all([exportBoardPage1(renderConfig, tileById, exportDpi), exportBoardPage2(renderConfig, tileById, exportDpi)]);
       const base = config.name.trim().replace(/[^\w.-]+/g, "_") || "board";
       downloadBlob(`${base}-board.png`, page1);
       downloadBlob(`${base}-descriptors.png`, page2);
@@ -160,10 +166,17 @@ export function BoardsTab() {
     }
   };
 
+  useShortcuts("boards", [
+    { keys: "1", label: "Board page", group: "Preview", run: () => setUi((prev) => ({ ...prev, previewPage: 1 })) },
+    { keys: "2", label: "Descriptor page", group: "Preview", run: () => setUi((prev) => ({ ...prev, previewPage: 2 })) },
+    { keys: "E", label: "Export both PNGs", group: "Export", run: () => (config.slots.length && !exporting ? void exportPngs() : undefined) },
+    { keys: "A", label: "Export window (PNG, GIF, MP4)", group: "Export", run: () => setExportOpen(true) },
+  ]);
+
   return (
     // Height-bounded on wide screens (like the Viewer) so the board stays put and only the side menus scroll.
     <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
-    <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:grid-rows-[minmax(0,1fr)]">
+    <div className={`grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-rows-[minmax(0,1fr)] ${settingsOpen ? "lg:grid-cols-[280px_minmax(0,1fr)_300px]" : "lg:grid-cols-[280px_minmax(0,1fr)]"}`}>
       <div className="order-2 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
         <GlowPanel glow="magenta">
           <div className="space-y-4 p-4">
@@ -216,9 +229,36 @@ export function BoardsTab() {
               ))}
             </div>
           </div>
-          <Button size="sm" disabled={!config.slots.length || exporting} onClick={() => void exportPngs()}>
-            {exporting ? "Exporting…" : "Export PNGs"}
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <PaneMenu icon={Bookmark} label="Board presets" side="bottom" width="w-72">
+              <PresetBar<BoardPresetData>
+                label="Board presets"
+                presets={boardPresets.presets}
+                onSave={(name) => boardPresets.save(name, presetData())}
+                onUpdate={(id) => boardPresets.update(id, presetData())}
+                onRename={boardPresets.rename}
+                onRemove={boardPresets.remove}
+                onApply={(p) => applyPreset(p.data)}
+              />
+              <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <input type="checkbox" className="accent-[var(--magenta)]" checked={presetWithTiles} onChange={(e) => setPresetWithTiles(e.target.checked)} />
+                Include the tile selection when saving
+              </label>
+            </PaneMenu>
+            <Button size="sm" disabled={!config.slots.length} onClick={() => setExportOpen(true)} title="PNG, GIF or MP4 (E)">
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              {animBusy ? "Exporting…" : "Export"}
+            </Button>
+            <button
+              type="button"
+              aria-label={settingsOpen ? "Hide the board settings" : "Show the board settings"}
+              title={settingsOpen ? "Hide the board settings" : "Show the board settings"}
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              className={`flex h-8 w-8 items-center justify-center rounded-md border-hair text-muted-foreground transition-colors hover:border-white/25 hover:text-foreground ${settingsOpen ? "border-magenta/50 bg-magenta/10 text-foreground" : ""}`}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
         <div ref={previewAreaRef} className="flex h-[30vh] items-center justify-center overflow-auto rounded-lg border-hair bg-black/40 p-2 sm:p-4 lg:h-auto lg:min-h-0 lg:flex-1">
           {config.slots.length ? (
@@ -242,49 +282,48 @@ export function BoardsTab() {
         </div>
       </div>
 
-      <div className="order-3 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
-        <GlowPanel glow="magenta">
-          <div className="p-4">
-            <button
-              type="button"
-              aria-expanded={animOpen}
-              onClick={() => setUi((prev) => ({ ...prev, animOpen: !prev.animOpen }))}
-              className="flex w-full items-center justify-between font-mono text-[11px] tracking-label uppercase text-muted-foreground hover:text-foreground"
-            >
-              <span>Animated export (GIF / MP4){animBusy ? " — running…" : ""}</span>
-              <ChevronDown className={`size-4 transition-transform ${animOpen ? "rotate-180" : ""}`} />
-            </button>
-            {/* Kept mounted while closed so an export in progress is not lost. */}
-            <div className={animOpen ? "mt-3" : "hidden"}>
+      {settingsOpen && (
+        <div className="order-3 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
+          <GlowPanel glow="orange" className="flex-1">
+            <div className="p-4">
+              <div className="mb-3 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Board settings</div>
+              <BoardSettingsPanel config={config} onChange={patchConfig} criteriaCount={criteria.keys.length} />
+              <p className="mt-4 text-[11px] text-muted-foreground">Settings save with the project automatically.</p>
+            </div>
+          </GlowPanel>
+        </div>
+      )}
+
+      <Dialog open={exportOpen} onOpenChange={(o) => !animBusy && setExportOpen(o)}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Export the board</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Pictures</div>
+              <label className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                Resolution
+                <select value={exportDpi} onChange={(e) => setExportDpi(Number(e.target.value))} aria-label="Board resolution" className="h-7 rounded-md border border-input bg-transparent px-2 text-[11px] text-foreground">
+                  {[150, 200, 300, 450, 600].map((d) => (
+                    <option key={d} value={d} className="bg-background">
+                      {d} dpi · {Math.round(config.widthIn * d)} × {Math.round(config.heightIn * d)} px
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button className="w-full justify-start" variant="outline" size="sm" disabled={!config.slots.length || exporting} onClick={() => void exportPngs()}>
+                {exporting ? "Exporting…" : "Both pages as PNG (the board and its descriptors)"}
+              </Button>
+            </div>
+            <div className="space-y-1.5 border-t border-border pt-3">
+              <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Animated (GIF / MP4){animBusy ? " — running…" : ""}</div>
+              <p className="text-[10px] text-muted-foreground">Width is set below; the height follows the page size ({config.widthIn} × {config.heightIn} in, changed under Board settings → Page).</p>
               <AnimatedExportPanel config={renderConfig} tileById={tileById} onChange={patchAnimation} onBusyChange={setAnimBusy} />
             </div>
           </div>
-        </GlowPanel>
-        <GlowPanel glow="orange" className="flex-1">
-          <div className="p-4">
-            <PresetBar<BoardPresetData>
-              label="Board presets"
-              presets={boardPresets.presets}
-              onSave={(name) => boardPresets.save(name, presetData())}
-              onUpdate={(id) => boardPresets.update(id, presetData())}
-              onRename={boardPresets.rename}
-              onRemove={boardPresets.remove}
-              onApply={(p) => applyPreset(p.data)}
-            />
-            <label className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-              <input type="checkbox" className="accent-[var(--magenta)]" checked={presetWithTiles} onChange={(e) => setPresetWithTiles(e.target.checked)} />
-              Include the tile selection when saving
-            </label>
-            <Separator className="my-4" />
-            <div className="mb-3 font-mono text-[11px] tracking-label uppercase text-muted-foreground">Board settings</div>
-            <BoardSettingsPanel config={config} onChange={patchConfig} criteriaCount={criteria.keys.length} />
-            <Separator className="my-4" />
-            <p className="text-[11px] text-muted-foreground">
-              Exports two PNGs: the board itself, and a second page showing each tile&rsquo;s scored descriptors (the criteria carried forward in the Analysis tab). Settings save with the project automatically.
-            </p>
-          </div>
-        </GlowPanel>
-      </div>
+        </DialogContent>
+      </Dialog>
 
       {editingSlotId &&
         (() => {

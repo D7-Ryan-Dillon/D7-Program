@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PrintPanel } from "@/components/viewer/PrintPanel";
 import { GlowPanel } from "@/components/shared/GlowPanel";
+import { LoadingCover } from "@/components/shared/LoadingCover";
 import { SquareFrame } from "@/components/shared/SquareFrame";
 import { DisplayModeBar } from "@/components/viewer/DisplayModeBar";
 import { VisibilityPanel } from "@/components/viewer/VisibilityPanel";
@@ -33,6 +34,7 @@ import { Section } from "@/components/shared/Section";
 import type { ViewportHandle } from "@/lib/viewportCapture";
 import { rotateTrace } from "@/lib/sections/rotateTrace";
 import { autoFill } from "@/lib/sections/autoFill";
+import { useShortcuts } from "@/lib/shortcuts";
 import { applyPlates, arePlatesActive, defaultPlates, type PlateFootprint, type PlateSettings } from "@/lib/sections/plates";
 import type { BankTile } from "@/lib/sections/tileLibrary";
 import { cubeFaces, facesForShape, hexSidePose, HEX_APOTHEM, prismFaces, type SectionTrace, type VolumeAssignments, type VolumeFaceName, type VolumeShape } from "@/lib/sections/volumeField";
@@ -349,6 +351,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
   const [busy, setBusy] = useState(false);
   const [exportingAnalysis, setExportingAnalysis] = useState(false);
   /** The tile built for the Print STL dialog (the same build "Add tile" and "Export _analysis" use). */
+  const [exportOpen, setExportOpen] = useState(false);
   const [printTile, setPrintTile] = useState<ParsedTile | null>(null);
   const [preparingPrint, setPreparingPrint] = useState(false);
 
@@ -599,6 +602,11 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
       setExportingAnalysis(false);
     }
   };
+
+  useShortcuts("sections", [
+    { keys: "G", label: "Generate", group: "Builder", run: generatePreview },
+    { keys: "F", label: "Auto-fill faces", group: "Builder", run: autoFillFaces },
+  ]);
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[280px_minmax(0,1fr)_280px] lg:grid-rows-[minmax(0,1fr)]">
@@ -853,6 +861,7 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
         <div className="flex h-[44vh] flex-col lg:h-full">
           <div className="min-h-0 flex-1">
           <SquareFrame className="relative">
+            {busy && <LoadingCover label="Building the tile…" />}
             {previewGroup && raw ? (
               <div className="relative h-full w-full overflow-hidden rounded-lg bg-black/40">
                 <Canvas
@@ -896,13 +905,11 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
 
       <div className="order-3 flex min-w-0 flex-col gap-4 lg:min-h-0 lg:overflow-y-auto">
         <GlowPanel glow="orange">
-          <Section id="builder.visibility" title="Visibility">
+          <Section id="builder.look" title="Look" defaultOpen={false} bodyClassName="space-y-4">
             <VisibilityPanel visibility={visibility} onVisibility={setVisibility} colors={colors} onColors={setColors} />
-          </Section>
-        </GlowPanel>
-        {displayMode === "faces" && (
-          <GlowPanel glow="magenta">
-            <Section id="builder.markers" title="Face markers" defaultOpen={false}>
+            <ClippingPlaneControl value={clip} onChange={setClip} />
+            {displayMode === "faces" && (
+              <Section id="builder.markers" variant="inline" title="Face markers" defaultOpen={false}>
               {(Object.keys(assignments) as VolumeFaceName[])
                 .filter((f) => assignments[f])
                 .map((face) => {
@@ -933,13 +940,9 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                     </div>
                   );
                 })}
-            </Section>
-          </GlowPanel>
-        )}
-        <GlowPanel glow="orange">
-          <div className="p-4">
-            <ClippingPlaneControl value={clip} onChange={setClip} />
-          </div>
+              </Section>
+            )}
+          </Section>
         </GlowPanel>
         <GlowPanel glow="magenta">
           <div className="space-y-3 p-4">
@@ -969,20 +972,39 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
             <p className="text-[11px] text-muted-foreground">
               Adds it to this project&rsquo;s tile bank -- usable in Viewer and Analysis right away.
             </p>
-            <div className="flex gap-1.5 pt-1">
-              <Button className="flex-1" variant="outline" size="sm" onClick={exportObj}>
-                Export OBJ
-              </Button>
-              <Button className="flex-1" variant="outline" size="sm" disabled={exportingAnalysis} onClick={() => void exportAnalysisBundle()}>
-                {exportingAnalysis ? "Building…" : "Export _analysis"}
-              </Button>
-            </div>
-            <Button className="w-full" variant="outline" size="sm" disabled={preparingPrint} onClick={() => void openPrint()}>
-              {preparingPrint ? "Building…" : "Print STL (parts and scale)"}
+            <Button className="w-full" variant="outline" size="sm" onClick={() => setExportOpen(true)}>
+              Export…
             </Button>
           </div>
         </GlowPanel>
       </div>
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-mono text-sm">Export {name.trim() || "this object"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Button className="w-full justify-start" variant="outline" size="sm" onClick={exportObj}>
+              OBJ model
+            </Button>
+            <Button className="w-full justify-start" variant="outline" size="sm" disabled={exportingAnalysis} onClick={() => void exportAnalysisBundle()}>
+              {exportingAnalysis ? "Building…" : "_analysis folder (for the Viewer and Analysis)"}
+            </Button>
+            <Button
+              className="w-full justify-start"
+              variant="outline"
+              size="sm"
+              disabled={preparingPrint}
+              onClick={async () => {
+                await openPrint();
+                setExportOpen(false);
+              }}
+            >
+              {preparingPrint ? "Building…" : "STL for printing (parts and scale)"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={!!printTile} onOpenChange={(open) => !open && setPrintTile(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>

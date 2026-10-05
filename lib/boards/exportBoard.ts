@@ -322,6 +322,8 @@ function tileRenderOptions(slot: BoardSlot, tile: ParsedTile, config: BoardConfi
   const o = slot.overrides;
   return {
     glbUrl: tile.glbUrl,
+    // exports (150 dpi and up) get the smooth mesh; the on-screen preview stays light
+    refine: dpi >= 150 ? tile : undefined,
     view: slot.view,
     customCamera: o?.customCamera,
     width,
@@ -608,15 +610,15 @@ function newCanvas(widthPx: number, heightPx: number, willReadFrequently = false
   return { canvas, ctx };
 }
 
-export async function exportBoardPage1(config: BoardConfig, tileById: Map<string, ParsedTile>): Promise<Blob> {
-  const { canvas, ctx } = newCanvas(Math.round(config.widthIn * DPI), Math.round(config.heightIn * DPI));
-  await drawBoardPage(ctx, config, tileById, 1);
+export async function exportBoardPage1(config: BoardConfig, tileById: Map<string, ParsedTile>, dpi: number = DPI): Promise<Blob> {
+  const { canvas, ctx } = newCanvas(Math.round(config.widthIn * dpi), Math.round(config.heightIn * dpi));
+  await drawBoardPage(ctx, config, tileById, 1, dpi);
   return canvasToPngBlob(canvas);
 }
 
-export async function exportBoardPage2(config: BoardConfig, tileById: Map<string, ParsedTile>): Promise<Blob> {
-  const { canvas, ctx } = newCanvas(Math.round(config.widthIn * DPI), Math.round(config.heightIn * DPI));
-  await drawBoardPage(ctx, config, tileById, 2);
+export async function exportBoardPage2(config: BoardConfig, tileById: Map<string, ParsedTile>, dpi: number = DPI): Promise<Blob> {
+  const { canvas, ctx } = newCanvas(Math.round(config.widthIn * dpi), Math.round(config.heightIn * dpi));
+  await drawBoardPage(ctx, config, tileById, 2, dpi);
   return canvasToPngBlob(canvas);
 }
 

@@ -5,6 +5,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { ParsedTile } from "@/lib/types";
+import { fineSoup, type Detail } from "@/lib/exporters/printMesh";
 
 export type StlPart = "foam" | "void" | "plates" | "struts";
 export const STL_PARTS: { key: StlPart; label: string; hint: string }[] = [
@@ -16,13 +17,13 @@ export const STL_PARTS: { key: StlPart; label: string; hint: string }[] = [
 
 const loader = new GLTFLoader();
 
-interface Tri {
+export interface Tri {
   /** x, y, z of three vertices, millimetres, Z up */
   v: Float32Array;
 }
 
 /** Triangles of one named mesh, in millimetres with Z up and the tile's low corner at 0. */
-async function trianglesOf(tile: ParsedTile, url: string, node: StlPart, ratio: number): Promise<Tri> {
+export async function tileTriangles(tile: ParsedTile, url: string, node: StlPart, ratio: number): Promise<Tri> {
   const gltf = await loader.loadAsync(url);
   const mesh = gltf.scene.getObjectByName(node);
   if (!(mesh instanceof THREE.Mesh)) return { v: new Float32Array(0) };
@@ -48,7 +49,7 @@ async function trianglesOf(tile: ParsedTile, url: string, node: StlPart, ratio: 
   return { v: out };
 }
 
-function binaryStl(tris: Float32Array[], label: string): { blob: Blob; triangles: number } {
+export function binaryStl(tris: Float32Array[], label: string): { blob: Blob; triangles: number } {
   const count = tris.reduce((a, t) => a + t.length / 9, 0);
   const buf = new ArrayBuffer(84 + count * 50);
   const dv = new DataView(buf);
@@ -72,7 +73,7 @@ function binaryStl(tris: Float32Array[], label: string): { blob: Blob; triangles
 }
 
 /** Signed volume of a closed triangle soup, mm3. */
-function volumeMm3(t: Float32Array): number {
+export function volumeMm3(t: Float32Array): number {
   let v = 0;
   for (let i = 0; i < t.length; i += 9) {
     const ax = t[i], ay = t[i + 1], az = t[i + 2], bx = t[i + 3], by = t[i + 4], bz = t[i + 5], cx = t[i + 6], cy = t[i + 7], cz = t[i + 8];
@@ -82,7 +83,7 @@ function volumeMm3(t: Float32Array): number {
 }
 
 /** Edges used by exactly one triangle (a hole) -- 0 means watertight. Vertices are matched to 1/1000 mm. */
-function openEdges(t: Float32Array): number {
+export function openEdges(t: Float32Array): number {
   const key = (i: number) => `${Math.round(t[i] * 1000)},${Math.round(t[i + 1] * 1000)},${Math.round(t[i + 2] * 1000)}`;
   const edges = new Map<string, number>();
   for (let i = 0; i < t.length; i += 9) {
@@ -125,14 +126,26 @@ export function availableParts(tile: ParsedTile): StlPart[] {
   return out;
 }
 
-export async function buildStl(tile: ParsedTile, parts: StlPart[], ratio: number, merge: boolean): Promise<StlResult> {
+/** How finely a print mesh is made: 0 = the engine's own mesh, 2 / 3 / 4 = rebuilt from the voxels that many times finer (smooth, no grid facets). */
+export type PrintDetail = 0 | Detail;
+export const DETAIL_CHOICES: { value: PrintDetail; label: string }[] = [
+  { value: 3, label: "High (smooth, recommended)" },
+  { value: 4, label: "Maximum (largest files)" },
+  { value: 2, label: "Standard (smaller files)" },
+  { value: 0, label: "Original engine mesh (faceted)" },
+];
+
+export async function buildStl(tile: ParsedTile, parts: StlPart[], ratio: number, merge: boolean, detail: PrintDetail = 3): Promise<StlResult> {
   const warnings: string[] = [];
   const mm = 304.8 / ratio;
   const got: { part: StlPart; tri: Float32Array }[] = [];
   for (const part of parts) {
     const url = part === "plates" || part === "struts" ? tile.partsUrl : tile.glbUrl;
     if (!url) continue;
-    const { v } = await trianglesOf(tile, url, part, ratio);
+    // foam and void are rebuilt from the voxels for a smooth surface; plates and branches keep their exact engine geometry
+    const fine = detail && (part === "foam" || part === "void") ? fineSoup(tile, ratio, detail, part) : null;
+    await new Promise((r) => setTimeout(r, 0));
+    const { v } = fine ? { v: fine } : await tileTriangles(tile, url, part, ratio);
     if (!v.length) warnings.push(`${part}: the tile has no such mesh.`);
     else got.push({ part, tri: v });
   }

@@ -70,8 +70,19 @@ Five tabs, in order:
    descriptors for the tiles in the project (editable, with a written reason
    for each, and always-on / always-off pins); the Boards descriptor page
    lists only those.
-4. **Arrange** -- auto-generate a connected, interlocking arrangement of
-   the tiles on the bank; inspect and edit joints and instances; export.
+4. **Arrange** -- compose the tiles into ONE connected, walkable building.
+   Place, drag, turn and group pieces freely (smart snapping to faces, openings
+   and floors; any floor can meet any floor), or generate an arrangement from a
+   shape, priorities and program rules (which kinds of tile may touch, how many
+   of each); every joint is scored in four readable parts, the whole is read as
+   architecture (levels, longest route, daylight, print checks, the 12
+   descriptors), a smoothing pass bridges near-misses and lists floating
+   fragments for you to approve, and each arrangement is saved with the project
+   and can be added back as a tile. Compare before / after, find nice views,
+   export a walk-through MP4 or GIF, PNGs, STL, drawings, a report, or a mass for
+   a second pass in Rhino. Details: `docs/ARRANGE.md`.
+   A shortcut bar at the bottom of every tab always shows the keys that work
+   right now (`?` lists them all).
 5. **Boards** -- lay out a presentation board from the tiles on the bank
    (adaptive grid, axo/perspective renders, auto-fit labels) and export it
    as two print-resolution PNGs -- the board itself, and a second page of
@@ -162,7 +173,7 @@ components/
   viewer/                 3D viewport, upload zone, metrics legend
   sections/               Tile bank, correction editor, cube/hex builder
   analysis/               Descriptor scoring UI
-  arrange/                Bank, settings, joints, viewport, per-piece editing
+  arrange/                Bank, generate, program, whole, joints, sequence, selection, viewport, exports
   boards/                 Tile picker, board settings, live preview canvas, per-tile popup editor
 lib/
   types.ts                Typed shapes for a tile (ParsedTile) and its faces/sections
@@ -170,7 +181,7 @@ lib/
   tiles/                  How a tile is read from its voxels (levels, rooms, routes, light, structure, plates): the ONE shared pipeline
   drawing/                Plan and section drawings (canvas + SVG), used by the Viewer, Boards, Analysis and the exports
   scoring/                The 12-descriptor scoring (measures, drivers, sentences, results exports)
-  arrange/                Auto-generate, matching, joints, regrowth (Arrange tab)
+  arrange/                Placement, snapping, joints, layout (the connected rule), generator, composite model, smoothing, views (Arrange tab)
   sections/               Photo -> trace -> lofted volume -> ParsedTile (Sections tab)
   boards/                 Grid layout, frame shape, text fitting, canvas export, GIF/MP4 turntable export (Boards tab)
   exporters/              CSG fuse, OBJ export, recipe manifest

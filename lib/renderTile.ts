@@ -14,6 +14,8 @@ import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { AXO_VIEWS, POPUP_VIEW_PRESETS, type AxoViewKey } from "@/lib/faceViews";
 import { applyClipToMesh, buildClipOutline, buildClipPlane, buildCutFaceCap, type ClipState } from "@/lib/clipping";
 import { HEX_APOTHEM } from "@/lib/sections/volumeField";
+import type { ParsedTile } from "@/lib/types";
+import { refineMeshes } from "@/lib/fineGeometry";
 import type { CustomCamera, FacetLineSettings, OutlineSettings } from "@/lib/boards/types";
 
 const loader = new GLTFLoader();
@@ -30,6 +32,8 @@ function loadScene(glbUrl: string): Promise<THREE.Group> {
 
 export interface TileRenderOptions {
   glbUrl: string;
+  /** rebuild the foam and void of this tile smooth from its voxels for this render (exports; previews leave it off) */
+  refine?: ParsedTile;
   view: AxoViewKey;
   /** Overrides `view` when present -- an exact camera captured from the
    * Boards tab's per-tile popup editor left in free Perspective rotation,
@@ -333,6 +337,8 @@ function disposeOwned(root: THREE.Object3D, ownGeometry: boolean) {
 export async function createTileRig(renderer: THREE.WebGLRenderer, opts: TileRenderOptions): Promise<TileRig> {
   const original = await loadScene(opts.glbUrl);
   const scene = original.clone(true);
+  // the clone is this render's own, so the smooth mesh can go straight in (and stays, discarded with the clone)
+  if (opts.refine && !opts.facetLines?.enabled) refineMeshes(scene, opts.refine, 3);
 
   applyMaterial(scene.getObjectByName("foam") ?? undefined, opts.foamColor, opts.foamOpacity, opts.foamVisible, "foam");
   applyMaterial(scene.getObjectByName("void") ?? undefined, opts.voidColor, opts.voidOpacity, opts.voidVisible && !(opts.thumbnail && readShapeStamp(scene)), "void");

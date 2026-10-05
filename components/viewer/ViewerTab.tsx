@@ -13,7 +13,13 @@ import { PresetBar } from "@/components/shared/PresetBar";
 import { Segmented } from "@/components/shared/Segmented";
 import { SyncAllMenu } from "@/components/shared/SyncAllMenu";
 import { TilePane, defaultPane, normalizePane, syncPane, type PaneState, type SyncField } from "@/components/shared/TilePane";
-import { Section } from "@/components/shared/Section";
+import { PaneMenu } from "@/components/shared/PaneMenu";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Bookmark, Download, PanelRight, Printer } from "lucide-react";
+import { PrintBatchDialog } from "@/components/viewer/PrintBatchDialog";
+import { useSectionOpen } from "@/lib/workspaceUi";
+import { useShortcuts } from "@/lib/shortcuts";
 
 type Layout = 1 | 2 | 4;
 
@@ -49,6 +55,10 @@ export function ViewerTab() {
   const panes = useMemo(() => ui.panes.map((p) => normalizePane(p)), [ui.panes]);
   const presets = usePresets<ViewerPresetData>("viewer");
   const [hub] = useState(newLinkHub);
+  // the numbers panel and the export window stay out of the way until asked for
+  const [infoOpen, setInfoOpen] = useSectionOpen("viewer.info", false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
 
   const count = layout;
   const activeIndex = Math.max(0, tiles.findIndex((t) => t.id === activeTile?.id));
@@ -84,6 +94,21 @@ export function ViewerTab() {
     });
 
   const linkFor = (i: number): CameraLink | undefined => (match && count > 1 ? { id: `pane-${i}`, hub, leader: i === 0 } : undefined);
+  const setDraw = (mode: "model" | "plan" | "section") => patchPane(0, { draw: { ...panes[0].draw, mode } });
+  useShortcuts("viewer", [
+    { keys: "1", label: "One viewport", group: "Viewports", run: () => setUi((prev) => ({ ...prev, layout: 1 })) },
+    { keys: "2", label: "Two viewports", group: "Viewports", run: () => setUi((prev) => ({ ...prev, layout: 2 })) },
+    { keys: "4", label: "Four viewports", group: "Viewports", run: () => setUi((prev) => ({ ...prev, layout: 4 })) },
+    { keys: "M", label: match ? "Unmatch cameras" : "Match cameras", group: "Viewports", run: () => setUi((prev) => ({ ...prev, match: !prev.match })) },
+    { keys: "3", label: "3D model", group: "First viewport", run: () => setDraw("model") },
+    { keys: "P", label: "Plan", group: "First viewport", run: () => setDraw("plan") },
+    { keys: "S", label: "Section", group: "First viewport", run: () => setDraw("section") },
+    { keys: "G", label: panes[0].displayMode === "ghosted" ? "Rendered" : "Ghosted", group: "First viewport", run: () => patchPane(0, { displayMode: panes[0].displayMode === "ghosted" ? "rendered" : "ghosted" }) },
+    { keys: "R", label: "Auto-rotate", group: "First viewport", run: () => patchPane(0, { autoRotate: !panes[0].autoRotate }) },
+    { keys: "I", label: infoOpen ? "Hide the numbers" : "Show the numbers", group: "View", run: () => setInfoOpen(!infoOpen) },
+    { keys: "Ctrl+E", label: "Export", group: "Output", run: () => activeTile && setExportOpen(true) },
+    { keys: "Ctrl+P", label: "3D print blocks", group: "Output", run: () => activeTile && setPrintOpen(true) },
+  ]);
   const paneIndexes = useMemo(() => Array.from({ length: count }, (_, i) => i), [count]);
   const shownTiles = paneIndexes.map(tileFor).filter((t): t is NonNullable<typeof t> => !!t);
 
@@ -118,7 +143,7 @@ export function ViewerTab() {
   };
 
   return (
-    <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
+    <div className="flex flex-col gap-3 lg:h-full lg:min-h-0">
       {!activeTile ? (
         <div className="flex flex-1 items-center justify-center p-8">
           <div className="w-full max-w-xl">
@@ -126,28 +151,20 @@ export function ViewerTab() {
           </div>
         </div>
       ) : (
-        <div
-          className={`grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-rows-[minmax(0,1fr)] ${count > 1 ? "lg:grid-cols-[260px_minmax(0,1fr)_380px]" : "lg:grid-cols-[260px_minmax(0,1fr)_280px]"}`}
-        >
-          <div className="order-2 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
-            <GlowPanel glow="orange">
-              <div className="space-y-3 p-4">
-                <div className="font-mono text-[11px] tracking-label uppercase text-muted-foreground">Viewports</div>
-                <Segmented value={layout} options={[{ value: 1, label: "1" }, { value: 2, label: "2 side by side" }, { value: 4, label: "4 grid" }]} onChange={(l) => setUi((prev) => ({ ...prev, layout: l as Layout }))} />
-                {count > 1 && (
-                  <>
-                    <label className="flex items-center gap-2 text-xs">
-                      <input type="checkbox" checked={match} onChange={(e) => setUi((prev) => ({ ...prev, match: e.target.checked }))} />
-                      Match cameras (orbit one, all follow)
-                    </label>
-                    <SyncAllMenu count={count} onSync={syncAll} />
-                  </>
-                )}
-                <p className="text-[10px] text-muted-foreground">Each viewport has its own view, display, visibility, opacity, clipping and rotation -- the buttons under it.</p>
-              </div>
-            </GlowPanel>
-            <GlowPanel glow="magenta">
-              <div className="p-4">
+        <>
+          <div className="flex flex-wrap items-center gap-3">
+            <Segmented value={layout} options={[{ value: 1, label: "1" }, { value: 2, label: "2" }, { value: 4, label: "4" }]} onChange={(l) => setUi((prev) => ({ ...prev, layout: l as Layout }))} />
+            {count > 1 && (
+              <>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" className="accent-[var(--magenta)]" checked={match} onChange={(e) => setUi((prev) => ({ ...prev, match: e.target.checked }))} />
+                  Match cameras
+                </label>
+                <SyncAllMenu count={count} onSync={syncAll} />
+              </>
+            )}
+            <div className="ml-auto flex items-center gap-1.5">
+              <PaneMenu icon={Bookmark} label="Presets" side="bottom" width="w-72">
                 <PresetBar<ViewerPresetData>
                   label="Viewport presets"
                   presets={presets.presets}
@@ -157,45 +174,72 @@ export function ViewerTab() {
                   onRemove={presets.remove}
                   onApply={(p) => applyPreset(p.data)}
                 />
-              </div>
-            </GlowPanel>
+              </PaneMenu>
+              <Button size="sm" variant="outline" className="h-7" onClick={() => setPrintOpen(true)} title="Print several blocks at once, each with a label in its underside (Ctrl+P)">
+                <Printer className="mr-1.5 h-3.5 w-3.5" />
+                3D print
+              </Button>
+              <Button size="sm" variant="outline" className="h-7" onClick={() => setExportOpen(true)} title="Print, OBJ and analysis files (Ctrl+E)">
+                <Download className="mr-1.5 h-3.5 w-3.5" />
+                Export
+              </Button>
+              <button
+                type="button"
+                aria-label={infoOpen ? "Hide the numbers" : "Show the numbers"}
+                title={infoOpen ? "Hide the numbers (I)" : "Show the numbers (I)"}
+                onClick={() => setInfoOpen(!infoOpen)}
+                className={`flex h-7 items-center gap-1 rounded-md border-hair px-2 font-mono text-[10px] uppercase tracking-label text-muted-foreground transition-colors hover:border-white/30 hover:text-foreground ${infoOpen ? "border-magenta/50 bg-magenta/10 text-foreground" : ""}`}
+              >
+                <PanelRight className="h-3.5 w-3.5" />
+                Info
+              </button>
+            </div>
           </div>
 
-          {/* Pinned to the top while the controls scroll on phones / half-screen laptops. */}
-          <div className="order-1 min-w-0 max-lg:sticky max-lg:top-0 max-lg:z-20 max-lg:self-start max-lg:bg-background/95 max-lg:pb-2 lg:order-none lg:min-h-0">
-            {count === 1 ? (
-              <div className="h-[46vh] lg:h-full">{renderPane(0)}</div>
-            ) : (
-              <div className={`grid h-[54vh] gap-2 lg:h-full ${count === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2"}`}>
-                {paneIndexes.map((i) => (
-                  <div key={i} className="min-h-0 min-w-0">
-                    {renderPane(i)}
-                  </div>
-                ))}
+          <div className={`grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-rows-[minmax(0,1fr)] ${infoOpen ? (count > 1 ? "lg:grid-cols-[minmax(0,1fr)_380px]" : "lg:grid-cols-[minmax(0,1fr)_300px]") : ""}`}>
+            {/* Pinned to the top while the controls scroll on phones / half-screen laptops. */}
+            <div className="order-1 min-w-0 max-lg:sticky max-lg:top-0 max-lg:z-20 max-lg:self-start max-lg:bg-background/95 max-lg:pb-2 lg:order-none lg:min-h-0">
+              {count === 1 ? (
+                <div className="h-[56vh] lg:h-full">{renderPane(0)}</div>
+              ) : (
+                <div className={`grid h-[60vh] gap-2 lg:h-full ${count === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2"}`}>
+                  {paneIndexes.map((i) => (
+                    <div key={i} className="min-h-0 min-w-0">
+                      {renderPane(i)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {infoOpen && (
+              <div className="order-3 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
+                <GlowPanel className="flex-1" glow="magenta">
+                  <div className="p-4">{count > 1 ? <MetricsTable tiles={shownTiles} /> : <MetricsPanel tile={activeTile} onShowLevel={(level) => patchPane(0, { draw: { ...panes[0].draw, mode: "plan", level } })} />}</div>
+                </GlowPanel>
               </div>
             )}
           </div>
 
-          <div className="order-3 flex min-w-0 flex-col gap-4 lg:order-none lg:min-h-0 lg:overflow-y-auto">
-            <GlowPanel className="flex-1" glow="magenta">
-              <div className="p-4">
-                {count > 1 ? (
-                  <MetricsTable tiles={shownTiles} />
-                ) : (
-                  <MetricsPanel tile={activeTile} onShowLevel={(level) => patchPane(0, { draw: { ...panes[0].draw, mode: "plan", level } })} />
-                )}
-                <div className="mt-4 space-y-4">
-                  <Section id="viewer.stl" variant="inline" title="Print (STL)" defaultOpen={false}>
-                    <PrintPanel tile={activeTile} />
-                  </Section>
-                  <Section id="viewer.export" variant="inline" title="Export (OBJ / analysis)">
-                    <ExportPanel tile={activeTile} visibility={panes[0].visibility} />
-                  </Section>
+          <PrintBatchDialog open={printOpen} onOpenChange={setPrintOpen} />
+          <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+            <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Export {activeTile.name}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Print (STL)</div>
+                  <PrintPanel tile={activeTile} />
+                </div>
+                <div className="space-y-2 border-t border-border pt-4">
+                  <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Models and analysis</div>
+                  <ExportPanel tile={activeTile} visibility={panes[0].visibility} />
                 </div>
               </div>
-            </GlowPanel>
-          </div>
-        </div>
+            </DialogContent>
+          </Dialog>
+        </>
       )}
     </div>
   );

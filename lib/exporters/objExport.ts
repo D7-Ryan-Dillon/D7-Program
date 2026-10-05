@@ -1,14 +1,18 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OBJExporter } from "three/examples/jsm/exporters/OBJExporter.js";
+import type { ParsedTile } from "@/lib/types";
+import { refineMeshes } from "@/lib/fineGeometry";
 
 const loader = new GLTFLoader();
 const exporter = new OBJExporter();
 
 /** Loads a tile's GLB fresh (independent of any live viewport) and serializes it to OBJ text. */
-export async function tileToObjText(glbUrl: string, visibility?: { foam: boolean; void: boolean }): Promise<string> {
+export async function tileToObjText(glbUrl: string, visibility?: { foam: boolean; void: boolean }, refine?: ParsedTile): Promise<string> {
   const gltf = await loader.loadAsync(glbUrl);
   const scene = gltf.scene.clone(true);
+  // the smooth, high-detail foam and void instead of the engine mesh (the clone is this export's own)
+  if (refine) refineMeshes(scene, refine, 3);
   if (visibility) {
     const foam = scene.getObjectByName("foam");
     const voidMesh = scene.getObjectByName("void");

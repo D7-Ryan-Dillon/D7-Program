@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { PRINT_SCALES, usePrintRatio } from "@/components/viewer/SpacesPanel";
 import { downloadBlob } from "@/lib/boards/exportBoard";
-import { availableParts, buildStl, filamentMetres, STL_PARTS, type StlPart, type StlResult } from "@/lib/exporters/stl";
+import { availableParts, buildStl, DETAIL_CHOICES, filamentMetres, STL_PARTS, type PrintDetail, type StlPart, type StlResult } from "@/lib/exporters/stl";
 import type { ParsedTile } from "@/lib/types";
 
 /** Print-ready STL: choose the parts and the scale, see the printed size, volume and warnings, then download. */
@@ -17,11 +17,12 @@ export function PrintPanel({ tile }: { tile: ParsedTile }) {
   const [merge, setMerge] = useState(false);
   const [mode, setMode] = useState<"preset" | "ratio" | "size">("preset");
   const [targetMm, setTargetMm] = useState(50);
+  const [detail, setDetail] = useState<PrintDetail>(3);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ key: string; result: StlResult } | null>(null);
   const offered = useMemo(() => availableParts(tile), [tile]);
   // the numbers belong to one tile, scale and choice of parts: change any and they are gone
-  const key = `${tile.id}|${ratio}|${parts.join("+")}|${merge}`;
+  const key = `${tile.id}|${ratio}|${parts.join("+")}|${merge}|${detail}`;
   const result = done && done.key === key ? done.result : null;
 
   const mm = 304.8 / ratio;
@@ -34,7 +35,7 @@ export function PrintPanel({ tile }: { tile: ParsedTile }) {
     }
     setBusy(true);
     try {
-      const res = await buildStl(tile, parts, ratio, merge);
+      const res = await buildStl(tile, parts, ratio, merge, detail);
       setDone({ key, result: res });
       if (download) for (const f of res.files) downloadBlob(f.name, f.blob);
       if (download && !res.files.length) toast.error("Nothing to write: the tile has none of those parts.");
@@ -47,6 +48,16 @@ export function PrintPanel({ tile }: { tile: ParsedTile }) {
 
   return (
     <div className="space-y-3">
+      <div className="space-y-1.5">
+        <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Mesh detail</div>
+        <Select className="h-7 text-[11px]" value={String(detail)} onChange={(e) => setDetail(Number(e.target.value) as PrintDetail)} aria-label="Mesh detail">
+          {DETAIL_CHOICES.map((d) => (
+            <option key={d.value} value={String(d.value)}>
+              {d.label}
+            </option>
+          ))}
+        </Select>
+      </div>
       <div className="space-y-1.5">
         <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Parts</div>
         {STL_PARTS.filter((p) => offered.includes(p.key)).map((p) => (

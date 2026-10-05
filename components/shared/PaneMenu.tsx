@@ -15,6 +15,8 @@ export function PaneMenu({
   active = false,
   showLabel = false,
   onApplyAll,
+  side = "top",
+  width = "w-64",
   children,
 }: {
   icon: ComponentType<{ className?: string }>;
@@ -25,6 +27,9 @@ export function PaneMenu({
   showLabel?: boolean;
   /** Adds an "Apply to all viewports" link at the bottom of the popup. */
   onApplyAll?: () => void;
+  /** Which way the popup opens from its button (a toolbar at the top of a panel wants "bottom"). */
+  side?: "top" | "bottom";
+  width?: string;
   children: ReactNode;
 }) {
   return (
@@ -41,8 +46,8 @@ export function PaneMenu({
         {showLabel && <span>{label}</span>}
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Positioner side="top" align="center" sideOffset={6} collisionPadding={8} className="z-[70]">
-          <Popover.Popup className="max-h-[70vh] w-64 max-w-[92vw] space-y-3 overflow-y-auto rounded-lg border-hair bg-popover p-3 text-xs text-popover-foreground shadow-lg outline-none">
+        <Popover.Positioner side={side} align="center" sideOffset={6} collisionPadding={8} className="z-[70]">
+          <Popover.Popup className={cn("max-h-[70vh] max-w-[92vw] space-y-3 overflow-y-auto rounded-lg border-hair bg-popover p-3 text-xs text-popover-foreground shadow-lg outline-none", width)}>
             <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">{label}</div>
             {children}
             {onApplyAll && (

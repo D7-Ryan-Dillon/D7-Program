@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ParsedTile } from "@/lib/types";
-import { loadProject, saveProject } from "@/lib/persistence";
+import { loadProject, saveProject, saveUi } from "@/lib/persistence";
 import type { SavedCube } from "@/lib/sections/savedCubes";
 import { mergeDefaults } from "@/lib/mergeDefaults";
 
@@ -129,23 +129,45 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     setSaveStatus("idle");
   }, []);
 
+  // Tiles (big, rarely changed) and settings (small, changed on every click) are saved separately.
+  const uiRef = useRef(ui);
+  useEffect(() => {
+    uiRef.current = ui;
+  }, [ui]);
+  const saved = useRef({ tiles: 0, ui: 0 });
+  const finishSave = (what: "tiles" | "ui", ok: boolean, err?: unknown) => {
+    if (ok) {
+      saved.current[what] = 0;
+      if (!saved.current.tiles && !saved.current.ui) setSaveStatus("saved");
+      setSaveError(null);
+    } else {
+      console.error(`[project-store] saving the ${what} failed:`, err);
+      setSaveStatus("error");
+      setSaveError(describeError(err));
+    }
+  };
   useEffect(() => {
     if (!projectCode || readyForCode.current !== projectCode) return;
     setSaveStatus("saving");
+    saved.current.tiles = 1;
     const timer = setTimeout(() => {
-      saveProject(projectCode, tiles, cubes, ui)
-        .then(() => {
-          setSaveStatus("saved");
-          setSaveError(null);
-        })
-        .catch((err) => {
-          console.error("[project-store] saveProject failed:", err);
-          setSaveStatus("error");
-          setSaveError(describeError(err));
-        });
+      saveProject(projectCode, tiles, cubes, uiRef.current)
+        .then(() => finishSave("tiles", true))
+        .catch((err) => finishSave("tiles", false, err));
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [tiles, cubes, ui, projectCode]);
+  }, [tiles, cubes, projectCode]);
+  useEffect(() => {
+    if (!projectCode || readyForCode.current !== projectCode) return;
+    setSaveStatus("saving");
+    saved.current.ui = 1;
+    const timer = setTimeout(() => {
+      saveUi(projectCode, ui)
+        .then(() => finishSave("ui", true))
+        .catch((err) => finishSave("ui", false, err));
+    }, AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [ui, projectCode]);
 
   const addTile = useCallback((tile: ParsedTile) => {
     setTiles((prev) => {

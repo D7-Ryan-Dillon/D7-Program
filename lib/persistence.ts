@@ -97,12 +97,27 @@ export async function saveProject(code: string, tiles: ParsedTile[], cubes: Save
   if (error) throw error;
 }
 
+/** The settings of a project (every tab's remembered state: arrangements, boards, views...) live in a small row of their own, `<code>~ui`.
+ * Tiles carry hundreds of kilobytes each and change rarely; settings change on every click, so saving them separately keeps each
+ * autosave to a few kilobytes instead of re-sending every tile (which could run into the database's statement timeout). */
+const uiCode = (code: string) => `${code}~ui`;
+
+export async function saveUi(code: string, ui: Record<string, unknown>): Promise<void> {
+  const { error } = await supabase.from("projects").upsert({ code: uiCode(code), state: { ui }, updated_at: new Date().toISOString() }, { onConflict: "code" });
+  if (error) throw error;
+}
+
 /** Returns the tiles (and the cube builder's saved pieces) saved under `code`, or null if that code has never been saved. */
 export async function loadProject(code: string): Promise<{ tiles: ParsedTile[]; cubes: SavedCube[]; ui: Record<string, unknown> } | null> {
-  const { data, error } = await supabase.from("projects").select("state").eq("code", code).maybeSingle();
+  const { data: rows, error } = await supabase.from("projects").select("code, state, updated_at").in("code", [code, uiCode(code)]);
   if (error) throw error;
-  if (!data) return null;
-  const state = data.state as { tiles?: StoredTile[]; cubes?: SavedCube[]; ui?: Record<string, unknown> } | null;
+  const main = rows?.find((r) => r.code === code);
+  const side = rows?.find((r) => r.code === uiCode(code));
+  if (!main && !side) return null;
+  const state = (main?.state ?? null) as { tiles?: StoredTile[]; cubes?: SavedCube[]; ui?: Record<string, unknown> } | null;
   const storedTiles = (state?.tiles ?? []) as StoredTile[];
-  return { tiles: await Promise.all(storedTiles.map(hydrateTile)), cubes: state?.cubes ?? [], ui: state?.ui ?? {} };
+  // the settings row wins unless an older version of the app (which keeps settings inside the main row) saved more recently
+  const sideNewer = !!side && (!main || new Date(side.updated_at).getTime() >= new Date(main.updated_at).getTime());
+  const ui = sideNewer ? ((side!.state as { ui?: Record<string, unknown> } | null)?.ui ?? {}) : (state?.ui ?? {});
+  return { tiles: await Promise.all(storedTiles.map(hydrateTile)), cubes: state?.cubes ?? [], ui };
 }

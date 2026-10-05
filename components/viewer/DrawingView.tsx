@@ -61,6 +61,7 @@ const SCALES = [
 /** SVG and PNG downloads of the drawing a viewport is showing, at a chosen scale. */
 export function DrawingExport({ tile, draw, highlight }: { tile: ParsedTile; draw: DrawState; highlight?: DrawingHighlight }) {
   const [feetPerInch, setFeetPerInch] = useState(10);
+  const [dpi, setDpi] = useState(200);
   const [paper, setPaper] = useState(false);
   const [busy, setBusy] = useState(false);
   const stem = () => {
@@ -81,7 +82,7 @@ export function DrawingExport({ tile, draw, highlight }: { tile: ParsedTile; dra
     if (!s) return;
     setBusy(true);
     try {
-      downloadBlob(`${s.name}.png`, await drawingToPng(s.d, style(), { feetPerInch, dpi: 200 }));
+      downloadBlob(`${s.name}.png`, await drawingToPng(s.d, style(), { feetPerInch, dpi }));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Couldn't write the PNG.");
     } finally {
@@ -97,6 +98,16 @@ export function DrawingExport({ tile, draw, highlight }: { tile: ParsedTile; dra
           {SCALES.map((s) => (
             <option key={s.feetPerInch} value={s.feetPerInch}>
               {s.label}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-muted-foreground">PNG resolution</span>
+        <Select className="h-6 w-32 text-[11px]" value={String(dpi)} onChange={(e) => setDpi(Number(e.target.value))} aria-label="PNG resolution">
+          {[96, 150, 200, 300, 600].map((d) => (
+            <option key={d} value={String(d)}>
+              {d} dpi
             </option>
           ))}
         </Select>
