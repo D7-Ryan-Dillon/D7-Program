@@ -26,7 +26,7 @@ export interface PairOptions {
   /** how the FIRST tile stands (default: unturned), so any of its faces can be the one the second tile meets */
   aRot?: number;
   aMirror?: boolean;
-  /** how many of each face's biggest openings to line up (default 2) */
+  /** how many of each face's biggest openings to line up (default 4) */
   openings?: number;
   /** try every pair of floor levels for every pair of openings (default: only for the biggest pair), so a ramp's upper landing can meet a floor of the other tile */
   allLevels?: boolean;
@@ -51,17 +51,20 @@ export function* pairCandidates(a: ParsedTile, b: ParsedTile, connectorFt = 1.5,
   const boxA = placeBox(pa, a);
   const fa = getFacts(a, aRot, aMirror, 1);
   // A's openings facing +x: the box face, and any notch or step wall that faces the same way
-  const aOpenings = boxA.occ.features["x+"].slice(0, opts.openings ?? 2);
+  const aOpenings = boxA.occ.features["x+"].slice(0, opts.openings ?? 4);
   for (let rot = 0; rot < 4; rot++)
     for (const mirror of [false, true]) {
       const fb = getFacts(b, rot, mirror, 1);
-      const bOpenings = getOcc(fb.o).features["x-"].slice(0, opts.openings ?? 2);
+      const bOpenings = getOcc(fb.o).features["x-"].slice(0, opts.openings ?? 4);
       const spots: [number, number, number][] = [[boxA.max[0], 0, 0]];
       let first = true;
       for (const qa of aOpenings)
         for (const qb of bOpenings) {
           const x = boxA.min[0] + qa.plane - qb.plane;
           spots.push([x, Math.round(qa.cu - qb.cu), Math.round(qa.cv - qb.cv)]);
+          // openings of different heights (eroded doorways are not all the same size): line the FLOORS up too (the bottoms of the two openings), and keep the two tiles at one level
+          spots.push([x, Math.round(qa.cu - qb.cu), Math.round(qa.v0 - qb.v0)]);
+          spots.push([x, Math.round(qa.cu - qb.cu), 0]);
           // the biggest pair of openings is tried against every pair of floor levels, the others only centre to centre
           if (first || opts.allLevels) for (const lp of fa.levelsZ) for (const lq of fb.levelsZ) spots.push([x, Math.round(qa.cu - qb.cu), lp - lq]);
           first = false;

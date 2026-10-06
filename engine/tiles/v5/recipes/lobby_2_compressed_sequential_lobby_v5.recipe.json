@@ -1,0 +1,39 @@
+{
+  "schema": "erosion-recipe/2",
+  "name": "lobby_2_compressed_sequential_lobby_v5",
+  "engine_version": "7.0",
+  "meta": {"category": "lobby", "typology": "compressed sequential lobby", "slot": 2, "variant": "V5"},
+  "sim": {"tile_w": 20.0, "tile_h": 20.0, "cell": 0.5, "steps": 170, "gravity": 0.5, "drain": false, "n_frames": 8, "smooth": 1.0, "seed": 27},
+  "cleanup": {"min_void_ft3": 6.0, "min_foam_ft3": 30.0, "weld": ""},
+  "foam": {"v": 1, "noise": 0.9, "scale": 2.8, "grain": 0.35, "seed": 127, "web": 0.0, "web_open": 0.3, "web_thickness": 0.5, "layers": false, "layer_count": 3, "layer_axis": 2, "layer_thickness": 0.75, "layer_strength": 0.85},
+  "plates": [
+    {"v": 1, "kind": "plates", "name": "ground", "thickness": 1.0, "resistance": 3.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "auto_support": false, "min_support": 8.0, "max_span": 10.0, "strut_size": 1.5, "verticality": 0.3, "branch_from_top": false, "support_pts": [],
+     "shapes": [
+       {"type":"field","x0":-2.0,"y0":-2.0,"step":1.2,"nx":20,"ny":20,"top":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],"zbot":0.0}
+     ]}
+  ],
+  "sources": [
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 3.4, 1.4], [11.087, 4.834, 14.693]], "dose": 210, "spread": 1.7, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[11.228, 4.205, 1.995], [9.655, 5.08, 13.984]], "dose": 318, "spread": 2.245, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 10.6, 2.312], [8.252, 11.556, 15.755]], "dose": 594, "spread": 2.818, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[9.082, 12.261, 1.897], [7.64, 10.887, 16.314]], "dose": 477, "spread": 2.491, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[8.243, 10.275, 1.706], [9.454, 8.693, 14.593]], "dose": 717, "spread": 3.192937478315414, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[14.6, 10.8, 2.519], [14.155, 9.494, 10.456]], "dose": 492, "spread": 3.140898863910448, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[15.101, 13.118, 1.691], [15.355, 11.761, 11.1]], "dose": 243, "spread": 2.1736165149853015, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 17.2, 1.822], [11.361, 16.116, 13.619]], "dose": 197, "spread": 1.735, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[11.04, 16.406, 1.475], [12.75, 16.731, 13.822]], "dose": 192, "spread": 1.735, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 7.0, 1.4], [10.0, 7.0, 9.2]], "dose": 120, "spread": 1.9437340153452687, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 14.0, 1.4], [10.0, 14.0, 9.2]], "dose": 120, "spread": 1.9437340153452687, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 8.0, 4.875], [10.071, 3.6, 4.875], [10.0, -1.2, 4.875]], "dose": 338, "spread": 4.5, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 0.4, 1.2], [10.0, 0.4, 9.2]], "dose": 267, "spread": 2.8644501278772383, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[8.0, 10.0, 4.875], [3.6, 10.654, 4.875], [-1.2, 10.0, 4.875]], "dose": 338, "spread": 4.5, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[0.4, 10.0, 1.2], [0.4, 10.0, 9.2]], "dose": 267, "spread": 2.8644501278772383, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[12.0, 10.0, 4.875], [16.4, 9.611, 4.875], [21.2, 10.0, 4.875]], "dose": 338, "spread": 4.5, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[19.6, 10.0, 1.2], [19.6, 10.0, 9.2]], "dose": 267, "spread": 2.8644501278772383, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 12.0, 4.875], [10.55, 16.4, 4.875], [10.0, 21.2, 4.875]], "dose": 338, "spread": 4.5, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 19.6, 1.2], [10.0, 19.6, 9.2]], "dose": 267, "spread": 2.8644501278772383, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false}
+  ],
+  "frame": null,
+  "expect": {"tile_id": "d513ffa2888edad9"},
+  "container": {"kind": "mask", "origin": [0.0, 0.0, 0.0], "cell": 0.5, "shape": [40, 40, 40], "mask": "eJzNmU2O3CAQhYkmSpZ9hLnCLLPri7UipNwjZ2GURZa5QcSsshyiLNpSLAhgKH5clKHtdMLiqWfcjevzqwIMjK2bAJFOfnErZnKinRjuRDpRTiYnM4hGxIBgV2foxfcnnNgbXacYgSiFbilw40WxJxfzU+y5ClyfuA3tUVgx7tM3F6kAkS0RpXCQki1h8fj8+BoLQ1A+eskurlPtxCThID5wCaLKPwUILwU6nZ1MThSIbGCZEivCqBbMi8+c3+pSBZ6ikqUoUiQiFRvcSLcAJ/hfErXAzJA5icN/Cg4GF6rHjkU6IdKBJUpBsGgB3mhKgnmWDEot/GIcYQimIwmbEmHs0ONrJnF8WYo4cPASgY55iAjjaBqFSQkjlwEgcXxdxqHAUVlBRzoPw/TaQ8PE5LKBX03keF04dMZRIcyk7PGow6hW/un47AWU+MLxwOBniYNGwDiGUHfA6PjslSuNxGEeUmn0WrFbxonK5HLzzAQrgGXI/XQMh+4UjKgj60pTZDRFwlSZcwzlFY1QNZqod6wDDj83lqsl84zVRy8MHX2z7YXRRXItQ67oHXebCDc22p5mrvlIY+BpnR04quTCYI7maMLQzgDHFBFyjsqUJlHFcUyj0wwb14oiyTjmZAoGU3EcY8WNMMChEY4pmULD3JcDS7N1kWQcKpmCwdyXowMGOBRw8JJD0zD/G8dcckhIrpqjOUv+e45Y7CjHhin34OhYkRUcc9qYqYpkw5Sjk4u24hiOe5jSi4BwwOLEbBR7ZYqArv7y4oSeP6DO065a4qjrvEKgTRmH6Vj+bnLEN6qCYwMBMwWDoYl6V/D0ukSY7A0322dgFUcTgZ4gh96oOhJpc30F+6eB43OzFpJgFyqYXqI9L/MxFh3ea38sW+jzuw6EpshtmKHX9Y6tsFgaceM3bJrMpxsRmjD0BlgvRxPBWXFZquJlShzmfCBHL8z4jtfaCl4c13w8o7vsB8IcuEscRynpD2nKY6fzLitoGJooYfVu2PPAwZHTKuuHPO/Lq16iDkDse4DgMkd+qM8NwiHI6S2Tb+xX1Hlr1sBQ6avHiMv7kE0YQjrMsaZ8Z/L9Coa1pAp86GqMKjtSg2VFdewpwwxxVTH6KpuqFmE4Ew+2Q5tmmv002ZlXEo0IHHxlR37bB5t09JxlxzWrWths4XuPHsvKyd5NZPfNYkGiwgQ7aG48dh/9q4teiHXgzej/AM0IlA4="}
+}

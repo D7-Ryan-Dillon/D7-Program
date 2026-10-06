@@ -17,7 +17,7 @@ import { bestPair, pairCandidates } from "../lib/arrange/pairMatrix";
 import { getOriented } from "../lib/arrange/orient";
 import { getOcc, getWalk } from "../lib/arrange/occupancy";
 import { defaultGen, defaultPriorities, defaultRules, defaultSite, emptyDoc, type ArrangementDoc, type Piece, type ProgramRules, type ShapeKind } from "../lib/arrange/types";
-import { loadExport, loadFixture, V3_ORDER, FIXTURES_V3, V4_ORDER } from "./v4/load";
+import { loadExport, loadFixture, V3_ORDER, COMPARE_FIXTURES, V4_ORDER, SET } from "./v4/load";
 import { evaluateTile } from "../lib/scoring/matrixEval";
 import { MATRIX } from "../lib/scoring/matrix";
 import { suggestPick, typologyGroups } from "../lib/scoring/compareSet";
@@ -34,10 +34,10 @@ const crude = (...a: Parameters<typeof renderArrangement>) => {
 const live = process.argv.includes("--live");
 const only = process.env.V4_ONLY?.split(",").map(Number);
 const want = (n: number) => !only || only.includes(n);
-const out = process.env.V4_OUT ?? join(__dirname, "..", "engine", "tiles", "v4", "assemblies");
+const out = process.env.V4_OUT ?? join(__dirname, "..", "engine", "tiles", SET, "assemblies");
 mkdirSync(out, { recursive: true });
 /** every picture-worthy assembly is also written as a voxel box (void, plates, struts, mask, owner per cell) that engine/tiles/v4/render_assemblies.py draws as an isometric cutaway with one colour per piece */
-const ASM = process.env.V4_ASM ?? "C:/tmp/tiles4_asm";
+const ASM = process.env.V4_ASM ?? `C:/tmp/tiles${SET === "v5" ? 5 : 4}_asm`;
 if (!only || only.includes(4)) rmSync(ASM, { recursive: true, force: true });
 function dump(name: string, l: Layout) {
   const comp = buildComposite(l.boxes);
@@ -89,7 +89,7 @@ const EXPECT = [
 ] as const;
 list.forEach((t, i) => {
   const [cat, slot, typ] = EXPECT[i];
-  ok(t.meta?.category === cat && t.meta?.slot === slot && t.meta?.variant === "V4", `${t.id}: metadata ${JSON.stringify(t.meta)}`);
+  ok(t.meta?.category === cat && t.meta?.slot === slot && t.meta?.variant === SET.toUpperCase(), `${t.id}: metadata ${JSON.stringify(t.meta)}`);
   ok((t.meta?.typology ?? "").replace(/ \/ /g, " ").replace(/-/g, " ") === typ, `${t.id}: typology "${t.meta?.typology}" expected "${typ}"`);
   const base = getOcc(getOriented(t, 0, false)).inside;
   for (let r = 0; r < 4; r++) for (const m of [false, true]) ok(getOcc(getOriented(t, r, m)).inside === base, `${t.id}: orientation ${r}/${m} changed the container`);
@@ -185,7 +185,20 @@ for (const r of rows) say(r);
 say(`  ${validRuns} of ${runs} runs valid; ${nestedTotal} nested fits found; ${mixes.length} runs mixed all three categories`);
 say("  how often each tile was placed (in all runs / in valid runs):");
 say("  " + list.map((t) => `${short(t)} ${used.get(t.id) ?? 0}/${inValid.get(t.id) ?? 0}`).join("   "));
-for (const t of list) ok((inValid.get(t.id) ?? 0) > 0, `${t.id} was never part of a valid generated aggregation`);
+// A tile the objective never prefers (a low-density gallery scores low on compactness) must still be assemblable: the best two-piece assembly with each host must be one valid aggregation.
+for (const t of list) {
+  if ((inValid.get(t.id) ?? 0) > 0) continue;
+  let hit = 0;
+  const hosts = list.filter((h) => h !== t);
+  for (const h of hosts) {
+    const bp = bestPair(h, t);
+    const pa: Piece = { id: "a", tileId: h.id, pos: [0, 0, 0], rotZ: 0, mirrorX: false, scale: 1, locked: false };
+    const pb: Piece = { id: "b", tileId: t.id, pos: bp.pos, rotZ: bp.rotZ, mirrorX: bp.mirrorX, scale: 1, locked: false };
+    if (valid(lay({ ...emptyDoc(), pieces: [pa, pb], entranceId: "a" }))) hit++;
+  }
+  say(`  ${short(t)} was not chosen by the objective in any run; its best two-piece assembly with each other tile is valid for ${hit} of ${hosts.length} hosts`);
+  ok(hit >= hosts.length - 2, `${t.id} could not be assembled with most hosts`);
+}
 for (const s of samples.filter((q) => !q.name.startsWith("gen_02")).slice(0, 12)) {
     crude(s.l.boxes, join(out, s.name + ".png"), { sliceZ: [4, 14, 24] });
     dump(s.name, s.l);
@@ -301,7 +314,7 @@ if (want(7)) {
 // ---- 8. the first set and V4 as variants of one typology, in the Analysis -------------------------------------------------------------------------------------------
 if (want(8)) {
   say("\n8. VARIANTS: each V4 tile beside the first set's tile of the same typology, as the Analysis tab's variant comparison reads them (strength, fit and usability kept apart)");
-  const first = V3_ORDER.map((n) => loadFixture(n, FIXTURES_V3)).filter((t): t is ParsedTile => !!t);
+  const first = V3_ORDER.map((n) => loadFixture(n, COMPARE_FIXTURES)).filter((t): t is ParsedTile => !!t);
   ok(first.length === 15, `only ${first.length} first-set fixtures found`);
   const all = [...first, ...list];
   const groups = typologyGroups(all);

@@ -32,7 +32,7 @@
   L3  W   W   W   W   W   W   W   W   W   W   W   W   W   W   W  
   L4  W   W   W   W   W   W   W   W   W   W   W   W   W   W   W  
   L5  W   W   W   W   W   W   W   W   W   W   W   W   W   W   W  
-  210 of 225 ordered pairs (93%) have a walkable joint in their best placement  (15 s)
+  210 of 225 ordered pairs (93%) have a walkable joint in their best placement  (11 s)
   counted either way round: 119 of 120 unordered pairs (99%) can be joined on foot
   G1: walkable partners 15/15  (first tile 15, second tile 14)
   G2: walkable partners 15/15  (first tile 15, second tile 14)
@@ -69,54 +69,54 @@
   14 of 15 tiles make at least one valid repeat / mirror / shift aggregation by themselves
 
 4. AUTO GENERATE: the whole V4 bank, several shapes, sizes and seeds. Every result must be collision-free, one attached group, and every piece reachable on foot from the entrance
-   2 pcs compact   seed 1:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  1002 ms   [L4 G1]
-   2 pcs compact   seed 2:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  875 ms   [L5 G3]
-   2 pcs compact   seed 3:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  834 ms   [L3 G4]
-   2 pcs courtyard seed 1:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  978 ms   [L5 G3]
-   2 pcs courtyard seed 2:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  964 ms   [L5 G3]
-   2 pcs courtyard seed 3:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  846 ms   [L3 G4]
-   2 pcs stepped   seed 1:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  868 ms   [L5 G3]
-   2 pcs stepped   seed 2:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  835 ms   [L2 G5]
-   2 pcs stepped   seed 3:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  834 ms   [L3 G4]
-   2 pcs spineH    seed 1:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  765 ms   [L5 G1]
-   2 pcs spineH    seed 2:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  869 ms   [L5 G3]
-   2 pcs spineH    seed 3:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  858 ms   [L2 O1]
-   2 pcs village   seed 1:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  1009 ms   [L4 G1]
-   2 pcs village   seed 2:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  929 ms   [L5 G3]
-   2 pcs village   seed 3:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  897 ms   [L3 G4]
-   4 pcs compact   seed 1:  4 placed  valid  joints 4 (3 walkable)  nested 0  3 categories  2635 ms   [L4 G1 O2 O1]
-   4 pcs compact   seed 2:  4 placed  valid  joints 4 (3 walkable)  nested 0  3 categories  3025 ms   [L5 G3 O4 G3]
-   4 pcs compact   seed 3:  4 placed  valid  joints 5 (3 walkable)  nested 0  3 categories  2403 ms   [L3 G4 G3 O5]
-   4 pcs courtyard seed 1:  4 placed  valid  joints 4 (3 walkable)  nested 1  3 categories  2888 ms   [L5 G3 O1 O4]
-   4 pcs courtyard seed 2:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  2887 ms   [L5 G3 O4 G1]
-   4 pcs courtyard seed 3:  4 placed  valid  joints 4 (3 walkable)  nested 0  3 categories  2961 ms   [L1 G3 O2 O3]
-   4 pcs stepped   seed 1:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  2969 ms   [L4 G4 O2 O2]
-   4 pcs stepped   seed 2:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  3097 ms   [L5 G5 O5 G3]
-   4 pcs stepped   seed 3:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  2707 ms   [L2 G1 O1 L3]
-   4 pcs spineH    seed 1:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  2840 ms   [L5 G1 O2 O1]
-   4 pcs spineH    seed 2:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  2784 ms   [L4 G1 O2 O5]
-   4 pcs spineH    seed 3:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  2610 ms   [L3 G3 O1 O5]
-   4 pcs village   seed 1:  4 placed  valid  joints 4 (3 walkable)  nested 0  3 categories  2871 ms   [L4 G1 O2 G3]
-   4 pcs village   seed 2:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  2535 ms   [L5 G3 O4 G4]
-   4 pcs village   seed 3:  4 placed  valid  joints 5 (3 walkable)  nested 0  3 categories  2306 ms   [L1 G3 O2 O5]
-   8 pcs compact   seed 1:  8 placed  valid  joints 10 (9 walkable)  nested 0  3 categories  6077 ms   [L4 G1 O2 O1 O5 G4 L3 G3]
-   8 pcs compact   seed 2:  8 placed  valid  joints 9 (7 walkable)  nested 0  3 categories  6059 ms   [L2 O5 O2 G3 G5 L1 O3 G4]
-   8 pcs compact   seed 3:  8 placed  valid  joints 9 (7 walkable)  nested 1  3 categories  6036 ms   [L2 O1 G5 L1 O3 G2 O5 O4]
-   8 pcs courtyard seed 1:  8 placed  valid  joints 8 (7 walkable)  nested 0  3 categories  6100 ms   [L5 G3 O3 O1 O5 L2 G4 O1]
-   8 pcs courtyard seed 2:  7 placed  valid  joints 7 (6 walkable)  nested 0  3 categories  5876 ms   [L5 G3 G4 O1 O2 O4 O3]
-   8 pcs courtyard seed 3:  8 placed  valid  joints 12 (7 walkable)  nested 1  3 categories  6150 ms   [L3 G4 G3 O2 O4 O3 O1 O5]
-   8 pcs stepped   seed 1:  8 placed  valid  joints 7 (7 walkable)  nested 0  3 categories  6059 ms   [L4 G4 O2 O2 G1 O4 O2 L4]
-   8 pcs stepped   seed 2:  8 placed  valid  joints 10 (8 walkable)  nested 0  3 categories  6050 ms   [L4 G3 O5 L2 O1 O3 O5 G2]
-   8 pcs stepped   seed 3:  8 placed  valid  joints 7 (7 walkable)  nested 0  3 categories  5994 ms   [L2 G1 O1 L3 G4 O5 L3 G3]
-   8 pcs spineH    seed 1:  8 placed  valid  joints 10 (7 walkable)  nested 0  3 categories  5876 ms   [L5 G1 O2 O1 G4 O5 G3 L3]
-   8 pcs spineH    seed 2:  8 placed  valid  joints 7 (7 walkable)  nested 0  3 categories  6038 ms   [L4 G1 O2 O5 G4 O1 G1 O4]
-   8 pcs spineH    seed 3:  8 placed  valid  joints 7 (7 walkable)  nested 0  3 categories  5725 ms   [L3 G3 O1 O5 G1 O3 L2 O2]
-   8 pcs village   seed 1:  8 placed  valid  joints 10 (7 walkable)  nested 0  3 categories  5574 ms   [L5 G3 O5 O1 O2 G4 O3 L3]
-   8 pcs village   seed 2:  7 placed  valid  joints 10 (7 walkable)  nested 1  3 categories  6029 ms   [L5 G3 O4 G4 O4 O4 O3]
-   8 pcs village   seed 3:  8 placed  valid  joints 11 (7 walkable)  nested 0  3 categories  5432 ms   [L3 G4 G3 O2 O1 O5 O1 O4]
+   2 pcs compact   seed 1:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  633 ms   [L4 G1]
+   2 pcs compact   seed 2:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  575 ms   [L5 G3]
+   2 pcs compact   seed 3:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  536 ms   [L3 G4]
+   2 pcs courtyard seed 1:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  566 ms   [L5 G3]
+   2 pcs courtyard seed 2:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  573 ms   [L5 G3]
+   2 pcs courtyard seed 3:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  546 ms   [L3 G4]
+   2 pcs stepped   seed 1:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  557 ms   [L5 G3]
+   2 pcs stepped   seed 2:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  567 ms   [L2 G5]
+   2 pcs stepped   seed 3:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  537 ms   [L3 G4]
+   2 pcs spineH    seed 1:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  566 ms   [L5 G1]
+   2 pcs spineH    seed 2:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  558 ms   [L5 G3]
+   2 pcs spineH    seed 3:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  537 ms   [L2 O1]
+   2 pcs village   seed 1:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  526 ms   [L4 G1]
+   2 pcs village   seed 2:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  578 ms   [L5 G3]
+   2 pcs village   seed 3:  2 placed  valid  joints 1 (1 walkable)  nested 0  2 categories  556 ms   [L3 G4]
+   4 pcs compact   seed 1:  4 placed  valid  joints 4 (3 walkable)  nested 0  3 categories  1807 ms   [L4 G1 O2 O1]
+   4 pcs compact   seed 2:  4 placed  valid  joints 4 (3 walkable)  nested 0  3 categories  1820 ms   [L5 G3 O4 G3]
+   4 pcs compact   seed 3:  4 placed  valid  joints 5 (3 walkable)  nested 0  3 categories  1621 ms   [L3 G4 G3 O5]
+   4 pcs courtyard seed 1:  4 placed  valid  joints 4 (3 walkable)  nested 1  3 categories  1790 ms   [L5 G3 O1 O4]
+   4 pcs courtyard seed 2:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  1748 ms   [L5 G3 O4 G1]
+   4 pcs courtyard seed 3:  4 placed  valid  joints 4 (3 walkable)  nested 0  3 categories  1714 ms   [L1 G3 O2 O3]
+   4 pcs stepped   seed 1:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  1739 ms   [L4 G4 O2 O2]
+   4 pcs stepped   seed 2:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  1685 ms   [L5 G5 O5 G3]
+   4 pcs stepped   seed 3:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  1656 ms   [L2 G1 O1 L3]
+   4 pcs spineH    seed 1:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  1778 ms   [L5 G1 O2 O1]
+   4 pcs spineH    seed 2:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  1686 ms   [L4 G1 O2 O5]
+   4 pcs spineH    seed 3:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  1618 ms   [L3 G3 O1 O5]
+   4 pcs village   seed 1:  4 placed  valid  joints 4 (3 walkable)  nested 0  3 categories  1774 ms   [L4 G1 O2 G3]
+   4 pcs village   seed 2:  4 placed  valid  joints 3 (3 walkable)  nested 0  3 categories  1696 ms   [L5 G3 O4 G4]
+   4 pcs village   seed 3:  4 placed  valid  joints 5 (3 walkable)  nested 0  3 categories  1554 ms   [L1 G3 O2 O5]
+   8 pcs compact   seed 1:  8 placed  valid  joints 8 (7 walkable)  nested 0  3 categories  3981 ms   [L5 G3 O3 G1 O4 O5 L3 O1]
+   8 pcs compact   seed 2:  8 placed  valid  joints 9 (7 walkable)  nested 0  3 categories  4153 ms   [L5 G3 O4 G3 O2 O3 O4 G2]
+   8 pcs compact   seed 3:  8 placed  valid  joints 11 (7 walkable)  nested 1  3 categories  4138 ms   [L2 O1 G5 L1 O3 G2 O5 O3]
+   8 pcs courtyard seed 1:  8 placed  valid  joints 8 (7 walkable)  nested 0  3 categories  4161 ms   [L5 G3 O3 O1 O5 L2 G4 O1]
+   8 pcs courtyard seed 2:  8 placed  valid  joints 8 (7 walkable)  nested 0  3 categories  4336 ms   [L5 G3 G4 O1 O2 O4 O3 G1]
+   8 pcs courtyard seed 3:  8 placed  valid  joints 11 (7 walkable)  nested 0  3 categories  6098 ms   [L3 G4 G3 O2 O4 O3 O1 O5]
+   8 pcs stepped   seed 1:  8 placed  valid  joints 8 (7 walkable)  nested 1  3 categories  6064 ms   [L4 G4 O2 O2 G1 O4 O2 O4]
+   8 pcs stepped   seed 2:  8 placed  valid  joints 10 (8 walkable)  nested 0  3 categories  6072 ms   [L4 G3 O5 L2 O1 O3 O5 G4]
+   8 pcs stepped   seed 3:  8 placed  valid  joints 7 (7 walkable)  nested 0  3 categories  5965 ms   [L2 G1 O1 L3 G4 O5 L3 G3]
+   8 pcs spineH    seed 1:  8 placed  valid  joints 8 (7 walkable)  nested 0  3 categories  6063 ms   [L5 G1 O2 O1 G4 O5 G3 G3]
+   8 pcs spineH    seed 2:  8 placed  valid  joints 7 (7 walkable)  nested 0  3 categories  5909 ms   [L4 G1 O2 O5 G4 O1 G1 O4]
+   8 pcs spineH    seed 3:  8 placed  valid  joints 7 (7 walkable)  nested 0  3 categories  5891 ms   [L3 G3 O1 O5 G1 O3 L2 O1]
+   8 pcs village   seed 1:  8 placed  valid  joints 8 (7 walkable)  nested 0  3 categories  6062 ms   [L5 G3 O5 O1 O2 G4 O3 O5]
+   8 pcs village   seed 2:  8 placed  valid  joints 11 (8 walkable)  nested 1  3 categories  4789 ms   [L5 G3 O4 G4 O4 O4 O3 O5]
+   8 pcs village   seed 3:  8 placed  valid  joints 13 (7 walkable)  nested 0  3 categories  5857 ms   [L3 G4 G3 O2 O1 O5 O1 O3]
   45 of 45 runs valid; 4 nested fits found; 30 runs mixed all three categories
   how often each tile was placed (in all runs / in valid runs):
-  G1 16/16   G2 2/2   G3 29/29   G4 19/19   G5 4/4   O1 20/20   O2 20/20   O3 10/10   O4 13/13   O5 18/18   L1 4/4   L2 9/9   L3 15/15   L4 11/11   L5 18/18
+  G1 17/17   G2 2/2   G3 31/31   G4 18/18   G5 3/3   O1 21/21   O2 18/18   O3 13/13   O4 15/15   O5 19/19   L1 3/3   L2 8/8   L3 13/13   L4 9/9   L5 20/20
 
 5. NESTING: the three L-plan tiles (G5, O4, L5) placed into each other's 10 x 10 ft notch (every orientation, offsets of 10 ft): valid = no collision, attached, both reachable on foot
   G5 + G5: 36 collision-free nested placements, 0 of them with a walkable joint and both pieces reachable
@@ -131,8 +131,8 @@
   (9 ordered pairs of L-plan tiles; nested pairs that also walk: see the counts above)
 
 6. VERTICAL: a tile standing with its ground floor at an upper level of L1 (ring ramp) or G5 (gallery ramp), joined where the ramp arrives, found by lining up doors and floors (all host orientations)
-  the ring ramp of L1: 14 of 14 other tiles stand at an upper level of the host and are reached on foot (G1 G2 G3 G4 G5 O1 O2 O3 O4 O5 L2 L3 L4 L5)  [1199 walkable raised placements checked]
-  the gallery ramp of G5: 14 of 14 other tiles stand at an upper level of the host and are reached on foot (G1 G2 G3 G4 O1 O2 O3 O4 O5 L1 L2 L3 L4 L5)  [204 walkable raised placements checked]
+  the ring ramp of L1: 14 of 14 other tiles stand at an upper level of the host and are reached on foot (G1 G2 G3 G4 G5 O1 O2 O3 O4 O5 L2 L3 L4 L5)  [1291 walkable raised placements checked]
+  the gallery ramp of G5: 14 of 14 other tiles stand at an upper level of the host and are reached on foot (G1 G2 G3 G4 O1 O2 O3 O4 O5 L1 L2 L3 L4 L5)  [272 walkable raised placements checked]
 
 7. RECEIVING FLOORS: tiles with more than one floor of their own (G2, G3, G4, O2, O4 ...) next to a host whose ramp arrives at their upper floor: the share of the guest's floor area a person can reach
   G2: 64% of its floor on its main floor alone; 100% best beside L1

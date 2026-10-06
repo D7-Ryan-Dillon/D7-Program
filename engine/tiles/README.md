@@ -1,5 +1,7 @@
 # The 15 typology tiles as engine 7 recipes
 
+> **The third set, V5, is in `v5/`** (`<category>_<n>_<typology>_v5`: the same family contract as V4 but eroded all the way through: a worn, bayed mask container, flat floors with lobed edges as the only hard things, frameless doorways; see `v5/README.md` and `docs/TILE_SET_V5.md`).
+>
 > **The second set, V4, is in `v4/`** (`<category>_<n>_<typology>_v4`: coordinated 20 ft lattice, floors at 1 / 11 / 21 / 31 ft, standard 6 x 8 ft doorways, real stairs and ramps, L-plan / single-storey / 40 ft tiles; see `v4/` and `docs/TILE_SET_V4.md`). This folder is the first set (V3 labels dropped), unchanged: ground slab top at z = 2 ft, mid datum at z = 12 ft. The two sets keep distinct names and tile ids and can sit in one project; typology keys are shared, so the Analysis tab compares them as variants of one typology.
 
 `recipes/` holds the fifteen recipes (three categories x five typologies from `Assignemnt_02_ProtoArchitecturalSpaces.pdf`, named `<category>_<n>_<typology>`, no version label). Each is a self-contained `erosion-recipe/2` with a `meta` block (category, typology, slot): paste it into the engine's `recipe` panel in Grasshopper (or type the file path) and the engine builds exactly that tile, ending with `RECIPE CHECK: OK`. No Rhino geometry is needed. The foam is the printed module, the voids are the spaces.

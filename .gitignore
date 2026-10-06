@@ -48,3 +48,4 @@ next-env.d.ts
 
 # the packaged V4 tile set (zips, ~100 MB): rebuilt by engine/tiles/v4/package.py
 /engine/tiles/v4/package/
+/engine/tiles/v5/package/

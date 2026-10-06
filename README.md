@@ -164,6 +164,7 @@ npm run check:parity   # lib/tiles agrees with the Grasshopper engine's own anal
 npm run build      # production build
 npm run check:arrange / check:interlock / check:analysis   # no-browser regression checks (Arrange, shaped tiles that interlock, the Analysis against the matrix and the one walking model)
 npm run check:v4       # assembly evidence for the V4 tile set: all pairs, repeat / mirror / shift in 2, 4, 8, nesting, Auto Generate, vertical meetings (writes pictures)
+npm run check:v5 / boxiness   # the same for the V5 set (eroded tiles), and how much less boxy V5 is than V4
 ```
 
 ## Layout

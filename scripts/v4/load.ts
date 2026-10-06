@@ -7,8 +7,12 @@ import { join } from "node:path";
 import { ensureAnalysis } from "../../lib/tiles/pipeline";
 import type { ParsedTile } from "../../lib/types";
 
-export const EXPORTS = process.env.V4_EXPORTS ?? "C:/tmp/tiles4";
-export const FIXTURES = join(__dirname, "..", "..", "lib", "tiles", "fixtures-v4");
+/** Which tile set the scripts read: v4 (default) or v5 (TILESET=v5). */
+export const SET = (process.env.TILESET ?? "v4").toLowerCase();
+export const EXPORTS = process.env.V4_EXPORTS ?? `C:/tmp/tiles${SET === "v5" ? 5 : 4}`;
+export const FIXTURES = join(__dirname, "..", "..", "lib", "tiles", `fixtures-${SET}`);
+/** The set this one is compared with in the variant comparison: the first set for V4, V4 for V5. */
+export const FIXTURES_V4 = join(__dirname, "..", "..", "lib", "tiles", "fixtures-v4");
 /** The first set's fixtures (no variant label). */
 export const FIXTURES_V3 = join(__dirname, "..", "..", "lib", "tiles", "fixtures");
 
@@ -61,7 +65,7 @@ function build(name: string, grid: [number, number, number], cell: number, meta:
 }
 
 /** The V4 set's names in order (gathering, office, lobby; typologies 1 to 5). */
-export const V4_ORDER = [
+const BASE = [
   "gathering_1_stepped_amphitheater_v4",
   "gathering_2_void_field_gathering_v4",
   "gathering_3_inserted_horizontal_plate_v4",
@@ -77,7 +81,9 @@ export const V4_ORDER = [
   "lobby_3_continuous_hall_lobby_v4",
   "lobby_4_topographic_ground_field_lobby_v4",
   "lobby_5_linear_gallery_lobby_v4",
-];
+].map((n) => n.replace(/_v4$/, ""));
 
-/** The first set's names, in the same order. */
-export const V3_ORDER = V4_ORDER.map((n) => n.replace(/_v4$/, ""));
+export const V4_ORDER = BASE.map((n) => `${n}_${SET}`);
+/** The names of the set this one is compared with (the first set for V4, V4 for V5) and where its fixtures are. */
+export const V3_ORDER = SET === "v5" ? BASE.map((n) => `${n}_v4`) : BASE;
+export const COMPARE_FIXTURES = SET === "v5" ? FIXTURES_V4 : FIXTURES_V3;
