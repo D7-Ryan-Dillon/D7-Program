@@ -1,6 +1,6 @@
 // Usable space, as against space that is merely carved. A carved void is not all somewhere a person can go: floor needs clear room to stand
-// (WALK in lib/arrange/occupancy.ts, the same thresholds Arrange uses for its walkable routes: 6.5 ft headroom, a 2.5 ft clear width, steps of
-// no more than 0.5 ft), and the floor has to be joined to a way in. This reads, for one tile or one assembly:
+// (the program's one walking model, lib/walking.ts: the very rules Arrange uses for its walkable routes and Analysis for every route: 6.5 ft headroom,
+// a 2.5 ft clear width, steps of no more than 0.5 ft by default), and the floor has to be joined to a way in. This reads, for one tile or one assembly:
 //   total void against the void above floor that can be reached on foot
 //   plate area against the floor that is exposed and usable (and what is loose or cut off)
 //   void connectivity (open space joined) against floor-supported circulation (floors joined)
@@ -9,8 +9,8 @@
 // not code compliance and not structural certification.
 
 import type { ParsedTile } from "@/lib/types";
-import { WALK } from "@/lib/arrange/occupancy";
-import { classAt, groundEntries, supportedCells, SOLID, VOID, voxelFacts, type VoxelFacts } from "./voxelFacts";
+import { floodZones, kernelFor, standingCells, WALK, walkKey } from "@/lib/walking";
+import { classAt, groundEntries, SOLID, VOID, voxelFacts, type VoxelFacts } from "./voxelFacts";
 
 export interface Region {
   areaFt2: number;
@@ -26,7 +26,7 @@ export interface UsableSpace {
   reachableVoidFt3: number;
   /** material of floor plates in plan, ft2 (the engine's plate objects), against floor that people can stand on and reach */
   plateFt2: number;
-  /** all floor-supported cells (material under, 5 ft of headroom) in ft2 */
+  /** all floor (material under, at least a crawl's height above) in ft2 */
   floorFt2: number;
   /** of it: stand-able (clear width and headroom) and reachable from the entry */
   usableFt2: number;
@@ -47,26 +47,21 @@ export interface UsableSpace {
   cutOff: Region[];
 }
 
-const NB: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+/** A floor under less clear height than this is a gap, not a floor: it is not counted at all (it is not a route rule: whether a floor can be stood on is the shared walking rules'). */
+const CRAWL_FT = 3;
 
-/** Stand-able cells: floor-supported with the full headroom and a disc of clear width (the Arrange rule), read in this tile's own cells. */
-function standable(f: VoxelFacts, supported: Uint8Array): Uint8Array {
-  const out = new Uint8Array(supported.length);
-  const head = Math.max(2, Math.round(WALK.headroomFt / f.cell));
-  const r = Math.max(1, Math.floor(WALK.widthFt / f.cell / 2));
-  const disc: [number, number][] = [];
-  for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) if (dx * dx + dy * dy <= r * r + 1) disc.push([dx, dy]);
+/** Floor cells: void with material directly under it and at least CRAWL_FT of clear height straight above, so a low gap is not counted as floor. */
+function floorCells(f: VoxelFacts): Uint8Array {
+  const out = new Uint8Array(f.cls.length);
+  const head = Math.max(2, Math.round(CRAWL_FT / f.cell));
   const { nx, ny, nz } = f;
   for (let x = 0; x < nx; x++)
     for (let y = 0; y < ny; y++)
       for (let z = 1; z < nz; z++) {
         const i = (x * ny + y) * nz + z;
-        if (!supported[i]) continue;
+        if (f.cls[i] !== VOID || f.cls[i - 1] !== SOLID) continue;
         let ok = true;
-        for (let k = 1; k < head && ok; k++) for (const [dx, dy] of disc) if (classAt(f, x + dx, y + dy, z + k) === SOLID) {
-          ok = false;
-          break;
-        }
+        for (let k = 1; k < head && ok; k++) if (classAt(f, x, y, z + k) === SOLID) ok = false;
         if (ok) out[i] = 1;
       }
   return out;
@@ -118,13 +113,15 @@ function regionsOf(f: VoxelFacts, cells: number[], limit = 8): Region[] {
   return out.sort((a, b) => b.areaFt2 - a.areaFt2).slice(0, limit);
 }
 
-const cache = new WeakMap<ParsedTile, UsableSpace>();
+const cache = new WeakMap<ParsedTile, { key: string; out: UsableSpace }>();
 
+/** Cached per tile and per set of walking rules (change a rule and every tile is read again). */
 export function usableSpace(tile: ParsedTile): UsableSpace {
+  const key = walkKey();
   const hit = cache.get(tile);
-  if (hit) return hit;
+  if (hit && hit.key === key) return hit.out;
   const out = compute(tile);
-  cache.set(tile, out);
+  cache.set(tile, { key, out });
   return out;
 }
 
@@ -135,37 +132,18 @@ function compute(tile: ParsedTile): UsableSpace {
   if (!f) return empty("This tile carries no voxel data.");
   const c3 = f.cell ** 3;
   const c2 = f.cell ** 2;
-  const supported = supportedCells(f, 5);
-  const strict = standable(f, supported);
+  const k = kernelFor(f.cell);
+  const dims: [number, number, number] = [f.nx, f.ny, f.nz];
+  const supported = floorCells(f);
+  // stand-able: the shared rules, in this tile's own cells; joined into zones by the shared step rule; a zone that is a pocket is not a space
+  const strict = standingCells(dims, f.cls, k);
+  const { zone, cells: zoneCells } = floodZones(dims, strict, k);
+  const real = (z: number) => z >= 0 && zoneCells[z] >= k.minZoneCells;
+  for (let i = 0; i < strict.length; i++) if (strict[i] && !real(zone[i])) strict[i] = 0;
   const entries = groundEntries(f, strict);
-  const step = Math.max(1, Math.round(WALK.stepFt / f.cell));
-  // flood the stand-able floor from the way in
+  const reachedZone = new Set(entries.map((e) => zone[e]));
   const reached = new Uint8Array(strict.length);
-  const stack: number[] = [];
-  for (const e of entries) {
-    reached[e] = 1;
-    stack.push(e);
-  }
-  while (stack.length) {
-    const i = stack.pop()!;
-    const z = i % f.nz;
-    const y = ((i - z) / f.nz) % f.ny;
-    const x = ((i - z) / f.nz - y) / f.ny;
-    for (const [dx, dy] of NB) {
-      const X = x + dx;
-      const Y = y + dy;
-      if (X < 0 || Y < 0 || X >= f.nx || Y >= f.ny) continue;
-      for (let dz = -step; dz <= step; dz++) {
-        const Z = z + dz;
-        if (Z < 1 || Z >= f.nz) continue;
-        const j = (X * f.ny + Y) * f.nz + Z;
-        if (strict[j] && !reached[j]) {
-          reached[j] = 1;
-          stack.push(j);
-        }
-      }
-    }
-  }
+  for (let i = 0; i < strict.length; i++) if (strict[i] && reachedZone.has(zone[i])) reached[i] = 1;
   let floor = 0;
   let usable = 0;
   let cutOff = 0;
@@ -189,51 +167,18 @@ function compute(tile: ParsedTile): UsableSpace {
   let reachableVoid = 0;
   for (let i = 0; i < reached.length; i++) {
     if (!reached[i]) continue;
-    for (let k = i; k < i - (i % f.nz) + f.nz && f.cls[k] === VOID; k++) {
-      if (!counted[k]) {
-        counted[k] = 1;
+    for (let q = i; q < i - (i % f.nz) + f.nz && f.cls[q] === VOID; q++) {
+      if (!counted[q]) {
+        counted[q] = 1;
         reachableVoid++;
       }
     }
   }
-  // zones of stand-able floor, and how many are joined to the way in (a zone counts when it holds at least minZone of floor)
-  const minCells = Math.round(WALK.minZoneFt2 / c2);
-  const zoneId = new Int32Array(strict.length).fill(-1);
-  let zones = 0;
-  let zonesReached = 0;
-  for (let s = 0; s < strict.length; s++) {
-    if (!strict[s] || zoneId[s] >= 0) continue;
-    let n = 0;
-    let isReached = false;
-    const st = [s];
-    zoneId[s] = zones;
-    while (st.length) {
-      const i = st.pop()!;
-      n++;
-      if (reached[i]) isReached = true;
-      const z = i % f.nz;
-      const y = ((i - z) / f.nz) % f.ny;
-      const x = ((i - z) / f.nz - y) / f.ny;
-      for (const [dx, dy] of NB) {
-        const X = x + dx;
-        const Y = y + dy;
-        if (X < 0 || Y < 0 || X >= f.nx || Y >= f.ny) continue;
-        for (let dz = -step; dz <= step; dz++) {
-          const Z = z + dz;
-          if (Z < 1 || Z >= f.nz) continue;
-          const j = (X * f.ny + Y) * f.nz + Z;
-          if (strict[j] && zoneId[j] < 0) {
-            zoneId[j] = zones;
-            st.push(j);
-          }
-        }
-      }
-    }
-    if (n >= minCells) {
-      zones++;
-      if (isReached) zonesReached++;
-    } else zoneId[s] = -2;
-  }
+  // zones of stand-able floor that are spaces, and how many are joined to the way in
+  const kept = new Set<number>();
+  for (let i = 0; i < strict.length; i++) if (strict[i]) kept.add(zone[i]);
+  const zones = kept.size;
+  const zonesReached = [...kept].filter((z) => reachedZone.has(z)).length;
   const levels = tile.spaces?.levels ?? [];
   let levelsReached = 0;
   for (const l of levels) {

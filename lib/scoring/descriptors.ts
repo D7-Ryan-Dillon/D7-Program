@@ -16,17 +16,17 @@
 import { measuresFor, type Measures } from "@/lib/scoring/measures";
 import { DEFAULT_ASSUMPTIONS } from "@/lib/scoring/assumptions";
 import { matrixOf } from "@/lib/scoring/matrix";
-import { compressedFor } from "@/lib/scoring/compressed";
+import { spatialDensityFor } from "@/lib/scoring/spatialDensity";
 import { clamp, coefficientOfVariation, normalize, triangular } from "@/lib/scoring/utils";
 import { cap, count, countWord, fix, ft, ft2, ft3, levelHeights, list, num, numberWord, pct, roomShort, sentence } from "@/lib/scoring/words";
 import type { ParsedTile } from "@/lib/types";
 
 export type DescriptorKey =
   | "carved" | "stepped" | "porous" | "continuous" | "resistant" | "threaded"
-  | "graduated" | "nonHierarchical" | "forceDriven" | "lightFilled" | "monumental" | "compressed";
+  | "graduated" | "nonHierarchical" | "forceDriven" | "lightFilled" | "monumental" | "spatialDensity";
 
-/** The reading kept beside the twelve, not among them. */
-export type SupplementalKey = "spatialDensity";
+/** An older measurement kept as a legacy reading beside the twelve: the earlier Spatial density, which measured the void's cross-section AREA along the main route (a different formula from the matrix's passage-width ratio). */
+export type LegacyKey = "spatialDensityArea";
 
 export interface Driver {
   label: string;
@@ -83,7 +83,7 @@ export interface DescriptorResult {
 }
 
 type Computed = Pick<DescriptorResult, "score" | "quant" | "qualitative" | "drivers" | "explanation" | "evidence"> & { approximate?: boolean };
-type Def = { key: DescriptorKey | SupplementalKey; label: string; compute: (m: Measures) => Computed };
+type Def = { key: DescriptorKey | LegacyKey; label: string; compute: (m: Measures) => Computed };
 
 const d = (label: string, value: string, pts: number, weight: number): Driver => ({ label, value, pts: clamp(pts, 0, 100), weight });
 const blend = (ds: Driver[]) => {
@@ -667,12 +667,12 @@ const DEFS: Def[] = [
     },
   },
 
-  // ------------------------------------------------------------------------------------------------ Compressed-then-released
+  // ------------------------------------------------------------------------------------------------ Spatial density
   {
-    key: "compressed",
-    label: "Compressed-then-released",
+    key: "spatialDensity",
+    label: "Spatial density",
     compute: (m) => {
-      const r = compressedFor(m.tile, DEFAULT_ASSUMPTIONS);
+      const r = spatialDensityFor(m.tile, DEFAULT_ASSUMPTIONS);
       if (!r.ok) {
         return {
           score: 0,
@@ -705,7 +705,7 @@ const DEFS: Def[] = [
             { label: "Expansions", value: String(p.stretches.filter((x) => x.kind === "expansion").length), how: "stretches of 2 ft or more wider than 1.4 times the typical width" },
           ],
         },
-        qualitative: read(["uniform", "gently varied", "compressed then released", "sharply compressed then released"], idx, "by the narrowest-to-widest ratio: over 0.8, to 0.55, to 0.35, below"),
+        qualitative: read(["little contrast", "gentle contrast", "marked contrast", "sharp contrast"], idx, "by the narrowest-to-widest ratio: over 0.8, to 0.55, to 0.35, below"),
         drivers,
         explanation: sentence([
           `Along a ${ft(p.route.lengthFt)} route from the entry, the clear passage runs from ${ft(p.narrowFt, 1)} at its narrowest to ${ft(p.wideFt, 1)} at its widest (${num(p.ratio, 2)}).`,
@@ -718,15 +718,14 @@ const DEFS: Def[] = [
 ];
 
 /**
- * Spatial density: how much the void's cross-section narrows along the main route. It is NOT one of the matrix's twelve descriptors (the matrix's
- * twelfth is Compressed-then-released, measured on passage width along a floor-supported route); it is kept as an optional supplemental reading
- * and is never mixed into the matrix results or their carry-forward.
+ * The earlier Spatial density: how much the void's cross-section AREA narrows along the engine's main route. The project's Spatial density is the
+ * matrix's passage-width ratio (above); this older formula measured something else, so its numbers are kept as a LEGACY measurement, labelled as
+ * such, and are never relabelled as the current criterion or mixed into it. The current criterion is always recomputed from the passage widths.
  */
-const SUPPLEMENTAL: Def[] = [
-  // ------------------------------------------------------------------------------------------------ Spatial density
+const LEGACY: Def[] = [
   {
-    key: "spatialDensity",
-    label: "Spatial Density",
+    key: "spatialDensityArea",
+    label: "Spatial density, earlier cross-section formula",
     compute: (m) => {
       const p = m.profile;
       const clear = levelClear(m);
@@ -802,8 +801,8 @@ function run(defs: Def[], tile: ParsedTile): DescriptorResult[] {
 
 export const scoreTile = (tile: ParsedTile): DescriptorResult[] => run(DEFS, tile);
 
-/** The supplemental readings (Spatial density), for a tile. */
-export function supplementalFor(tile: ParsedTile): DescriptorResult[] {
-  return run(SUPPLEMENTAL, tile).map((r) => ({ ...r, key: r.key as unknown as DescriptorKey }));
+/** The legacy measurements (the earlier Spatial density formula), for a tile. */
+export function legacyMeasurementsFor(tile: ParsedTile): DescriptorResult[] {
+  return run(LEGACY, tile).map((r) => ({ ...r, key: r.key as unknown as DescriptorKey }));
 }
 

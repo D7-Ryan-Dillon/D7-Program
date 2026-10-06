@@ -15,6 +15,8 @@ import {
   type ProgramRules,
 } from "@/lib/arrange/types";
 import { toFt } from "@/lib/arrange/geometry";
+import { WALK } from "@/lib/walking";
+import { WalkRulesEditor } from "@/components/shared/WalkRulesEditor";
 import { Cap, Chip, Num } from "@/components/arrange/ui";
 import { useArrange } from "@/components/arrange/useArrange";
 
@@ -323,7 +325,7 @@ export function ProgramPanel() {
               how far a piece may overhang.
             </p>
             <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              Floors that meet within
+              Report as &quot;needs a connector&quot;
               <Select
                 className="h-7 flex-1 text-[11px]"
                 value={rules.levelTolerance}
@@ -335,14 +337,20 @@ export function ProgramPanel() {
                 }
                 aria-label="Level tolerance"
               >
-                <option value="exact">Exact (6 in)</option>
-                <option value="riser">One riser (1.5 ft)</option>
-                <option value="ramp">A ramp</option>
+                <option value="exact">Nothing (steps only)</option>
+                <option value="riser">Floors up to 1.5 ft apart</option>
+                <option value="ramp">Floors up to a set rise apart</option>
               </Select>
             </div>
+            <p className="text-[10px] text-muted-foreground">
+              This only changes what is <em>reported</em>. A joint is walkable only across a step of {WALK.stepFt} ft or less, or over real stair or ramp
+              geometry; no setting here turns a bigger jump into a route. Floors further apart than a step, with a clear doorway between them, are listed as
+              needing a stair or ramp connector, and Auto Generate never counts them toward reaching a piece.
+            </p>
+            <WalkRulesEditor />
             {rules.levelTolerance === "ramp" && (
               <Num
-                label="Ramp rise"
+                label="Report up to"
                 value={rules.rampRiseFt}
                 min={1.5}
                 max={10}

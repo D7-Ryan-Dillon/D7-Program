@@ -70,7 +70,7 @@ export function JointsPanel() {
                   <span title="the pieces touch face to face">touch {j.connect.contactFt2.toFixed(0)} ft2{j.patches.length > 1 ? ` in ${j.patches.length} patches` : ""}</span>
                   <span title="open space meets open space across the joint" className={j.connect.voidConnected ? "text-foreground" : ""}>open {j.connect.voidFt2.toFixed(0)} ft2</span>
                   <span title="a person can stand on a floor on each side and step across" className={j.connect.walkable ? "text-pink" : "text-orange"}>
-                    {j.connect.walkable ? `walkable${j.connect.stepFt ? ` · step ${j.connect.stepFt.toFixed(1)} ft` : ""}` : j.connect.kind === "void" ? "not walkable" : "no route"}
+                    {j.connect.walkable ? `walkable${j.connect.stepFt ? ` · step ${j.connect.stepFt.toFixed(1)} ft` : ""}` : j.connect.kind === "connector" ? `needs a connector · ${j.connect.connector!.riseFt.toFixed(1)} ft rise · not walkable` : j.connect.kind === "void" ? "not walkable" : "no route"}
                   </span>
                 </div>
                 {!j.connect.walkable && j.connect.why && <div>{j.connect.why}</div>}

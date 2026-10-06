@@ -8,8 +8,8 @@ import { boundsOfBoxes, findContacts, nearPairs, placeBox, toFt, type Contact, t
 import { collide, findCollisions, findNested, violates, type Collision } from "./collision";
 import { groupByPair, jointFromContacts } from "./joints";
 import { categoryOf, FACE_AXIS, FACE_KEYS, FACE_SIGN, type FaceKey, type Patch } from "./orient";
-import { getWalk, HEAD_CELLS, OUT, type Feature } from "./occupancy";
-import { toleranceFt, type ArrangementDoc, type Joint, type Piece, type ProgramRules, type Vec3 } from "./types";
+import { arrangeKernel, getWalk, OUT, type Feature } from "./occupancy";
+import { connectorReachFt, type ArrangementDoc, type Joint, type Piece, type ProgramRules, type Vec3 } from "./types";
 
 export interface Exposed {
   pieceId: string;
@@ -226,7 +226,7 @@ function entryZones(b: PlacedBox, exposed: Exposed[]): number[] {
           const X = x + dx;
           const Y = y + dy;
           if (X < 0 || Y < 0 || X >= nx || Y >= ny) continue;
-          for (let Z = Math.max(1, z - HEAD_CELLS); Z <= z; Z++) {
+          for (let Z = Math.max(1, z - arrangeKernel().head); Z <= z; Z++) {
             const k = (X * ny + Y) * nz + Z;
             if (wk.stand[k] && wk.zones[wk.zone[k]].significant) found.add(wk.zone[k]);
           }
@@ -239,7 +239,7 @@ function entryZones(b: PlacedBox, exposed: Exposed[]): number[] {
 export function analyzeLayout(doc: ArrangementDoc, tileById: Map<string, ParsedTile>, rules: ProgramRules): Layout {
   const boxes = boxesFor(doc.pieces, tileById);
   const byId = new Map(boxes.map((b) => [b.piece.id, b]));
-  const tol = toleranceFt(rules);
+  const tol = connectorReachFt(rules);
   const collisions = findCollisions(boxes).filter((c) => violates(c));
   const overlaps: [string, string][] = collisions.map((c) => [c.aId, c.bId]);
   const nested = findNested(boxes);

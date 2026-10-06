@@ -4,8 +4,8 @@
 // that does not touch anything useful, adds nothing):
 //   void        void against void, exactly the program's long-standing rule (docs/DATA_FORMAT.md section 5):
 //               matched = open on both sides, dead = open on one side only; 100 * matched / (matched + dead)
-//   floors      floors that meet at (nearly) the same height; any pair of floor levels may meet, so floor 1 of one tile
-//               can meet floor 2 of another; a step bigger than the level tolerance counts against
+//   floors      floors that meet within one step (the program's shared step limit, lib/walking.ts); any pair of floor levels may meet, so
+//               floor 1 of one tile can meet floor 2 of another; a bigger difference counts against
 //   foam        structure touching structure across the joint (no hairline joints)
 //   circulation each opening on one side that continues into an opening on the other (a route end meeting a route end)
 // null = that part does not apply (nothing opens onto the joint; no floors; ...).
@@ -14,8 +14,8 @@
 
 import { aggregateScore, ARRANGE_CELL, type Joint, type JointConnect, type JointParts, type JointPatch, type Rating, type Vec3 } from "./types";
 import { contactsBetween, findContacts, OTHER_AXES, pieceSig, toFt, type Contact, type PlacedBox } from "./geometry";
-import { SOLID, VOID } from "./occupancy";
-import { crossingsOf, nearContact, World, type Crossing } from "./walk";
+import { SOLID, VOID, WALK, walkKey } from "./occupancy";
+import { crossingsOf, nearContact, World, type Connector, type Crossing } from "./walk";
 
 const WEIGHTS = { void: 0.4, floors: 0.25, circulation: 0.2, foam: 0.15 };
 const MIN_COMPONENT_CELLS = Math.round(4 / (ARRANGE_CELL * ARRANGE_CELL)); // an opening of 4 ft2 or more
@@ -126,7 +126,7 @@ interface PatchStats {
   matchedA: number;
 }
 
-function statsOf(c: Contact, L: Layers, tolFt: number): PatchStats {
+function statsOf(c: Contact, L: Layers): PatchStats {
   const { w, h } = L;
   const st: PatchStats = { matched: 0, dead: 0, foamBoth: 0, foamAny: 0, floorsTotal: 0, floorsOk: 0, steps: [], comps: 0, met: 0, matchedA: 0 };
   for (let i = 0; i < w * h; i++) {
@@ -150,7 +150,7 @@ function statsOf(c: Contact, L: Layers, tolFt: number): PatchStats {
         if (!best) continue;
         st.floorsTotal++;
         const step = Math.abs(a[0] - best[0]) * ARRANGE_CELL;
-        if (step <= tolFt + 1e-6) st.floorsOk++;
+        if (step <= WALK.stepFt + 1e-6) st.floorsOk++;
         st.steps.push(step);
       }
     }
@@ -205,9 +205,12 @@ function rectsOf(c: Contact): { min: Vec3; max: Vec3 }[] {
   return out;
 }
 
-/** `tolFt` is the level tolerance: floors within it count as one level, and a walkable route may step that much. `all` are the pieces near the contacts (for clearance). */
-export function scoreContacts(contacts: Contact[], all: PlacedBox[], tolFt: number): JointCore {
-  const tolCells = Math.max(1, Math.round(tolFt / ARRANGE_CELL));
+/**
+ * `connectorFt` only decides how far apart two floors may be and still be reported as "needs a connector"; it never makes anything walkable (the
+ * shared step limit does that, and nothing changes it but the walking rules themselves). `all` are the pieces near the contacts (for clearance).
+ */
+export function scoreContacts(contacts: Contact[], all: PlacedBox[], connectorFt: number): JointCore {
+  const connectorCells = Math.max(0, Math.round(connectorFt / ARRANGE_CELL));
   let matched = 0;
   let dead = 0;
   let foamBoth = 0;
@@ -220,11 +223,12 @@ export function scoreContacts(contacts: Contact[], all: PlacedBox[], tolFt: numb
   let matchedA = 0;
   const patches: JointPatch[] = [];
   const crossings: Crossing[] = [];
-  const reached = { floorA: false, floorB: false, standA: false, standB: false, paired: false, significant: false, open: false, clear: false };
+  const connectors: Connector[] = [];
+  const reached = { floorA: false, floorB: false, standA: false, standB: false, paired: false, near: false, significant: false, open: false, clear: false };
   let anyVertical = false;
   for (const c of contacts) {
     const L = contactLayers(c);
-    const st = statsOf(c, L, tolFt);
+    const st = statsOf(c, L);
     matched += st.matched;
     dead += st.dead;
     foamBoth += st.foamBoth;
@@ -237,8 +241,9 @@ export function scoreContacts(contacts: Contact[], all: PlacedBox[], tolFt: numb
     matchedA += st.matchedA;
     let patchWalk: Crossing[] = [];
     if (c.axis !== 2 && st.matched >= MIN_COMPONENT_CELLS) {
-      const r = crossingsOf(c, L.voidA, L.voidB, new World(nearContact(all, c)), tolCells);
+      const r = crossingsOf(c, L.voidA, L.voidB, new World(nearContact(all, c)), connectorCells);
       patchWalk = r.crossings;
+      connectors.push(...r.connectors);
       for (const key of Object.keys(reached) as (keyof typeof reached)[]) reached[key] = reached[key] || r.reached[key];
     }
     if (c.axis === 2 && st.matched >= MIN_COMPONENT_CELLS) anyVertical = true;
@@ -259,6 +264,8 @@ export function scoreContacts(contacts: Contact[], all: PlacedBox[], tolFt: numb
   const circulation = comps > 0 ? (100 * met) / comps : null;
   const voidConnected = met > 0 && matched >= MIN_COMPONENT_CELLS && matchedA > 0;
   const walkable = crossings.length > 0;
+  const connectorRise = connectors.length ? Math.min(...connectors.map((x) => x.riseFt)) : null;
+  const needsConnector = !walkable && voidConnected && connectors.length > 0;
 
   const parts: JointParts = { void: voidScore, floors, foam, circulation };
   let score: number | null = null;
@@ -279,11 +286,12 @@ export function scoreContacts(contacts: Contact[], all: PlacedBox[], tolFt: numb
     if (!voidConnected) why = matched === 0 && dead > 0 ? "an opening on one side meets solid material on the other" : "no open space continues across the joint";
     else if (anyVertical && !crossings.length && !reached.paired) why = "the openings meet across a horizontal plane (a shaft): a view, not a route; no stair or ramp joins the floors";
     else if (!reached.floorA || !reached.floorB) why = "the openings meet but there is no floor to stand on " + (!reached.floorA && !reached.floorB ? "on either side" : "on one side");
-    else if (!reached.standA || !reached.standB) why = "the passage is too narrow or too low on " + (!reached.standA && !reached.standB ? "both sides" : "one side") + " (it needs 2.5 ft clear width and 6.5 ft headroom)";
-    else if (!reached.paired) why = `the floors on the two sides differ by more than the ${tolFt} ft step allowed`;
+    else if (!reached.standA || !reached.standB) why = "the passage is too narrow or too low on " + (!reached.standA && !reached.standB ? "both sides" : "one side") + ` (it needs ${WALK.widthFt} ft clear width and ${WALK.headroomFt} ft headroom)`;
+    else if (needsConnector && !reached.paired) why = `the floors on the two sides are ${connectorRise!.toFixed(1)} ft apart: more than one step (${WALK.stepFt} ft), so a stair or ramp connector is needed and is not there; this is not a walkable route`;
+    else if (!reached.paired) why = `the floors on the two sides differ by more than one step (${WALK.stepFt} ft): no stair or ramp joins them`;
     else if (!reached.significant) why = "the opening leads into a pocket of floor too small to be a space, not into the tile's circulation";
     else if (!reached.open) why = "the standing places on the two sides do not face each other across the opening";
-    else if (!reached.clear) why = "the passage is too narrow or too low (it needs 2.5 ft clear width and 6.5 ft headroom)";
+    else if (!reached.clear) why = `the passage is too narrow or too low (it needs ${WALK.widthFt} ft clear width and ${WALK.headroomFt} ft headroom)`;
     else why = "no walkable route across the joint";
   }
   const stepFt = crossings.length ? Math.min(...crossings.map((x) => x.stepFt)) : null;
@@ -294,7 +302,8 @@ export function scoreContacts(contacts: Contact[], all: PlacedBox[], tolFt: numb
     walkable,
     stepFt,
     crossings: [...new Map(crossings.map((x) => [`${x.aId}#${x.zoneA}~${x.bId}#${x.zoneB}`, { aId: x.aId, zoneA: x.zoneA, bId: x.bId, zoneB: x.zoneB }])).values()],
-    kind: walkable ? "walkable" : voidConnected ? "void" : "contact",
+    connector: needsConnector ? { riseFt: connectorRise!, count: connectors.length } : null,
+    kind: walkable ? "walkable" : needsConnector ? "connector" : voidConnected ? "void" : "contact",
     why,
   };
   return { parts, score, legacy: voidScore, walkable, floorStepFt, matchedCells: matched, patches, connect };
@@ -304,14 +313,14 @@ const cache = new Map<string, JointCore>();
 export const jointId = (aId: string, bId: string) => (aId < bId ? `${aId}~${bId}` : `${bId}~${aId}`);
 
 /** The joint for one pair of pieces from all the patches where they meet. `all`: the pieces round them (clearance can depend on a third piece). */
-export function jointFromContacts(contacts: Contact[], all: PlacedBox[], tolFt: number, ratings: Record<string, Rating> = {}): Joint {
+export function jointFromContacts(contacts: Contact[], all: PlacedBox[], connectorFt: number, ratings: Record<string, Rating> = {}): Joint {
   const first = contacts[0];
   const near = new Map<string, PlacedBox>();
   for (const c of contacts) for (const b of nearContact(all, c)) near.set(b.piece.id, b);
-  const key = [...near.values()].map((b) => `${b.piece.id}@${pieceSig(b.piece)}`).sort().join("|") + `|${tolFt}|${contacts.map((c) => `${c.axis}${c.plane}:${c.count}`).join(",")}`;
+  const key = [...near.values()].map((b) => `${b.piece.id}@${pieceSig(b.piece)}`).sort().join("|") + `|${connectorFt}|${walkKey()}|${contacts.map((c) => `${c.axis}${c.plane}:${c.count}`).join(",")}`;
   let core = cache.get(key);
   if (!core) {
-    core = scoreContacts(contacts, [...near.values()], tolFt);
+    core = scoreContacts(contacts, [...near.values()], connectorFt);
     if (cache.size > 6000) cache.clear();
     cache.set(key, core);
   }
@@ -354,14 +363,14 @@ export function groupByPair(contacts: Contact[]): Contact[][] {
   return [...m.values()];
 }
 
-export function computeJoints(boxes: PlacedBox[], tolFt: number, ratings: Record<string, Rating> = {}): Joint[] {
-  return groupByPair(findContacts(boxes)).map((g) => jointFromContacts(g, boxes, tolFt, ratings));
+export function computeJoints(boxes: PlacedBox[], connectorFt: number, ratings: Record<string, Rating> = {}): Joint[] {
+  return groupByPair(findContacts(boxes)).map((g) => jointFromContacts(g, boxes, connectorFt, ratings));
 }
 
 /** The joint a new box would make with one existing box, scored (null when they do not touch). */
-export function jointBetween(p: PlacedBox, q: PlacedBox, tolFt: number, all: PlacedBox[] = [p, q]): Joint | null {
+export function jointBetween(p: PlacedBox, q: PlacedBox, connectorFt: number, all: PlacedBox[] = [p, q]): Joint | null {
   const cs = contactsBetween(p, q);
-  return cs.length ? jointFromContacts(cs, all, tolFt) : null;
+  return cs.length ? jointFromContacts(cs, all, connectorFt) : null;
 }
 
 export const overallScore = (joints: Joint[]) => aggregateScore(joints.map((j) => j.score));

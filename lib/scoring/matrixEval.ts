@@ -11,14 +11,18 @@
 
 import type { ParsedTile } from "@/lib/types";
 import type { DescriptorResult, Evidence } from "@/lib/scoring/descriptors";
-import { scoreTile, supplementalFor } from "@/lib/scoring/descriptors";
+import { legacyMeasurementsFor, scoreTile } from "@/lib/scoring/descriptors";
 import { measuresFor, type Measures } from "@/lib/scoring/measures";
 import { assumptionsKey, DEFAULT_ASSUMPTIONS, mergeAssumptions, type Assumptions } from "@/lib/scoring/assumptions";
 import { MATRIX, type MatrixCriterion, type MatrixKey, type MatrixStatus } from "@/lib/scoring/matrix";
-import { compressedFor } from "@/lib/scoring/compressed";
+import { spatialDensityFor } from "@/lib/scoring/spatialDensity";
 import { usableSpace, type UsableSpace } from "@/lib/scoring/usable";
 import { classAt, distinctRoutes, findRoute, OUT, SOLID, skylights, surfaceStats, VOID, voxelFacts, type RouteOverride0, type VoxelFacts } from "@/lib/scoring/voxelFacts";
 import { cap, count, ft, ft2, ft3, list, num, pct, roomShort } from "@/lib/scoring/words";
+import { WALK, walkKey } from "@/lib/walking";
+
+/** The walking rules every route in this evaluation was read with (the project's one set, shared with Arrange). */
+const walkUsed = () => `walking rules: ${ft(WALK.headroomFt, 1)} headroom, ${ft(WALK.widthFt, 1)} clear width, steps of ${ft(WALK.stepFt, 1)} or less (shared with Arrange)`;
 
 export interface MatrixMeasure {
   /** the result in a line, with units */
@@ -66,8 +70,8 @@ export const defaultEvalInputs = (): EvalInputs => ({ assumptions: DEFAULT_ASSUM
 export interface TileEvaluation {
   tileId: string;
   results: MatrixResult[];
-  /** readings kept beside the twelve (not among them) */
-  supplemental: DescriptorResult[];
+  /** older measurements kept beside the twelve as legacy readings (the earlier Spatial density formula): never relabelled as the current criterion */
+  legacyMeasurements: DescriptorResult[];
   usable: UsableSpace;
   assumptions: Assumptions;
 }
@@ -87,6 +91,8 @@ interface Ctx {
   a: Assumptions;
   over: RouteOverride0 | undefined;
   legacy: Map<string, DescriptorResult>;
+  /** the earlier Spatial density (cross-section area) for this tile: a legacy measurement shown beside the current criterion, never in place of it */
+  legacyDensity?: DescriptorResult;
 }
 
 const cell2 = (f: VoxelFacts) => f.cell * f.cell;
@@ -400,7 +406,7 @@ function continuous(c: Ctx): Part {
   const cannot = "That any surface is or is not seamless in construction. Mesh triangles and voxel edges are not seams and are not counted. A route that meets only eroded foam says the surface is geometrically continuous along it, not that no joints would be needed.";
   const f = c.f;
   if (!f) return unavailable("not assessable", method, cannot, "The tile has no voxel data.");
-  const rr = findRoute(f, { headroomFt: c.a.routeHeadroomFt, stepFt: c.a.routeStepFt, from: c.over?.from, to: c.over?.to, destination: "farthest" });
+  const rr = findRoute(f, { from: c.over?.from, to: c.over?.to, destination: "farthest" });
   if (!rr.route) return unavailable("not assessable", method, cannot, `${rr.reason} Without a floor-supported route there is no surface to walk along, and a line through the void is not substituted.`);
   const mc = materialChanges(f, rr.route.points);
   const idx = mc.per10m < 0.5 ? 3 : mc.per10m < 2 ? 2 : mc.per10m < 5 ? 1 : 0;
@@ -416,7 +422,7 @@ function continuous(c: Ctx): Part {
         { label: "Route", value: `${ft(rr.route.lengthFt)} (${num(mc.lengthM, 1)} m)`, how: "floor-supported, from a ground-level opening to " + rr.route.how },
         { label: "Material changes", value: String(mc.changes), how: "foam ↔ plate or branch, summed over floor and both walls" },
       ],
-      used: [`route headroom ${ft(c.a.routeHeadroomFt, 1)}`],
+      used: [walkUsed()],
     },
     interpretation: {
       text: `Along a ${ft(rr.route.lengthFt)} floor-supported route the surface changes material ${mc.changes} time${mc.changes === 1 ? "" : "s"} (${num(mc.per10m, 1)} per 10 m of surface). That reads as ${mc.per10m < 2 ? "geometrically continuous" : "broken up by plates and branches"}; it is a stand-in for the seams count, which the files cannot give.`,
@@ -572,7 +578,7 @@ function graduated(c: Ctx): Part {
   const cannot = "Which zones are private and which public: that needs program information, and enclosure here is geometric. It also reads one route; another route through the tile may graduate differently.";
   const f = c.f;
   if (!f) return unavailable("not assessable", method, cannot, "The tile has no voxel data.");
-  const rr = findRoute(f, { headroomFt: c.a.routeHeadroomFt, stepFt: c.a.routeStepFt, from: c.over?.from, to: c.over?.to, destination: "farthest" });
+  const rr = findRoute(f, { from: c.over?.from, to: c.over?.to, destination: "farthest" });
   if (!rr.route) return unavailable("not assessable", method, cannot, `${rr.reason} Enclosure is read along a route a person could take, so none is measured.`);
   const raw = rr.route.points.map((p) => enclosureAt(f, p, c.a));
   const seq = [0, ...raw];
@@ -642,7 +648,7 @@ function nonHierarchical(c: Ctx): Part {
   const cannot = "Whether the routes feel equally valid: they may differ greatly in length or quality. It counts the routes that exist from one entry to one destination, not every pair.";
   const f = c.f;
   if (!f) return unavailable("not assessable", method, cannot, "The tile has no voxel data.");
-  const opt = { headroomFt: c.a.routeHeadroomFt, stepFt: c.a.routeStepFt, from: c.over?.from, to: c.over?.to, blockFt: c.a.routeBlockFt };
+  const opt = { from: c.over?.from, to: c.over?.to, blockFt: c.a.routeBlockFt };
   const { routes, first } = distinctRoutes(f, opt, c.a.maxRoutes);
   if (!routes.length) return unavailable("not assessable", method, cannot, `${first.reason} With no route, no routes are counted (and nothing is substituted).`);
   const lens = routes.map((r) => r.lengthFt);
@@ -666,7 +672,7 @@ function nonHierarchical(c: Ctx): Part {
         { label: "Route lengths", value: routes.length > 1 ? `${ft(shortest)} to ${ft(longest)}` : ft(shortest), how: "the shortest and longest of the routes found" },
         { label: "Search limits", value: `${c.a.maxRoutes} routes, ${ft(c.a.routeBlockFt, 1)} corridor closed after each`, how: "the settings" },
       ],
-      used: [`corridor ${ft(c.a.routeBlockFt, 1)}`, `up to ${c.a.maxRoutes} routes`, `headroom ${ft(c.a.routeHeadroomFt, 1)}`, `step ${ft(c.a.routeStepFt, 1)}`],
+      used: [`corridor ${ft(c.a.routeBlockFt, 1)}`, `up to ${c.a.maxRoutes} routes`, walkUsed()],
     },
     interpretation: {
       text: routes.length === 1 ? `Only one floor-supported way leads from the entry to the destination: circulation here is a single path.` : `${cap(count(routes.length, "separate way"))}${capped ? " (the search stopped there)" : ""} lead from the entry to the destination, between ${ft(shortest)} and ${ft(longest)} long, so there is a choice of path.`,
@@ -803,15 +809,18 @@ function monumental(c: Ctx): Part {
   };
 }
 
-// ---- Compressed-then-released ---------------------------------------------------------------------------------------------------------------------
+// ---- Spatial density ---------------------------------------------------------------------------------------------------------------------
 
-function compressed(c: Ctx): Part {
-  const method = "Along a floor-supported route from a ground-level opening, the clear width of the passage (open space across the direction of travel at the height set below) is sampled at every cell and smoothed over about 3 ft. The quantity is the narrowest over the widest smoothed width. A constriction is a stretch of 2 ft or more narrower than the ratio set below of the typical (median) width; an expansion one wider than the ratio set below. Where they sit along the route is reported.";
+function spatialDensity(c: Ctx): Part {
+  const method = "Along a floor-supported route from a ground-level opening (a way a person can walk under the shared walking rules), the clear width of the passage (open space across the direction of travel at the height set below) is sampled at every cell and smoothed over about 3 ft. The quantity is the narrowest over the widest smoothed width. A constriction is a stretch of 2 ft or more narrower than the ratio set below of the typical (median) width; an expansion one wider than the ratio set below. Where they sit along the route is reported.";
   const cannot = "That more contrast is better or that the tile was designed to compress and release. It reads one route; the route has to be a way a person could walk, and no line through open air is substituted for it.";
   if (!c.f) return unavailable("not assessable", method, cannot, "The tile has no voxel data.");
-  const r = compressedFor(c.tile, c.a, c.over);
+  const r = spatialDensityFor(c.tile, c.a, c.over);
   if (!r.ok) return unavailable("not assessable", method, cannot, r.reason);
   const p = r.profile;
+  // floor the route could not reach (a passage too narrow or too low, a level change bigger than one step): said, so a short route is not mistaken for a whole tile
+  const cut = usableSpace(c.tile).cutOffFt2;
+  const legacyNote = c.legacyDensity ? { label: "Earlier formula (legacy)", value: `${c.legacyDensity.quant.headline}; older index ${c.legacyDensity.score}`, how: "the earlier Spatial density measured the void's cross-section area along the engine's main route: a different formula, kept as a legacy measurement and not the criterion above" } : null;
   const con = p.stretches.filter((s) => s.kind === "constriction");
   const exp = p.stretches.filter((s) => s.kind === "expansion");
   const idx = p.ratio >= 0.8 ? 0 : p.ratio >= 0.55 ? 1 : p.ratio >= 0.35 ? 2 : 3;
@@ -829,19 +838,21 @@ function compressed(c: Ctx): Part {
         { label: "Constrictions", value: con.length ? con.map((s) => `${ft(s.widthFt, 1)} at ${ft(s.fromFt)} along`).join("; ") : "none", how: `stretches ≥ 2 ft narrower than ${num(c.a.constrictionRatio, 2)} of the typical ${ft(p.typicalFt, 1)}` },
         { label: "Expansions", value: exp.length ? exp.map((s) => `${ft(s.widthFt, 1)} at ${ft(s.fromFt)} along`).join("; ") : "none", how: `stretches ≥ 2 ft wider than ${num(c.a.expansionRatio, 2)} of it` },
         { label: "Route", value: ft(p.route.lengthFt), how: `floor-supported, to ${p.route.how}` },
+        ...(cut >= WALK.minZoneFt2 ? [{ label: "Floor not reached", value: ft2(cut), how: "standing floor that no step, stair or ramp joins to the way in (a passage narrower or lower than the walking rules, or a level change bigger than one step): the route does not go there" }] : []),
+        ...(legacyNote ? [legacyNote] : []),
       ],
-      used: [`width read ${ft(c.a.passageHeightFt, 1)} above the floor`, `constriction < ${num(c.a.constrictionRatio, 2)}`, `expansion > ${num(c.a.expansionRatio, 2)}`, `headroom ${ft(c.a.routeHeadroomFt, 1)}`],
+      used: [`width read ${ft(c.a.passageHeightFt, 1)} above the floor`, `constriction < ${num(c.a.constrictionRatio, 2)}`, `expansion > ${num(c.a.expansionRatio, 2)}`, walkUsed()],
     },
     interpretation: {
       text: `Along a ${ft(p.route.lengthFt)} route the passage narrows to ${ft(p.narrowFt, 1)} and opens to ${ft(p.wideFt, 1)} (${num(p.ratio, 2)}); ${p.releases ? `${count(p.releases, "squeeze")} ${p.releases === 1 ? "is" : "are"} followed by a wider stretch` : "no narrow stretch is followed by a clearly wider one"}.`,
-      scale: ["even", "gently varied", "compressed then released", "sharply compressed then released"],
+      scale: ["little contrast", "gentle contrast", "marked contrast", "sharp contrast"],
       index: idx,
     },
     evidence: { routePoints: p.route.points, regions: p.stretches.slice(0, 6).map((s) => ({ min: [s.at[0] - 1.5, s.at[1] - 1.5, s.at[2] - 1], max: [s.at[0] + 1.5, s.at[1] + 1.5, s.at[2] + 3] })) },
   };
 }
 
-const PARTS: Record<MatrixKey, (c: Ctx) => Part> = { carved, stepped, porous, continuous, resistant: resistant, threaded, graduated, nonHierarchical, forceDriven, lightFilled, monumental, compressed };
+const PARTS: Record<MatrixKey, (c: Ctx) => Part> = { carved, stepped, porous, continuous, resistant: resistant, threaded, graduated, nonHierarchical, forceDriven, lightFilled, monumental, spatialDensity };
 
 // ---- the evaluation --------------------------------------------------------------------------------------------------------------------------------
 
@@ -851,13 +862,14 @@ const memo = new WeakMap<ParsedTile, Map<string, TileEvaluation>>();
 export function evaluateTile(tile: ParsedTile, inputs: Partial<EvalInputs> = {}): TileEvaluation {
   const a = mergeAssumptions(inputs.assumptions);
   const over = inputs.routes?.[tile.id];
-  const key = assumptionsKey(a) + JSON.stringify(over ?? null);
+  const key = assumptionsKey(a) + JSON.stringify(over ?? null) + walkKey();
   let byKey = memo.get(tile);
   if (!byKey) memo.set(tile, (byKey = new Map()));
   const hit = byKey.get(key);
   if (hit) return hit;
   const legacy = scoreTile(tile);
-  const ctx: Ctx = { tile, f: voxelFacts(tile), m: measuresFor(tile), a, over, legacy: new Map(legacy.map((r) => [r.key, r])) };
+  const legacyMeasurements = legacyMeasurementsFor(tile);
+  const ctx: Ctx = { tile, f: voxelFacts(tile), m: measuresFor(tile), a, over, legacy: new Map(legacy.map((r) => [r.key, r])), legacyDensity: legacyMeasurements[0] };
   const results: MatrixResult[] = MATRIX.map((criterion) => {
     let part: Part;
     try {
@@ -867,7 +879,7 @@ export function evaluateTile(tile: ParsedTile, inputs: Partial<EvalInputs> = {})
     }
     return { key: criterion.key, criterion, measure: part.measure, interpretation: { ...part.interpretation, generated: true }, evidence: part.evidence, legacy: ctx.legacy.get(criterion.key)! };
   });
-  const out: TileEvaluation = { tileId: tile.id, results, supplemental: supplementalFor(tile), usable: usableSpace(tile), assumptions: a };
+  const out: TileEvaluation = { tileId: tile.id, results, legacyMeasurements, usable: usableSpace(tile), assumptions: a };
   if (byKey.size > 6) byKey.clear();
   byKey.set(key, out);
   return out;

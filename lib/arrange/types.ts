@@ -56,6 +56,12 @@ export interface CountRange {
   max: number;
 }
 
+/**
+ * How far apart two floors may be and still be REPORTED as joinable by a connector (a stair or ramp that does not exist yet). It is not a
+ * walking rule: whether a person can cross a joint is decided by the program's shared step limit (lib/walking.ts) alone, and no setting makes a
+ * bigger jump walkable. "exact": only steps are considered, nothing is reported as a connector. "riser": floors up to 1.5 ft apart. "ramp":
+ * floors up to `rampRiseFt` apart.
+ */
 export type LevelTolerance = "exact" | "riser" | "ramp";
 
 export interface ProgramRules {
@@ -77,7 +83,7 @@ export interface ProgramRules {
     maxOverhangFt: number;
   };
   levelTolerance: LevelTolerance;
-  /** The most a step may rise when ramps are allowed, ft. */
+  /** The most two floors may differ and still be reported as needing a ramp or stair connector, ft (only with levelTolerance "ramp"). */
   rampRiseFt: number;
   /** The order a route should move through the categories, entrance first. */
   sequenceOrder: Exclude<Category, "other">[];
@@ -102,9 +108,9 @@ export const defaultRules = (): ProgramRules => ({
   sequenceOrder: ["lobby", "gathering", "office"],
 });
 
-export const LEVEL_TOLERANCE_FT: Record<LevelTolerance, number> = { exact: 0.5, riser: 1.5, ramp: 4 };
-/** How far two floors may differ and still count as one walkable level. */
-export const toleranceFt = (rules: ProgramRules) => (rules.levelTolerance === "ramp" ? Math.max(rules.rampRiseFt, 1.5) : LEVEL_TOLERANCE_FT[rules.levelTolerance]);
+export const LEVEL_TOLERANCE_FT: Record<LevelTolerance, number> = { exact: 0, riser: 1.5, ramp: 4 };
+/** How far apart two floors may be and still be reported as needing a connector (never how big a jump is walkable). */
+export const connectorReachFt = (rules: ProgramRules) => (rules.levelTolerance === "ramp" ? Math.max(rules.rampRiseFt, 1.5) : LEVEL_TOLERANCE_FT[rules.levelTolerance]);
 
 // ---- generating --------------------------------------------------------------------------------------------------
 
@@ -226,8 +232,10 @@ export interface JointConnect {
   stepFt: number | null;
   /** the pairs of floors (a zone of each piece; see occupancy.ts) that walkable routes join */
   crossings: { aId: string; zoneA: number; bId: string; zoneB: number }[];
-  /** void meets void only across a horizontal plane or without a floor under it: a view, not a route */
-  kind: "walkable" | "void" | "contact";
+  /** the floors on the two sides are open and clear but further apart than one step: a stair or ramp would join them. Not a route. */
+  connector: { riseFt: number; count: number } | null;
+  /** walkable: a person can cross; connector: open and clear but needs a stair or ramp that is not there; void: open space continues but nobody can walk it (a view); contact: the pieces only touch */
+  kind: "walkable" | "connector" | "void" | "contact";
   /** why an opening that lines up is not walkable, in words (empty when it is) */
   why: string;
 }
@@ -256,7 +264,7 @@ export interface Joint {
   connect: JointConnect;
 }
 
-export type WarningKind = "disconnected" | "unreachable" | "partial" | "never" | "overlap" | "level" | "dead-end" | "sealed" | "hanging" | "site" | "counts" | "limit" | "tile";
+export type WarningKind = "disconnected" | "unreachable" | "partial" | "never" | "overlap" | "level" | "connector" | "dead-end" | "sealed" | "hanging" | "site" | "counts" | "limit" | "tile";
 
 export interface ArrangeWarning {
   id: string;

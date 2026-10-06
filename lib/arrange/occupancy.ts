@@ -13,11 +13,10 @@
 // walkable floor of the tile read on its own (standing cells and the zones they form).
 
 import { FACE_AXIS, FACE_KEYS, FACE_SIGN, type Dims, type FaceKey, type Oriented, type Patch } from "./orient";
+import { floodZones, kernelFor, OUT, SOLID, standingAtWith, standingCells, VOID, type Kernel } from "@/lib/walking";
 import { ARRANGE_CELL } from "./types";
 
-export const OUT = 0;
-export const SOLID = 1;
-export const VOID = 2;
+export { OUT, SOLID, VOID };
 
 /** An opening on the tile's container surface: void cells whose outward neighbour is outside the container, in one plane. */
 export interface Feature extends Patch {
@@ -185,38 +184,13 @@ export const classAtLocal = (occ: Occ, x: number, y: number, z: number): number 
 export { FACE_SIGN };
 
 // ---- the walkable floor of a tile on its own -------------------------------------------------------------------------------------------
+// The rules (headroom, clear width, one step, the smallest space) are the program's one walking model: lib/walking.ts. Arrange reads them in
+// its own 0.5 ft cells.
 
-/** What a person needs to stand somewhere: proto-architecture tolerances, not code compliance. */
-export const WALK = {
-  /** clear height above the floor, ft */
-  headroomFt: 6.5,
-  /** clear width of the standing place (a disc this wide that must hold no material), ft */
-  widthFt: 2.5,
-  /** the largest rise or drop between two neighbouring standing cells, ft (a step or a voxel-stepped ramp) */
-  stepFt: 0.5,
-  /** a floor area smaller than this is a pocket, not a space, ft2 */
-  minZoneFt2: 12,
-};
+export { applyWalk, DEFAULT_WALK, WALK, walkKey } from "@/lib/walking";
 
-// The thresholds in cells, derived from WALK (live exports: they change when applyWalk() is called, which tests do).
-export let HEAD_CELLS = 0;
-export let STEP_CELLS = 0;
-export let DISC: [number, number][] = [];
-let MIN_ZONE_CELLS = 0;
-
-/** Re-derives the cell thresholds after WALK was changed (and forgets every cached floor reading). */
-export function applyWalk(patch: Partial<typeof WALK> = {}) {
-  Object.assign(WALK, patch);
-  HEAD_CELLS = Math.round(WALK.headroomFt / ARRANGE_CELL);
-  STEP_CELLS = Math.max(1, Math.round(WALK.stepFt / ARRANGE_CELL));
-  const radius = Math.max(1, Math.floor(WALK.widthFt / ARRANGE_CELL / 2)); // cells either side of the middle: a disc 2r+1 cells across (2.5 ft = r 2)
-  DISC = [];
-  for (let dx = -radius; dx <= radius; dx++) for (let dy = -radius; dy <= radius; dy++) if (dx * dx + dy * dy <= radius * radius + 1) DISC.push([dx, dy]);
-  MIN_ZONE_CELLS = Math.round(WALK.minZoneFt2 / (ARRANGE_CELL * ARRANGE_CELL));
-  walkEpoch++;
-}
-let walkEpoch = 0;
-applyWalk();
+/** The shared rules in Arrange's cells (re-read after the rules change: the kernel is cached per rule set). */
+export const arrangeKernel = (): Kernel => kernelFor(ARRANGE_CELL);
 
 export interface Zone {
   id: number;
@@ -237,65 +211,24 @@ export interface Walk {
 }
 
 let walkCache = new WeakMap<Occ, Walk>();
-let walkCacheEpoch = 0;
+let walkCacheKey = "";
 
 /** Can someone stand in this cell, given a way of asking what is in any cell. */
 export function standingAt(cell: (x: number, y: number, z: number) => number, x: number, y: number, z: number): boolean {
-  if (cell(x, y, z) !== VOID) return false;
-  if (cell(x, y, z - 1) !== SOLID) return false;
-  for (let k = 1; k < HEAD_CELLS; k++) for (const [dx, dy] of DISC) if (cell(x + dx, y + dy, z + k) === SOLID) return false;
-  return true;
+  return standingAtWith(arrangeKernel(), cell, x, y, z);
 }
 
 export function getWalk(occ: Occ): Walk {
-  if (walkCacheEpoch !== walkEpoch) {
+  const k = arrangeKernel();
+  if (walkCacheKey !== k.key) {
     walkCache = new WeakMap();
-    walkCacheEpoch = walkEpoch;
+    walkCacheKey = k.key;
   }
   const hit = walkCache.get(occ);
   if (hit) return hit;
-  const [nx, ny, nz] = occ.dims;
-  const n = nx * ny * nz;
-  const stand = new Uint8Array(n);
-  const cell = (x: number, y: number, z: number) => classAtLocal(occ, x, y, z);
-  for (let x = 0; x < nx; x++)
-    for (let y = 0; y < ny; y++)
-      for (let z = 1; z < nz; z++) {
-        const i = (x * ny + y) * nz + z;
-        if (occ.cls[i] === VOID && occ.cls[i - 1] === SOLID && standingAt(cell, x, y, z)) stand[i] = 1;
-      }
-  const zone = new Int32Array(n).fill(-1);
-  const zones: Zone[] = [];
-  const stack: number[] = [];
-  for (let s = 0; s < n; s++) {
-    if (!stand[s] || zone[s] >= 0) continue;
-    const id = zones.length;
-    let cells = 0;
-    stack.push(s);
-    zone[s] = id;
-    while (stack.length) {
-      const i = stack.pop()!;
-      cells++;
-      const z = i % nz;
-      const y = ((i - z) / nz) % ny;
-      const x = ((i - z) / nz - y) / ny;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-        const X = x + dx;
-        const Y = y + dy;
-        if (X < 0 || Y < 0 || X >= nx || Y >= ny) continue;
-        for (let dz = -STEP_CELLS; dz <= STEP_CELLS; dz++) {
-          const Z = z + dz;
-          if (Z < 1 || Z >= nz) continue;
-          const j = (X * ny + Y) * nz + Z;
-          if (stand[j] && zone[j] < 0) {
-            zone[j] = id;
-            stack.push(j);
-          }
-        }
-      }
-    }
-    zones.push({ id, cells, areaFt2: cells * ARRANGE_CELL * ARRANGE_CELL, significant: cells >= MIN_ZONE_CELLS });
-  }
+  const stand = standingCells(occ.dims, occ.cls, k);
+  const { zone, cells } = floodZones(occ.dims, stand, k);
+  const zones: Zone[] = cells.map((n, id) => ({ id, cells: n, areaFt2: n * ARRANGE_CELL * ARRANGE_CELL, significant: n >= k.minZoneCells }));
   let main = -1;
   for (const z of zones) if (z.significant && (main < 0 || z.cells > zones[main].cells)) main = z.id;
   const walk: Walk = { stand, zone, zones, main };

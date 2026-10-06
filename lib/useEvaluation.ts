@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useProject, useProjectUi } from "@/lib/project-store";
+import { useWalkRules } from "@/lib/useWalkRules";
 import type { ParsedTile } from "@/lib/types";
 import { assumptionsKey, type Assumptions } from "@/lib/scoring/assumptions";
 import { evaluateTile, type TileEvaluation } from "@/lib/scoring/matrixEval";
 import type { MatrixKey } from "@/lib/scoring/matrix";
-import { adoptFrom, defaultProfile, diffSuggestion, effectiveAssumptions, effectiveCriteria, emptyOverrides, migrateLegacy, suggestCriteria, withAssumption, withInterpretation, withIntention, withPick, withPickReason, withPin, withReason, withRoomClass, withRoute, withoutAssumption, type EvaluationProfile } from "@/lib/scoring/profile";
-import { suggestPick, typologyGroups, type Pick, type TypologyGroup } from "@/lib/scoring/compareSet";
+import { adoptFrom, defaultProfile, diffSuggestion, effectiveAssumptions, effectiveCriteria, emptyOverrides, migrateLegacy, normalizeProfile, suggestCriteria, withAssumption, withInterpretation, withIntention, withPick, withPickReason, withPin, withReason, withRoomClass, withRoute, withTarget, withoutAssumption, type EvaluationProfile } from "@/lib/scoring/profile";
+import { suggestPick, typologyGroups, type Pick, type PreferenceOverride, type TypologyGroup } from "@/lib/scoring/compareSet";
 import type { RouteOverride0 } from "@/lib/scoring/voxelFacts";
 
 /**
@@ -17,11 +18,18 @@ import type { RouteOverride0 } from "@/lib/scoring/voxelFacts";
  */
 export function useEvaluation() {
   const { tiles, ui } = useProject();
-  const [profile, setProfile] = useProjectUi<EvaluationProfile>("evaluation", defaultProfile);
+  const [saved, setProfile] = useProjectUi<EvaluationProfile>("evaluation", defaultProfile);
+  // an earlier save is read as the current profile (Spatial density's working name mapped back, retired settings dropped with a note) and saved once in that form
+  const profile = useMemo(() => normalizeProfile(saved), [saved]);
+  useEffect(() => {
+    if (profile !== saved) setProfile(profile);
+  }, [profile, saved, setProfile]);
+  // the project's walking rules (shared with Arrange) are applied before any route is read; a change to one recomputes every result below
+  const walk = useWalkRules();
   const assumptions = useMemo(() => effectiveAssumptions(profile), [profile]);
   const routes = profile.overrides.routes;
   const inputs = useMemo(() => ({ assumptions, routes }), [assumptions, routes]);
-  const key = useMemo(() => assumptionsKey(assumptions) + JSON.stringify(routes), [assumptions, routes]);
+  const key = useMemo(() => assumptionsKey(assumptions) + JSON.stringify(routes) + walk.key, [assumptions, routes, walk.key]);
 
   // ---- every tile, read as it arrives ------------------------------------------------------------------------------------------------------
   const [done, setDone] = useState<{ key: string; ids: Set<string> }>({ key: "", ids: new Set() });
@@ -80,9 +88,9 @@ export function useEvaluation() {
   const groups = useMemo<TypologyGroup[]>(() => typologyGroups(tiles), [tiles]);
   const picks = useMemo(() => {
     const out = new Map<string, Pick>();
-    if (ready) for (const g of groups) out.set(g.key, suggestPick(g, evals, crit.keys));
+    if (ready) for (const g of groups) out.set(g.key, suggestPick(g, evals, crit.keys, profile.overrides.targets?.[g.key]));
     return out;
-  }, [ready, groups, evals, crit.keys]);
+  }, [ready, groups, evals, crit.keys, profile.overrides.targets]);
 
   // ---- the optional controls: each changes one thing and can be put back -------------------------------------------------------------------------
   const actions = useMemo(
@@ -98,6 +106,7 @@ export function useEvaluation() {
       setPick: (typology: string, tileId: string | null) => setProfile((p) => withPick(p, typology, tileId)),
       setPickReason: (typology: string, text: string) => setProfile((p) => withPickReason(p, typology, text)),
       setIntention: (typology: string, text: string) => setProfile((p) => withIntention(p, typology, text)),
+      setTarget: (typology: string, key: MatrixKey, t: PreferenceOverride | null) => setProfile((p) => withTarget(p, typology, key, t)),
       dismissMigration: () => setProfile((prev) => (prev.migration ? { ...prev, migration: { ...prev.migration, dismissed: true } } : prev)),
       /** every override back to automatic (the adopted criteria stay) */
       resetAll: () => setProfile((prev) => ({ ...prev, overrides: emptyOverrides() })),

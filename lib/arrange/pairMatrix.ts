@@ -22,7 +22,7 @@ export interface PairMatrix {
   cells: PairCell[][];
 }
 
-export function bestPair(a: ParsedTile, b: ParsedTile, tolFt = 1.5): PairCell {
+export function bestPair(a: ParsedTile, b: ParsedTile, connectorFt = 1.5): PairCell {
   const pa: Piece = { id: "a", tileId: a.id, pos: [0, 0, 0], rotZ: 0, mirrorX: false, scale: 1, locked: false };
   const boxA = placeBox(pa, a);
   const fa = getFacts(a, 0, false, 1);
@@ -52,7 +52,7 @@ export function bestPair(a: ParsedTile, b: ParsedTile, tolFt = 1.5): PairCell {
         const pb: Piece = { id: "b", tileId: b.id, pos: [toFt(x), toFt(dy), toFt(dz)], rotZ: rot, mirrorX: mirror, scale: 1, locked: false };
         const boxB = placeBox(pb, b);
         if (!placementFree(boxB, [boxA])) continue;
-        const j = jointBetween(boxA, boxB, tolFt);
+        const j = jointBetween(boxA, boxB, connectorFt);
         if (!j) continue;
         // a joint people can walk through beats one that only touches or lets the view through
         const v = (j.walkable ? 1000 : 0) + (j.score === null ? -0.5 : j.score);

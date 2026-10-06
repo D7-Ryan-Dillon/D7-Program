@@ -23,10 +23,10 @@ import { suggestNext } from "../lib/arrange/suggest";
 import { smoothComposite } from "../lib/arrange/smooth";
 import { snapPosition } from "../lib/arrange/snap";
 import { evaluateProgram } from "../lib/arrange/program";
-import { getOcc, WALK } from "../lib/arrange/occupancy";
+import { applyWalk, DEFAULT_WALK, getOcc, WALK } from "../lib/arrange/occupancy";
 import { getOriented } from "../lib/arrange/orient";
 import { defaultGen, defaultPriorities, defaultRules, defaultSite, defaultSmooth, emptyDoc, type ArrangementDoc, type Piece, type ProgramRules, type Vec3 } from "../lib/arrange/types";
-import { L, block, cube, pocket, riser, shaft, step, tileOf, type Vox } from "./fixtures/shaped";
+import { L, block, cube, pocket, riser, shaft, step, tileOf, rampHall, type RampKind, type Vox } from "./fixtures/shaped";
 import { cubeTall } from "./fixtures/shaped";
 import { renderArrangement } from "./fixtures/render";
 
@@ -196,21 +196,73 @@ const nestedDoc = docOf([{ tile: tL, at: [0, 0, 0] }, { tile: tCube, at: [10, 10
   ok(small.overlaps.length === 0 && small.joints[0]?.connect.walkable && small.joints[0].connect.stepFt === 0.5, `a 0.5 ft step should be walkable: ${kind(small)}`);
   // 1.5 ft apart: within the floor tolerance, but the L's doorway (7 ft) leaves only 5.5 ft of headroom above the raised floor
   const mid = lay(docOf([{ tile: tL, at: [0, 0, 0] }, { tile: tCube, at: [10, 10, 1.5] }]));
-  ok(!mid.joints[0].connect.walkable && /too narrow or too low/.test(mid.joints[0].connect.why), `a raised floor under a low lintel: ${kind(mid)}`);
-  // 3 ft apart: more than the riser tolerance
+  ok(!mid.joints[0].connect.walkable && /more than one step/.test(mid.joints[0].connect.why), `a floor 1.5 ft up is more than one step, whatever the doorway: ${kind(mid)}`);
+  // 3 ft apart: a jump, not a step
   const raised = docOf([{ tile: tL, at: [0, 0, 0] }, { tile: tCube, at: [10, 10, 3] }]);
   const l = lay(raised);
   const j = l.joints[0];
-  ok(!!j && j.connect.voidConnected && !j.connect.walkable && /differ by more than/.test(j.connect.why), `floors 3 ft apart should not carry a route under the riser tolerance: ${kind(l)}`);
-  // with ramps allowed, and doorways tall enough, the same 3 ft rise is a walkable step
+  ok(!!j && j.connect.voidConnected && !j.connect.walkable && /more than one step/.test(j.connect.why), `floors 3 ft apart are a jump, not a route: ${kind(l)}`);
+  // A BARE 3 ft JUMP IS NEVER WALKABLE, whatever the level tolerance says: "ramp" mode only changes what is reported
   const tall = reg(L("L_tall", "gathering", true, 26));
   const tallCube = reg(cubeTall());
-  const ramp: ProgramRules = { ...rules, levelTolerance: "ramp", rampRiseFt: 4 };
-  const lt = lay(docOf([{ tile: tall, at: [0, 0, 0] }, { tile: tallCube, at: [10, 10, 3] }]), ramp);
-  const lt0 = lay(docOf([{ tile: tall, at: [0, 0, 0] }, { tile: tallCube, at: [10, 10, 3] }]));
-  ok(lt.joints[0].connect.walkable && lt.joints[0].connect.stepFt === 3, `with ramps allowed and tall doorways a 3 ft rise should be walkable: ${kind(lt)}`);
-  ok(!lt0.joints[0].connect.walkable, "the same 3 ft rise should not be walkable under the riser tolerance");
-  console.log(`  mismatched floors: 0.5 ft apart walkable; 1.5 ft under a 7 ft lintel: ${mid.joints[0].connect.why}; 3 ft apart: ${j.connect.why}; with ramps allowed and tall doorways: ${lt.joints[0].connect.walkable ? "walkable" : "not walkable"} (step ${lt.joints[0].connect.stepFt} ft)`);
+  const jump = docOf([{ tile: tall, at: [0, 0, 0] }, { tile: tallCube, at: [10, 10, 3] }]);
+  for (const [name, r] of [["exact", { ...rules, levelTolerance: "exact" as const }], ["riser", rules], ["ramp 4 ft", { ...rules, levelTolerance: "ramp" as const, rampRiseFt: 4 }], ["ramp 10 ft", { ...rules, levelTolerance: "ramp" as const, rampRiseFt: 10 }]] as const) {
+    const lj = lay(jump, r);
+    const c = lj.joints[0].connect;
+    ok(!c.walkable && !lj.joints[0].walkable, `a bare 3 ft jump must not be walkable (${name} mode): ${kind(lj)}`);
+    ok(lj.unreachable.includes(lj.boxes[1].piece.id), `the piece behind a bare 3 ft jump must not count as reachable (${name} mode)`);
+    const w = evaluateProgram(lj, jump, r, defaultSite(), tiles);
+    if (name.startsWith("ramp")) {
+      // it is reported as needing a connector (a stair or ramp that is not there), never as a route
+      ok(c.kind === "connector" && !!c.connector && Math.abs(c.connector.riseFt - 3) < 1e-6 && /connector/.test(c.why), `ramp mode should label the jump as needing a connector: ${kind(lj)}`);
+      ok(w.some((x) => x.kind === "connector" && /not walkable/.test(x.message)), `no warning that a connector is needed: ${w.map((x) => x.kind).join(",")}`);
+    } else ok(c.kind !== "connector", `${name} mode should not report connectors: ${kind(lj)}`);
+  }
+  // ...and Auto Generate never counts a connector toward reaching a piece: with ramp mode on, every piece it places has a walkable way in
+  {
+    const rr: ProgramRules = { ...rules, levelTolerance: "ramp", rampRiseFt: 10 };
+    const ctx: GenContext = { tileById: tiles, bank: [tall, tallCube, tCube], rules: rr, priorities: defaultPriorities(), site: defaultSite(), settings: { ...defaultGen(), amount: 5, seed: 3 } };
+    const g = generateArrangement(ctx, emptyDoc());
+    const lg = lay(g.doc, rr);
+    ok(lg.unreachable.length === 0 && lg.joints.filter((q) => q.connect.kind === "connector").every((q) => lg.reachable.has(q.aId) && lg.reachable.has(q.bId) && lg.joints.some((o) => o.connect.walkable && (o.aId === q.aId || o.bId === q.aId))), "a generated arrangement relied on a connector that does not exist");
+  }
+  // actual supported stair or ramp geometry carries the same 3 ft rise: the floors are joined cell by cell by steps of 0.5 ft
+  const cubeUp = reg(cubeTall("cube_up"));
+  let hallDoc: ArrangementDoc = emptyDoc();
+  const hallAt = (kindOf: RampKind, riseFt = 3) => {
+    const hall = reg(rampHall(`hall_${kindOf}`, kindOf, riseFt));
+    const doc = docOf([{ tile: hall, at: [0, 0, 0] }, { tile: cubeUp, at: [36, 2, riseFt] }]);
+    hallDoc = doc;
+    return lay(doc, { ...rules, levelTolerance: "ramp", rampRiseFt: 10 });
+  };
+  const upBy = (l: ReturnType<typeof lay>) => l.reachable.has(l.boxes[1].piece.id);
+  for (const k of ["ramp", "stair"] as const) {
+    const lh = hallAt(k);
+    ok(lh.joints.length === 1 && lh.joints[0].connect.walkable && lh.joints[0].connect.stepFt === 0, `${k}: the doorway at the top should be a level crossing: ${kind(lh)}`);
+    ok(upBy(lh) && lh.unreachable.length === 0, `${k}: a 3 ft rise over real ${k} geometry should be reachable from the entrance`);
+    ok(lh.reach.get(lh.boxes[0].piece.id)!.reachedFt2 >= lh.reach.get(lh.boxes[0].piece.id)!.totalFt2 * 0.95, `${k}: the whole hall should be reachable: ${JSON.stringify(lh.reach.get(lh.boxes[0].piece.id))}`);
+  }
+  // the same rise as a sheer wall, a ramp with too little headroom, and a ramp with a riser missing: the doorway lines up, the route does not exist
+  for (const [k, why] of [["sheer", /bare jump|more than one step|not reach|partial/], ["lowCeiling", /./], ["broken", /./]] as const) {
+    const lh = hallAt(k);
+    ok(!upBy(lh), `${k}: the piece beyond a broken route must not count as reachable from the entrance`);
+    const wk = evaluateProgram(lh, hallDoc, rules, defaultSite(), tiles);
+    ok(wk.some((x) => x.kind === "unreachable" || x.kind === "partial"), `${k}: no warning that the way is broken`);
+    ok(lh.reach.get(lh.boxes[0].piece.id)!.reachedFt2 < lh.reach.get(lh.boxes[0].piece.id)!.totalFt2 * 0.95, `${k}: the hall's upper floor should be reported as cut off`);
+    void why;
+  }
+  // small steps still pass: the shared step limit is the only way a height change is crossed, and widening it widens it for everyone (a 1 ft riser), never beyond
+  {
+    const two = (zFt: number) => lay(docOf([{ tile: tall, at: [0, 0, 0] }, { tile: tallCube, at: [10, 10, zFt] }]));
+    applyWalk({ stepFt: 1 });
+    const oneFoot = two(1);
+    const threeFoot = two(3);
+    applyWalk({ stepFt: DEFAULT_WALK.stepFt });
+    ok(oneFoot.joints[0].connect.walkable && oneFoot.joints[0].connect.stepFt === 1, `with a 1 ft riser allowed, a 1 ft step is walkable: ${kind(oneFoot)}`);
+    ok(!threeFoot.joints[0].connect.walkable, "with a 1 ft riser allowed, a 3 ft jump is still not walkable");
+    ok(!two(1).joints[0].connect.walkable, "back at 0.5 ft the 1 ft step is a connector again (the cache must follow the rule)");
+  }
+  console.log(`  jumps: a bare 3 ft jump is never walkable (ramp mode reports a connector); a 3 ft ramp or stair is walked; a sheer wall, a ramp 5.5 ft high and a ramp with a riser missing are not; 0.5 ft steps and level floors still pass`);
   // doorways 4 ft high: the openings line up but nobody can pass
   const low = docOf([{ tile: tL, at: [0, 0, 0] }, { tile: tLow, at: [10, 10, 0] }]);
   const ll = lay(low);

@@ -24,7 +24,7 @@ import { ruleBetween, ruleValue, supportFraction } from "./program";
 import { mulberry32 } from "./rng";
 import { buildSequence } from "./whole";
 import { makePiece, newPieceId } from "./ops";
-import { toleranceFt, type ArrangementDoc, type GenSettings, type Joint, type Piece, type Priorities, type ProgramRules, type ShapeKind, type Site, type Vec3 } from "./types";
+import { connectorReachFt, type ArrangementDoc, type GenSettings, type Joint, type Piece, type Priorities, type ProgramRules, type ShapeKind, type Site, type Vec3 } from "./types";
 
 export interface GenContext {
   tileById: Map<string, ParsedTile>;
@@ -267,7 +267,7 @@ export function placeAgainst(
     return null;
   }
 
-  const tol = toleranceFt(ctx.rules);
+  const tol = connectorReachFt(ctx.rules);
   const withMe = [...st.boxes, box];
   // the joint with the piece it attaches to comes first: most candidates fail there, and the rest of the neighbours are only read for those that do not
   const parentContacts = contactsBetween(box, parent);

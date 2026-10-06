@@ -10,10 +10,17 @@ import type { ParsedTile } from "../lib/types";
 import { ensureAnalysis } from "../lib/tiles/pipeline";
 import { MATRIX, MATRIX_KEYS, STATUS_LABEL } from "../lib/scoring/matrix";
 import { evaluateTile, type TileEvaluation } from "../lib/scoring/matrixEval";
-import { DESCRIPTOR_META, scoreTile, supplementalFor } from "../lib/scoring/descriptors";
+import { DESCRIPTOR_META, legacyMeasurementsFor, scoreTile } from "../lib/scoring/descriptors";
 import { DEFAULT_ASSUMPTIONS } from "../lib/scoring/assumptions";
-import { adoptFrom, defaultProfile, diffSuggestion, effectiveAssumptions, effectiveCriteria, interpretationFor, migrateLegacy, suggestCriteria, withAssumption, withInterpretation, withPick, withPin, withReason, withRoomClass, withRoute, withoutAssumption } from "../lib/scoring/profile";
-import { suggestPick, typologyGroups } from "../lib/scoring/compareSet";
+import { spatialDensityFor } from "../lib/scoring/spatialDensity";
+import { applyWalk, DEFAULT_WALK, getOcc, getWalk, WALK } from "../lib/arrange/occupancy";
+import { getOriented } from "../lib/arrange/orient";
+import { findRoute } from "../lib/scoring/voxelFacts";
+import type { MatrixKey } from "../lib/scoring/matrix";
+import { adoptFrom, defaultProfile, diffSuggestion, effectiveAssumptions, effectiveCriteria, emptyOverrides, interpretationFor, migrateLegacy, normalizeProfile, type EvaluationProfile, suggestCriteria, withAssumption, withInterpretation, withPick, withPin, withReason, withRoomClass, withRoute, withTarget, withoutAssumption } from "../lib/scoring/profile";
+import { fitOf, preferenceFor, suggestPick, typologyGroups, type TypologyGroup } from "../lib/scoring/compareSet";
+import type { MatrixStatus } from "../lib/scoring/matrix";
+import type { UsableSpace } from "../lib/scoring/usable";
 import { descriptorText, boardTextFor } from "../lib/scoring/boardText";
 import { resultsCsv, type ResultRow } from "../lib/scoring/exportResults";
 import { voxelFacts } from "../lib/scoring/voxelFacts";
@@ -58,7 +65,7 @@ const cubes: ParsedTile[] = names.map((name) => {
     ["Force-driven", "Legibility of the generating force in the final form.", "Measurable input used to generate geometry, such as required sun-hours or pedestrian counts.", "Namba Parks and Valley force diagrams.", "Organizational / spatial"],
     ["Light-filled", "Perceived brightness/quality of daylight at the void’s base.", "Skylight area as a percentage of void floor area below it.", "Gilder Center’s oval skylights; Valley’s grotto skylights/reflecting pools.", "Experiential / atmospheric"],
     ["Monumental", "Perceived significance communicated by scale.", "Void height-to-width ratio, or void volume as a percentage of total building volume.", "Gilder Center’s five-story atrium.", "Experiential / atmospheric"],
-    ["Compressed-then-released", "Perceived contrast between narrowest and widest moments.", "Ratio of narrowest to widest passage width along the sequence.", "Gilder Center entrance to exhibit threshold.", "Experiential / atmospheric"],
+    ["Spatial density", "Perceived contrast between narrowest and widest moments.", "Ratio of narrowest to widest passage width along the sequence.", "Gilder Center entrance to exhibit threshold.", "Experiential / atmospheric"],
   ];
   ok(MATRIX.length === 12, `the matrix has ${MATRIX.length} descriptors`);
   expected.forEach((e, i) => {
@@ -70,14 +77,18 @@ const cubes: ParsedTile[] = names.map((name) => {
   eq(e.results.map((r) => r.criterion.name), expected.map((x) => x[0]), "the twelve results come back in the matrix's order");
   eq(e.results.map((r) => r.key), MATRIX_KEYS, "the keys");
   ok(e.results.every((r) => r.interpretation.generated === true && r.measure.method.length > 0 && r.measure.cannot.length > 0), "every result says it is generated, how it was measured and what it cannot establish");
-  ok(!MATRIX_KEYS.includes("spatialDensity" as never), "Spatial density is not a matrix descriptor");
+  // Spatial density is the project's twelfth descriptor (a decision, not a supplement), with the matrix's own criteria
+  ok(MATRIX_KEYS[11] === "spatialDensity" && MATRIX[11].name === "Spatial density", "Spatial density is the twelfth descriptor");
+  ok(!MATRIX.some((m) => /compressed|released/i.test(m.name)) && !MATRIX_KEYS.includes("compressed" as never), "the working name is not used anywhere in the matrix");
+  ok(MATRIX[11].qualitative === "Perceived contrast between narrowest and widest moments." && MATRIX[11].quantitative === "Ratio of narrowest to widest passage width along the sequence.", "Spatial density keeps the matrix's qualitative and quantitative criteria");
   const legacy = scoreTile(tile);
-  eq(legacy.map((r) => r.key), MATRIX_KEYS, "the older index list is the same twelve, with Compressed-then-released where Spatial density was");
+  eq(legacy.map((r) => r.key), MATRIX_KEYS, "the older index list is the same twelve");
   eq(DESCRIPTOR_META.map((m) => m.label), MATRIX.map((m) => m.name), "the labels are the matrix's names");
-  const sup = supplementalFor(tile);
-  ok(sup.length === 1 && (sup[0].key as string) === "spatialDensity", "Spatial density is kept as a supplemental reading");
-  ok(!e.results.some((r) => r.legacy.key === ("spatialDensity" as never)), "Spatial density is not among the results");
-  console.log(`  matrix: ${MATRIX.length} descriptors in ${new Set(MATRIX.map((m) => m.group)).size} groups, word for word; the older index is relabelled, not converted; Spatial density is supplemental`);
+  // the earlier formula (cross-section AREA along the main route) is a legacy measurement under another key: never in the twelve, never relabelled as the current criterion
+  const lm = legacyMeasurementsFor(tile);
+  ok(lm.length === 1 && (lm[0].key as string) === "spatialDensityArea", "the earlier Spatial density formula is kept as a legacy measurement");
+  ok(!e.results.some((r) => (r.legacy.key as string) === "spatialDensityArea") && e.legacyMeasurements.length === 1, "the legacy measurement is beside the twelve, not among them");
+  console.log(`  matrix: ${MATRIX.length} descriptors in ${new Set(MATRIX.map((m) => m.group)).size} groups, word for word, Spatial density the twelfth; the older index is relabelled, not converted; the earlier cross-section formula is a legacy measurement`);
 }
 
 // ---- 2. every ordinary tile reads without a manual step; statuses are honest ---------------------------------------------------------------------------------------
@@ -114,21 +125,26 @@ const cubes: ParsedTile[] = names.map((name) => {
   ok(/material change/.test(c.measure.unit) || c.measure.status === "unavailable", "Continuous proxy is not in material changes");
   ok(!/connect|circulation/i.test(c.measure.unit), "Continuous must not substitute circulation connectivity");
   const k = new Map(MATRIX.map((m) => [m.key, m]));
-  ok(/passage width/.test(k.get("compressed")!.quantitative), "Compressed-then-released: narrowest to widest passage width");
-  // a known passage: 4 ft, then a 2 ft neck, then a 10 ft chamber (widths are read between the walls, one cell added)
+  ok(/passage width/.test(k.get("spatialDensity")!.quantitative), "Spatial density: narrowest to widest passage width");
+  // a known passage: 4 ft, then a 3 ft neck, then a 10 ft chamber (widths are read between the walls, one cell added)
   const cor = ensureAnalysis(corridor());
-  const r = evaluateTile(cor).results.find((x) => x.key === "compressed")!;
+  const r = evaluateTile(cor).results.find((x) => x.key === "spatialDensity")!;
   ok(r.measure.status === "measured" && r.measure.value !== null, `the corridor is not read: ${r.measure.headline} ${r.interpretation.text}`);
+  // it is the ratio of narrowest to widest passage WIDTH: not occupancy, rooms per volume or a solid-to-void share
+  const sd = spatialDensityFor(cor, DEFAULT_ASSUMPTIONS);
+  ok(sd.ok && r.measure.value === sd.profile.narrowFt / sd.profile.wideFt && /passage width/.test(r.measure.unit), `Spatial density is not the narrowest / widest passage width: ${r.measure.value} vs ${sd.ok ? sd.profile.narrowFt / sd.profile.wideFt : "n/a"}`);
+  ok(/width of the passage/.test(r.measure.method) && !/occupan|rooms per|solid-to-void/i.test(r.measure.unit), "Spatial density names its measurement honestly");
+  ok(r.measure.supporting.some((s) => /legacy/i.test(s.label)), "the earlier formula's number is shown as a legacy measurement beside the current one");
   if (r.measure.value !== null) {
-    ok(r.measure.value > 0.13 && r.measure.value < 0.4, `corridor ratio ${r.measure.value} (a 2.5 ft neck against a 10.5 ft chamber is about 0.24)`);
+    ok(r.measure.value > 0.2 && r.measure.value < 0.45, `corridor ratio ${r.measure.value} (a 3 ft neck against a 10.5 ft chamber is about 0.3)`);
     ok(r.measure.supporting.some((s) => s.label === "Constrictions" && s.value !== "none") && r.measure.supporting.some((s) => s.label === "Expansions" && s.value !== "none"), "the corridor's constriction and expansion were not located");
     ok(!!r.evidence.routePoints && r.evidence.routePoints.length > 20, "the corridor's route is not offered as evidence");
   }
-  console.log(`  Compressed-then-released on a known passage: ${r.measure.headline}`);
+  console.log(`  Spatial density on a known passage: ${r.measure.headline}`);
   // a tile with no way in has no supported route: not assessable, with a reason, and no line through open air
   const sealed = ensureAnalysis(closed());
   const es = evaluateTile(sealed);
-  for (const key of ["compressed", "graduated", "nonHierarchical", "continuous"] as const) {
+  for (const key of ["spatialDensity", "graduated", "nonHierarchical", "continuous"] as const) {
     const x = es.results.find((q) => q.key === key)!;
     ok(x.measure.status === "unavailable" && x.measure.value === null && /opening|entry|floor/.test(x.interpretation.text), `${key} on a sealed room: ${x.measure.status} / ${x.interpretation.text}`);
   }
@@ -287,6 +303,109 @@ async function assemblies() {
   ok(!pk.supported && pk.tileId === null && /does not support|cannot be told apart/.test(pk.rationale), `identical variants must not get a forced pick: ${pk.rationale}`);
 }
 
+// ---- 8b. variant comparison: strength, fit and usability are kept apart; a bigger number is not a better building -------------------------------------------------
+{
+  type Spec = Partial<Record<MatrixKey, { v: number | null; status?: MatrixStatus }>>;
+  const usableOf = (share: number, extra: Partial<UsableSpace> = {}): UsableSpace => ({ available: true, reason: "", thresholds: { headroomFt: 6.5, widthFt: 2.5, stepFt: 0.5, minZoneFt2: 12 }, voidFt3: 1000, reachableVoidFt3: 1000 * share, plateFt2: 0, floorFt2: 400, usableFt2: 400 * share, cutOffFt2: 400 * (1 - share), tightFt2: 0, voidPieces: 1, zones: 2, zonesReached: share > 0.8 ? 2 : 1, verticalVisual: 0, levelsTotal: 2, levelsReached: share > 0.8 ? 2 : 1, verticalTraversable: share > 0.8, tight: [], cutOff: [], ...extra });
+  // a synthetic evaluation: only the measurements named are real, the rest are not assessable (never a zero)
+  const fake = (tile: ParsedTile, spec: Spec, usable: UsableSpace = usableOf(0.95)): TileEvaluation => {
+    const base = evaluateTile(tile);
+    return {
+      ...base,
+      usable,
+      results: base.results.map((r) => {
+        const s = spec[r.key];
+        if (!s) return { ...r, measure: { ...r.measure, value: null, status: "unavailable" as const, headline: "not assessable" } };
+        return { ...r, measure: { ...r.measure, value: s.v, status: s.v === null ? ("unavailable" as const) : (s.status ?? "measured"), headline: s.v === null ? "not assessable" : String(s.v) }, interpretation: { ...r.interpretation, scale: ["low", "middle", "high"], index: s.v === null ? 0 : s.v < 3 ? 0 : s.v < 10 ? 1 : 2 } };
+      }),
+    };
+  };
+  const mk = (typology: string, n: number): { group: TypologyGroup; tiles: ParsedTile[] } => {
+    const tiles = Array.from({ length: n }, (_, i) => ensureAnalysis({ ...cubes[i % cubes.length], id: `v${typology}${i}`, name: `${typology}_V${i + 1}`, meta: { ...(cubes[0].meta ?? {}), typology }, guessed: { ...cubes[0].guessed, typology } } as ParsedTile));
+    return { group: typologyGroups(tiles)[0], tiles };
+  };
+  const pickOf = (typology: string, specs: Spec[], usables: UsableSpace[] = [], carried: MatrixKey[] = ["stepped", "graduated", "porous", "forceDriven", "carved", "spatialDensity", "nonHierarchical"], over = {}) => {
+    const { group, tiles } = mk(typology, specs.length);
+    const evals = new Map(tiles.map((t, i) => [t.id, fake(t, specs[i], usables[i])]));
+    return { pick: suggestPick(group, evals, carried, over), tiles, group };
+  };
+
+  // the rules are typology-aware ranges, not "more is better"
+  ok(preferenceFor("stepped amphitheater", "stepped").pref.mode === "target" && preferenceFor("flat deep plan plate", "stepped").pref.hi! <= 1, "a stepped typology wants a legible range of setbacks, a flat plate wants almost none");
+  ok(preferenceFor("void field gathering", "forceDriven").pref.mode === "descriptive" && preferenceFor("stepped amphitheater", "resistant").pref.mode === "descriptive", "no defensible preference: described, not preferred");
+  ok(fitOf({ mode: "target", lo: 2, hi: 8, why: "" }, 5) === 1 && fitOf({ mode: "target", lo: 2, hi: 8, why: "" }, 40)! === 0, "a target is a range: far above it is no better than far below");
+
+  // 1. tiny numerical differences do not become decisive (no min/max stretching)
+  {
+    const r = pickOf("stepped amphitheater", [{ stepped: { v: 4.0 }, graduated: { v: 3, status: "measured" } }, { stepped: { v: 4.1 }, graduated: { v: 3, status: "measured" } }]);
+    ok(!r.pick.supported && r.pick.verdict !== "pick", `a 4.0 against 4.1 setbacks must not decide: ${r.pick.verdict}`);
+    const r2 = pickOf("stepped amphitheater", [{ stepped: { v: 2.0 }, graduated: { v: 3 } }, { stepped: { v: 2.2 }, graduated: { v: 3.4 } }]);
+    ok(!r2.pick.supported, `differences smaller than the measurement resolution decide nothing: ${r2.pick.verdict}`);
+  }
+  // 2. a missing result is not a zero and is not used to compare
+  {
+    const r = pickOf("void field gathering", [{ porous: { v: 25 }, lightFilled: { v: 12 } }, { porous: { v: null }, lightFilled: { v: 12 } }], [], ["porous", "lightFilled"]);
+    const por = r.pick.basis.find((b) => b.key === "porous")!;
+    ok(!!por.notUsed && /not assessable for/.test(por.notUsed) && /not a zero/.test(por.notUsed), `a missing porosity should be reported, not used: ${por.notUsed}`);
+    ok(por.rows[1].fit === null && por.rows[1].against === "not assessable" && por.rows[1].value === null, "a missing result has no fit and no value (not 0)");
+    ok(!r.pick.supported, "with one usable criterion left there is not enough to pick");
+  }
+  // 3. proxies and assumptions are supporting evidence only: they cannot decide alone
+  {
+    const r = pickOf("topographic ground field", [{ carved: { v: 90, status: "proxy" }, threaded: { v: 2, status: "assumed" } }, { carved: { v: 35, status: "proxy" }, threaded: { v: 0, status: "assumed" } }], [], ["carved", "threaded"]);
+    ok(!r.pick.supported && r.pick.verdict === "insufficient", `proxy and assumed evidence alone must not produce a pick: ${r.pick.verdict}`);
+    ok(/proxy|assumed/.test(r.pick.rationale), `the reason names the weakness of the evidence: ${r.pick.rationale}`);
+    ok(r.pick.basis.filter((b) => b.pref.mode !== "descriptive").every((b) => b.role === "supporting"), "proxy and assumed criteria are supporting, never decisive");
+  }
+  // 4. blindly increasing a metric does not improve the recommendation
+  {
+    const near = pickOf("stepped amphitheater", [{ stepped: { v: 5 }, graduated: { v: 3 } }, { stepped: { v: 60 }, graduated: { v: 3 } }, { stepped: { v: 5 }, graduated: { v: 3.2 } }]);
+    const huge = pickOf("stepped amphitheater", [{ stepped: { v: 5 }, graduated: { v: 3 } }, { stepped: { v: 60 }, graduated: { v: 9 } }]);
+    ok(huge.pick.tileId !== huge.tiles[1].id, "twelve times the setbacks must not be the pick: more steps are not better architecture");
+    ok(near.pick.tileId !== near.tiles[1].id, "an overshooting variant is not the pick");
+    const stepRow = huge.pick.basis.find((b) => b.key === "stepped")!;
+    ok(stepRow.rows[0].against === "within" && stepRow.rows[1].against === "outside", "inside the target is fit, far above it is outside");
+    // a criterion with no defensible preference changes nothing, however big it gets
+    const a = pickOf("void field gathering", [{ porous: { v: 25 }, lightFilled: { v: 12 }, forceDriven: { v: 100 } }, { porous: { v: 25 }, lightFilled: { v: 12 }, forceDriven: { v: 5 } }], [], ["porous", "lightFilled", "forceDriven"]);
+    const b = pickOf("void field gathering", [{ porous: { v: 25 }, lightFilled: { v: 12 }, forceDriven: { v: 100000 } }, { porous: { v: 25 }, lightFilled: { v: 12 }, forceDriven: { v: 5 } }], [], ["porous", "lightFilled", "forceDriven"]);
+    ok(a.pick.verdict === b.pick.verdict && a.pick.tileId === b.pick.tileId && !a.pick.supported, `a bigger generating dose must not change the recommendation: ${a.pick.verdict} / ${b.pick.verdict}`);
+    ok(a.pick.basis.find((x) => x.key === "forceDriven")!.pref.mode === "descriptive", "Force-driven is described, never preferred");
+  }
+  // 5. usability always accompanies a recommendation, and a clear usability gap blocks a pick
+  {
+    const good = pickOf("stepped amphitheater", [{ stepped: { v: 5 }, graduated: { v: 3 } }, { stepped: { v: 40 }, graduated: { v: 12 } }], [usableOf(0.95), usableOf(0.9)]);
+    ok(good.pick.supported && good.pick.tileId === good.tiles[0].id, `a clear, usable leader is picked: ${good.pick.verdict} ${good.pick.rationale}`);
+    ok(/Usability:/.test(good.pick.rationale) && good.pick.usability.length === 2, "a pick carries the usability of the variants");
+    const blocked = pickOf("stepped amphitheater", [{ stepped: { v: 5 }, graduated: { v: 3 } }, { stepped: { v: 40 }, graduated: { v: 12 } }], [usableOf(0.25), usableOf(0.95)]);
+    ok(!blocked.pick.supported && blocked.pick.verdict === "tradeoff" && /usab/.test(blocked.pick.rationale), `a leader that can hardly be walked must not be recommended over a usable variant: ${blocked.pick.verdict} / ${blocked.pick.rationale}`);
+    ok(blocked.pick.usability[0].problems.length > 0, "the usability problem is stated");
+  }
+  // 6. no winner justified: the tradeoffs are explained automatically
+  {
+    const t = pickOf("stepped amphitheater", [{ stepped: { v: 5 }, graduated: { v: 9 } }, { stepped: { v: 45 }, graduated: { v: 3 } }], [], ["stepped", "graduated"]);
+    ok(!t.pick.supported && t.pick.verdict === "tradeoff", `each variant wins on something: ${t.pick.verdict}`);
+    ok(t.pick.tradeoffs.length >= 2 && t.pick.tradeoffs.some((x) => /Stepped/.test(x)) && t.pick.tradeoffs.some((x) => /Graduated/.test(x)), `the tradeoffs say who leads on what: ${t.pick.tradeoffs.join(" | ")}`);
+    ok(t.pick.assumptions.length > 0 && t.pick.assumptions.every((a) => /system assumption|your override/.test(a)), "every rule is labelled as the system's assumption or yours");
+  }
+  // 7. overrides: yours replaces the system's for one typology, one criterion, and can be put back; the profile round-trips
+  {
+    const g = "stepped amphitheater";
+    let p = defaultProfile();
+    p = withTarget(p, g, "stepped", { mode: "target", lo: 30, hi: 50 });
+    const back = JSON.parse(JSON.stringify(p));
+    ok(back.overrides.targets[g].stepped.lo === 30, "the preference you set survives a JSON round trip");
+    const mine = pickOf(g, [{ stepped: { v: 5 }, graduated: { v: 3 } }, { stepped: { v: 40 }, graduated: { v: 3 } }], [], ["stepped", "graduated"], back.overrides.targets[g]);
+    ok(mine.pick.basis.find((b) => b.key === "stepped")!.source === "your override", "an override is labelled as yours");
+    ok(mine.pick.tileId === mine.tiles[1].id || !mine.pick.supported, "with your target (30-50 setbacks) the 40 fits and the 5 does not");
+    ok(mine.pick.basis.find((b) => b.key === "stepped")!.rows[1].against === "within", "your range is the one used");
+    p = withTarget(p, g, "stepped", null);
+    ok(!p.overrides.targets[g], "restoring the criterion removes the override and nothing else");
+    const sys = pickOf(g, [{ stepped: { v: 5 }, graduated: { v: 3 } }, { stepped: { v: 40 }, graduated: { v: 3 } }], [], ["stepped", "graduated"], p.overrides.targets[g]);
+    ok(sys.pick.basis.find((b) => b.key === "stepped")!.source === "system assumption", "restored to the system's assumption");
+  }
+  console.log("  variants: tiny differences, missing results, proxies, usability and 'more is better' are each handled: no forced pick, tradeoffs written out, usability always shown, rules labelled as system assumptions or yours");
+}
+
 // ---- 9. usable space ---------------------------------------------------------------------------------------------------------------------------------------------------------
 {
   const u = usableSpace(ensureAnalysis(cube()));
@@ -300,13 +419,69 @@ async function assemblies() {
   console.log(`  usable space: ${real.filter((x) => x.usableFt2 > 0).length} of ${real.length} tiles have floor reachable from an opening; the average tile has ${(real.reduce((a, x) => a + x.usableFt2 / Math.max(1, x.floorFt2), 0) / real.length * 100).toFixed(0)}% of its floor usable`);
 }
 
+// ---- 9b. one walking model: Analysis and Arrange agree on what can be walked --------------------------------------------------------------------------------------
+{
+  // The same four numbers (headroom, clear width, one step, the smallest space) decide where a person can stand and walk in Arrange's joints and in Analysis's
+  // routes and usable-space check. Before they were unified Analysis used 5 ft of headroom and no width: it walked through a 2 ft neck and under a 5.5 ft lintel
+  // that Arrange refused. Compare what each says about the SAME tile, cell for cell.
+  const arrangeEntryZone = (t: ParsedTile): number => {
+    const w = getWalk(getOcc(getOriented(t, 0, false)));
+    const i = (3 * t.grid[1] + 12) * t.grid[2] + 2; // just inside the way in (x = 1.5 ft, y = 6 ft), standing on the floor slab
+    return w.stand[i] ? w.zones[w.zone[i]].cells : 0;
+  };
+  const cases: { name: string; tile: ParsedTile; passes: boolean }[] = [
+    { name: "a 3 ft neck", tile: ensureAnalysis(corridor("c3", "gathering", { neckFt: 3 })), passes: true },
+    { name: "a 2 ft neck (too narrow: needs 2.5 ft clear width)", tile: ensureAnalysis(corridor("c2", "gathering", { neckFt: 2 })), passes: false },
+    { name: "a 7 ft ceiling in the neck", tile: ensureAnalysis(corridor("h7", "gathering", { neckFt: 4, lowFt: 7 })), passes: true },
+    { name: "a 5.5 ft ceiling in the neck (too low: needs 6.5 ft)", tile: ensureAnalysis(corridor("h55", "gathering", { neckFt: 4, lowFt: 5.5 })), passes: false },
+  ];
+  for (const c of cases) {
+    const u = usableSpace(c.tile);
+    const arr = arrangeEntryZone(c.tile);
+    const analysisCells = Math.round(u.usableFt2 / 0.25);
+    ok(arr > 0, `${c.name}: Arrange finds no floor to start from`);
+    ok(arr === analysisCells, `${c.name}: Arrange's entry floor is ${arr} cells, Analysis's usable floor is ${analysisCells}`);
+    const chamberReached = u.cutOffFt2 === 0;
+    ok(chamberReached === c.passes, `${c.name}: the chamber beyond should ${c.passes ? "" : "not "}be reached on foot (cut off ${u.cutOffFt2} ft2)`);
+    // the route the passage descriptors read goes through exactly when a person could walk
+    const f = voxelFacts(c.tile)!;
+    const rr = findRoute(f, { destination: "farthest" });
+    const reachedX = rr.route ? Math.max(...rr.route.points.map((p) => p[0])) : 0;
+    ok(c.passes ? reachedX > 30 : reachedX < 19, `${c.name}: the route reaches ${reachedX.toFixed(1)} ft (it should ${c.passes ? "cross into the chamber" : "stop before the constriction"})`);
+    // the descriptors agree with the route: a blocked route is read as a short one, never as a passage through the neck
+    const sd = evaluateTile(c.tile).results.find((x) => x.key === "spatialDensity")!;
+    if (!c.passes) ok(sd.measure.supporting.some((s) => s.label === "Floor not reached"), `${c.name}: Spatial density does not say that floor was not reached`);
+    else ok(sd.measure.value !== null && sd.measure.value < 0.6, `${c.name}: a passage that is walked should show its contrast (${sd.measure.value})`);
+    console.log(`  walking: ${c.name}: Arrange ${arr} cells, Analysis ${analysisCells} cells, ${chamberReached ? "chamber reached" : "chamber cut off"}`);
+  }
+  // the rules are one set, and changing one changes both (the caches follow): a 1.5 ft clear width lets the 2 ft neck be walked in Arrange and in Analysis alike
+  const narrow = cases[1].tile;
+  const before = evaluateTile(narrow).results.find((x) => x.key === "spatialDensity")!.measure.headline;
+  applyWalk({ widthFt: 1.5 });
+  const arrWide = arrangeEntryZone(narrow);
+  const uWide = usableSpace(narrow);
+  const afterRule = evaluateTile(narrow).results.find((x) => x.key === "spatialDensity")!.measure.headline;
+  applyWalk({ widthFt: DEFAULT_WALK.widthFt });
+  ok(uWide.cutOffFt2 === 0 && arrWide === Math.round(uWide.usableFt2 / 0.25), "with a 1.5 ft clear width the 2 ft neck is walked, in Arrange and Analysis alike");
+  ok(afterRule !== before, "a changed walking rule must recompute the Analysis results (the cache is keyed by the rules)");
+  ok(evaluateTile(narrow).results.find((x) => x.key === "spatialDensity")!.measure.headline === before && usableSpace(narrow).cutOffFt2 > 0, "and putting the rule back restores the results");
+  ok(WALK.headroomFt === 6.5 && WALK.widthFt === 2.5 && WALK.stepFt === 0.5, "the defaults are Arrange's: 6.5 ft headroom, 2.5 ft clear width, 0.5 ft step");
+}
+
 // ---- 10. migration ------------------------------------------------------------------------------------------------------------------------------------------------------------
 {
-  const m = migrateLegacy({ manual: true, keys: ["carved", "spatialDensity", "porous"], pins: { spatialDensity: "on", carved: "on" }, notes: { carved: "mine", spatialDensity: "old" } });
-  ok(!!m && m.overrides.pins.carved === "on" && !("spatialDensity" in m.overrides.pins) && m.overrides.reasons.carved === "mine", "pins and written reasons carry over; Spatial density does not");
-  ok(!!m?.migration && m.migration.notes.some((n) => /Spatial density/.test(n) && /not converted|not one of/.test(n)), "the migration says Spatial density was not converted into Compressed-then-released");
-  ok(!m?.adopted, "the old list is not adopted: a fresh suggestion replaces it");
+  const m = migrateLegacy({ manual: true, keys: ["carved", "spatialDensity", "porous"], pins: { spatialDensity: "on", carved: "on" }, notes: { carved: "mine", spatialDensity: "my note on density" } });
+  ok(!!m && m.overrides.pins.carved === "on" && m.overrides.reasons.carved === "mine", "pins and written reasons carry over");
+  ok(!!m && m.overrides.pins.spatialDensity === "on" && m.overrides.reasons.spatialDensity === "my note on density", "the pin and the note on Spatial density are kept: it is one of the twelve");
+  ok(!!m && m.overrides.pins.porous === "on", "a list edited by hand is kept as pins");
+  ok(!!m?.migration && m.migration.notes.some((n) => /Spatial density/.test(n) && /legacy measurement/.test(n) && /recomputed/.test(n)), "the migration says the earlier Spatial density numbers are kept as a legacy measurement and the current criterion is recomputed");
+  ok(!m?.adopted, "the list the program chose is not adopted: a fresh suggestion replaces it");
   ok(migrateLegacy(undefined) === null, "nothing to migrate");
+  // a profile saved under the working name is read as Spatial density, everything kept
+  const old = { ...defaultProfile(), adopted: { keys: ["compressed", "carved"], reasons: { compressed: "r" }, setAside: {}, basis: [], at: 1 }, overrides: { ...emptyOverrides(), pins: { compressed: "on" }, reasons: { compressed: "mine" }, interpretations: { t1: { compressed: "reading" } } } } as never as EvaluationProfile;
+  const fixed = normalizeProfile(old);
+  ok(fixed.adopted!.keys.includes("spatialDensity") && !fixed.adopted!.keys.includes("compressed" as never) && fixed.overrides.pins.spatialDensity === "on" && fixed.overrides.reasons.spatialDensity === "mine" && fixed.overrides.interpretations.t1.spatialDensity === "reading", "a profile saved under the working name is read as Spatial density with its pins, notes and readings");
+  ok(normalizeProfile(fixed) === fixed, "an already-current profile is returned as it is");
 }
 
 // ---- 11. the Analysis, the Boards and the exports are one set of numbers ------------------------------------------------------------------------------------------------

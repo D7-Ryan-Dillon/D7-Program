@@ -310,10 +310,14 @@ function sheetEvidence(pg: Page, W: number, H: number, inp: SheetInput, style: D
       y += 0.3;
       const mine = inp.profile.overrides.picks[inp.group.key];
       const chosen = mine ? inp.group.tiles.find((t) => t.id === mine) : inp.pick?.supported ? inp.group.tiles.find((t) => t.id === inp.pick!.tileId) : null;
-      const headline = inp.group.tiles.length < 2 ? "Only one variant" : chosen ? `${chosen.name}${mine ? " (your choice)" : ""}` : "No pick: the evidence does not separate the variants";
+      const none = inp.pick?.verdict === "tradeoff" ? "A tradeoff, not a winner" : inp.pick?.verdict === "tie" ? "No pick: the variants do not differ where it matters" : "No pick: the evidence does not support one";
+      const headline = inp.group.tiles.length < 2 ? "Only one variant" : chosen ? `${chosen.name}${mine ? " (your choice)" : ""}` : none;
       y += pg.text(headline, x, y, rightW, 0.6, 0.18, { weight: "600", lines: 2, color: chosen ? pg.p.good : pg.p.text }) + 0.1;
       const why = inp.profile.overrides.pickReasons[inp.group.key] ?? inp.pick?.rationale ?? "";
-      pg.text(why, x, y, rightW, H - y - 0.45, 0.12, { color: pg.p.muted, lines: 14 });
+      y += pg.text(why, x, y, rightW, Math.max(0.5, (H - y - 0.45) * 0.55), 0.12, { color: pg.p.muted, lines: 10 }) + 0.08;
+      // who leads on what, and the rules behind it (the system's assumptions, not assignment requirements)
+      for (const t of (inp.pick?.tradeoffs ?? []).slice(0, 5)) y += pg.text(`• ${t}`, x, y, rightW, 0.5, 0.105, { color: pg.p.muted, lines: 3 }) + 0.05;
+      if (inp.pick && inp.pick.assumptions.length && H - y > 0.7) pg.text(`Targets used are the system's assumptions for this typology, not assignment requirements: ${inp.pick.assumptions.slice(0, 3).map((a) => a.split(" — ")[0]).join("; ")}.`, x, y + 0.05, rightW, H - y - 0.45, 0.095, { color: pg.p.muted, lines: 5 });
     }
   }
 }

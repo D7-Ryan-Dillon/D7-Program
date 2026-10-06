@@ -171,15 +171,15 @@ export function AnalysisTab() {
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{results.filter((r) => r.criterion.group === g).map((r) => cardFor(activeTile, r, 0))}</div>
                   </div>
                 ))}
-                {evaluation && evaluation.supplemental.length > 0 && (
+                {evaluation && evaluation.legacyMeasurements.length > 0 && (
                   <details className="rounded-md border-hair px-3 py-2 text-xs">
-                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Supplemental reading (not one of the matrix&apos;s twelve): Spatial density</summary>
+                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Legacy measurement: the earlier Spatial density formula (kept for comparison)</summary>
                     <div className="mt-2 space-y-1 text-muted-foreground">
-                      {evaluation.supplemental.map((s) => (
+                      {evaluation.legacyMeasurements.map((s) => (
                         <div key={s.label}>
                           <div className="font-mono text-foreground">{s.quant.headline}</div>
                           <div>{s.explanation}</div>
-                          <div className="text-[10px]">The older 0-100 index for it was {s.score}. It is kept as a measurement of the void&apos;s cross-section along its main route; it is not the matrix&apos;s Compressed-then-released, and it is not used to choose criteria.</div>
+                          <div className="text-[10px]">The earlier 0-100 index for it was {s.score}. It measured the void&apos;s cross-section area along its main route, a different formula from the Spatial density criterion above (the ratio of narrowest to widest passage width). It is not the same measurement, so it is kept here as it was and never relabelled as the current result.</div>
                         </div>
                       ))}
                     </div>

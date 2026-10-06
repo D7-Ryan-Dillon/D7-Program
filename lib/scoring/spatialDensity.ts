@@ -1,4 +1,5 @@
-// Compressed-then-released: the ratio of the narrowest to the widest passage width along a route a person could walk. The width is read
+// Spatial density: the ratio of the narrowest to the widest passage width along a route a person could walk (the matrix's "perceived contrast
+// between narrowest and widest moments"). The width is read
 // where someone would stand (a few feet above a floor the route is supported on), across the direction of travel, between the material on
 // either side. A passage is not a line through the void: if the tile has no floor-supported route from an opening, nothing is measured.
 //
@@ -38,7 +39,7 @@ export interface PassageProfile {
   releases: number;
 }
 
-export type CompressedResult = { ok: true; profile: PassageProfile; routeResult: RouteResult } | { ok: false; reason: string; routeResult: RouteResult | null };
+export type SpatialDensityResult = { ok: true; profile: PassageProfile; routeResult: RouteResult } | { ok: false; reason: string; routeResult: RouteResult | null };
 
 const MIN_ROUTE_FT = 8;
 
@@ -47,10 +48,10 @@ function median(xs: number[]): number {
   return s.length ? s[Math.floor(s.length / 2)] : 0;
 }
 
-export function compressedFor(tile: ParsedTile, a: Pick<Assumptions, "routeHeadroomFt" | "routeStepFt" | "passageHeightFt" | "constrictionRatio" | "expansionRatio">, over?: RouteOverride0): CompressedResult {
+export function spatialDensityFor(tile: ParsedTile, a: Pick<Assumptions, "passageHeightFt" | "constrictionRatio" | "expansionRatio">, over?: RouteOverride0): SpatialDensityResult {
   const f = voxelFacts(tile);
   if (!f) return { ok: false, reason: "This tile carries no voxel data, so no passage can be measured.", routeResult: null };
-  const rr = findRoute(f, { headroomFt: a.routeHeadroomFt, stepFt: a.routeStepFt, from: over?.from, to: over?.to, destination: "farthest" });
+  const rr = findRoute(f, { from: over?.from, to: over?.to, destination: "farthest" });
   if (!rr.route) return { ok: false, reason: rr.reason, routeResult: rr };
   if (rr.route.lengthFt < MIN_ROUTE_FT) return { ok: false, reason: `The route from the entry is only ${rr.route.lengthFt.toFixed(0)} ft long: too short to read a sequence of passage widths.`, routeResult: rr };
   const { widths: raw, along } = passageWidths(f, rr.route, a.passageHeightFt);

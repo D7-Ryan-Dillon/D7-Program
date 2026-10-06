@@ -19,7 +19,7 @@ for (const name of names) {
   const t0 = Date.now();
   const ev = evaluateTile(tile);
   console.log(`\n== ${name} (${Date.now() - t0} ms)`);
-  for (const r of ev.results) { console.log(`  ${r.criterion.name.padEnd(28)} [${r.measure.status.padEnd(11)}] ${r.measure.headline}`); if (r.measure.status === "unavailable") console.log("        ! " + r.interpretation.text); if (process.env.DETAIL && ["stepped","graduated","compressed","nonHierarchical"].includes(r.key)) for (const x of r.measure.supporting) console.log(`        - ${x.label}: ${x.value}`); }
+  for (const r of ev.results) { console.log(`  ${r.criterion.name.padEnd(28)} [${r.measure.status.padEnd(11)}] ${r.measure.headline}`); if (r.measure.status === "unavailable") console.log("        ! " + r.interpretation.text); if (process.env.DETAIL && ["stepped","graduated","spatialDensity","nonHierarchical"].includes(r.key)) for (const x of r.measure.supporting) console.log(`        - ${x.label}: ${x.value}`); }
   console.log("   levels:", (tile.spaces?.levels ?? []).map((l) => `${l.z_ft}ft/${l.area_ft2.toFixed(0)}`).join(" "));
   const u = ev.usable;
   console.log(`  usable: void ${u.voidFt3.toFixed(0)} reach ${u.reachableVoidFt3.toFixed(0)} | floor ${u.floorFt2.toFixed(0)} usable ${u.usableFt2.toFixed(0)} cutoff ${u.cutOffFt2.toFixed(0)} tight ${u.tightFt2.toFixed(0)} | zones ${u.zonesReached}/${u.zones} | levels ${u.levelsReached}/${u.levelsTotal}`);

@@ -2,7 +2,8 @@
 // functions serve the generator (hard "never" rules are absolute there) and the Warnings list.
 
 import type { ParsedTile } from "@/lib/types";
-import { toleranceFt, CATEGORY_LABEL, pairKey, type Adjacency, type ArrangeWarning, type ArrangementDoc, type Joint, type ProgramRules, type RuleLevel, type Site } from "./types";
+import { WALK } from "./occupancy";
+import { CATEGORY_LABEL, pairKey, type Adjacency, type ArrangeWarning, type ArrangementDoc, type Joint, type ProgramRules, type RuleLevel, type Site } from "./types";
 import { categoryOf } from "./orient";
 import { classAt, toFt } from "./geometry";
 import { describeCollision } from "./collision";
@@ -72,19 +73,19 @@ export function evaluateProgram(layout: Layout, doc: ArrangementDoc, rules: Prog
   }
   for (const [a, b] of layout.nested) add({ kind: "overlap", severity: "info", message: `${name(a)} and ${name(b)} nest: their bounding boxes overlap but their cells fit.`, pieceIds: [a, b] });
   for (const isle of layout.islands) add({ kind: "disconnected", severity: "error", message: `${isle.length === 1 ? name(isle[0]) : `${isle.length} pieces (${name(isle[0])}...)`} not attached to the main set.`, pieceIds: isle });
-  if (layout.unreachable.length) add({ kind: "unreachable", severity: "warn", message: `${layout.unreachable.length} attached piece${layout.unreachable.length > 1 ? "s have" : " has"} no walkable route from the entrance to ${layout.unreachable.length > 1 ? "their" : "its"} main floor (a floor to stand on, 2.5 ft clear width and 6.5 ft headroom, steps within the level tolerance).`, pieceIds: layout.unreachable });
+  if (layout.unreachable.length) add({ kind: "unreachable", severity: "warn", message: `${layout.unreachable.length} attached piece${layout.unreachable.length > 1 ? "s have" : " has"} no walkable route from the entrance to ${layout.unreachable.length > 1 ? "their" : "its"} main floor (a floor to stand on, ${WALK.widthFt} ft clear width and ${WALK.headroomFt} ft headroom, steps of no more than ${WALK.stepFt} ft or real stair or ramp geometry).`, pieceIds: layout.unreachable });
   for (const [id, r] of layout.reach) {
     if (r.main && r.totalFt2 > 0 && r.reachedFt2 < r.totalFt2 * 0.98) add({ kind: "partial", severity: "info", message: `${name(id)}: ${(r.totalFt2 - r.reachedFt2).toFixed(0)} ft2 of its ${r.totalFt2.toFixed(0)} ft2 of floor cannot be reached on foot (another level or pocket with no stair or ramp to it).`, pieceIds: [id] });
   }
 
-  const tol = toleranceFt(rules);
   for (const j of layout.joints) {
     const a = layout.byId.get(j.aId)!;
     const b = layout.byId.get(j.bId)!;
     const level = ruleBetween(rules, a.tile, b.tile, j.axis === 2);
     const pair = `${name(j.aId)} / ${name(j.bId)}`;
     if (level === "never") add({ kind: "never", severity: "error", message: `${pair}: ${CATEGORY_LABEL[categoryOf(a.tile)]} may never touch ${CATEGORY_LABEL[categoryOf(b.tile)]} ${j.axis === 2 ? "stacked" : "side by side"}.`, pieceIds: [j.aId, j.bId], jointId: j.id });
-    if (j.floorStepFt !== null && j.floorStepFt > tol + 1e-6) add({ kind: "level", severity: "warn", message: `${pair}: floors differ by up to ${j.floorStepFt.toFixed(1)} ft across the joint.`, pieceIds: [j.aId, j.bId], jointId: j.id });
+    if (j.connect.kind === "connector" && j.connect.connector) add({ kind: "connector", severity: "warn", message: `${pair}: the floors are ${j.connect.connector.riseFt.toFixed(1)} ft apart across a clear doorway. That needs a stair or ramp connector, which is not there: the joint is not walkable.`, pieceIds: [j.aId, j.bId], jointId: j.id });
+    else if (j.floorStepFt !== null && j.floorStepFt > WALK.stepFt + 1e-6 && !j.connect.walkable) add({ kind: "level", severity: "warn", message: `${pair}: floors differ by up to ${j.floorStepFt.toFixed(1)} ft across the joint (more than one ${WALK.stepFt} ft step).`, pieceIds: [j.aId, j.bId], jointId: j.id });
     if (j.legacy !== null && j.legacy < 50) add({ kind: "dead-end", severity: "info", message: `${pair}: openings dead-end into foam (${j.legacy.toFixed(0)}% matched).`, pieceIds: [j.aId, j.bId], jointId: j.id });
     if (j.connect.kind === "void" && j.connect.why) add({ kind: "sealed", severity: "info", message: `${pair}: open space continues across the joint but nobody can walk it: ${j.connect.why}.`, pieceIds: [j.aId, j.bId], jointId: j.id });
   }

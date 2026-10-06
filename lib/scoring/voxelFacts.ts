@@ -5,15 +5,15 @@
 //
 //   classes   OUT (outside the container), SOLID (foam, plates, branches), VOID (carved space)
 //   surfaces  the faces of the void, by what is on the other side: foam, a floor plate, a branch, or air (an opening)
-//   route     a FLOOR-SUPPORTED way from a ground-level opening to a destination: a path of cells that each have material under them and
-//             headroom above, the way a person would go; never a line through open air
+//   route     a FLOOR-SUPPORTED way from a ground-level opening to a destination: a path of cells a person can stand in (the program's one walking
+//             model, lib/walking.ts: material under, 6.5 ft of headroom and a 2.5 ft clear width by default) joined by steps no bigger than one
+//             riser, the way a person would go; never a line through open air, and never a jump
 
 import { edtSquared } from "@/lib/tiles/grid";
 import type { ParsedTile } from "@/lib/types";
+import { floodZones, kernelFor, NEIGHBOURS, OUT, SOLID, standingCells, VOID, type Kernel } from "@/lib/walking";
 
-export const OUT = 0;
-export const SOLID = 1;
-export const VOID = 2;
+export { OUT, SOLID, VOID };
 
 export interface VoxelFacts {
   nx: number;
@@ -202,10 +202,6 @@ export interface RouteResult {
 }
 
 export interface RouteOptions {
-  /** clear headroom a route needs, ft */
-  headroomFt: number;
-  /** the largest rise or drop between two neighbouring cells of the route, ft */
-  stepFt: number;
   /** override: entry and destination as tile coordinates (ft); the nearest supported cell is used */
   from?: [number, number, number];
   to?: [number, number, number];
@@ -215,7 +211,7 @@ export interface RouteOptions {
   destination?: "room" | "farthest";
 }
 
-export const DEFAULT_ROUTE: RouteOptions = { headroomFt: 5, stepFt: 0.5 };
+export const DEFAULT_ROUTE: RouteOptions = {};
 
 /** A route you chose: where it starts and where it goes (tile coordinates, ft). Either may be left to the automatic choice. */
 export interface RouteOverride0 {
@@ -223,24 +219,24 @@ export interface RouteOverride0 {
   to?: [number, number, number];
 }
 
-/** Floor-supported cells: void with material under it and headroom above it. */
-export function supportedCells(f: VoxelFacts, headroomFt: number): Uint8Array {
-  const head = Math.max(2, Math.round(headroomFt / f.cell));
-  const out = new Uint8Array(f.cls.length);
-  const { nx, ny, nz } = f;
-  for (let x = 0; x < nx; x++)
-    for (let y = 0; y < ny; y++)
-      for (let z = 1; z < nz; z++) {
-        const i = (x * ny + y) * nz + z;
-        if (f.cls[i] !== VOID || f.cls[i - 1] !== SOLID) continue;
-        let ok = true;
-        for (let k = 1; k < head && ok; k++) if (classAt(f, x, y, z + k) === SOLID) ok = false;
-        if (ok) out[i] = 1;
-      }
-  return out;
+const standCache = new WeakMap<VoxelFacts, { key: string; cells: Uint8Array }>();
+
+/**
+ * Standing cells: void with material under it, the full headroom above it and a clear disc round it (the shared walking rules), in a floor that is a
+ * space and not a pocket (the zone it belongs to is at least the smallest space). Cached per tile and rule set.
+ */
+export function supportedCells(f: VoxelFacts, k: Kernel = kernelFor(f.cell)): Uint8Array {
+  const hit = standCache.get(f);
+  if (hit && hit.key === k.key) return hit.cells;
+  const dims: [number, number, number] = [f.nx, f.ny, f.nz];
+  const stand = standingCells(dims, f.cls, k);
+  const { zone, cells } = floodZones(dims, stand, k);
+  for (let i = 0; i < stand.length; i++) if (stand[i] && cells[zone[i]] < k.minZoneCells) stand[i] = 0;
+  standCache.set(f, { key: k.key, cells: stand });
+  return stand;
 }
 
-const NB: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+const NB = NEIGHBOURS as [number, number][];
 
 /** The cells next to an opening in a side wall (air beyond a void cell) at the lowest floor level reached by any opening, where a person would come in. */
 export function groundEntries(f: VoxelFacts, supported: Uint8Array, single = false): number[] {
@@ -387,11 +383,12 @@ function clearance(f: VoxelFacts): Float64Array {
 
 /** The route a person would take in: from a ground-level opening to the largest other room reachable on foot (or what was asked for). */
 export function findRoute(f: VoxelFacts, opt: RouteOptions = DEFAULT_ROUTE, blocked: Uint8Array | null = null): RouteResult {
-  const supported = supportedCells(f, opt.headroomFt);
+  const kernel = kernelFor(f.cell);
+  const supported = supportedCells(f, kernel);
   let any = false;
   for (let i = 0; i < supported.length && !any; i++) if (supported[i]) any = true;
-  if (!any) return { route: null, reason: "No floor with headroom to walk on was found in the tile: nothing is floor-supported.", reachable: null, supported, entries: [] };
-  const step = Math.max(1, Math.round(opt.stepFt / f.cell));
+  if (!any) return { route: null, reason: "No floor that a person can stand on was found in the tile: nothing has material under it with the headroom and clear width the walking rules need.", reachable: null, supported, entries: [] };
+  const step = kernel.step;
   const clear = clearance(f);
   let entries = groundEntries(f, supported, true);
   const nearest = (p: [number, number, number]): number => {

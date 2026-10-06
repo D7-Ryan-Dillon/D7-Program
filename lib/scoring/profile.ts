@@ -8,11 +8,12 @@
 // Nothing here has to be touched for the analysis, the comparison, the boards or the exports to work.
 
 import type { ParsedTile } from "@/lib/types";
-import { DEFAULT_ASSUMPTIONS, mergeAssumptions, type Assumptions } from "@/lib/scoring/assumptions";
+import { DEFAULT_ASSUMPTIONS, mergeAssumptions, RETIRED_ASSUMPTIONS, type Assumptions } from "@/lib/scoring/assumptions";
 import { MATRIX, STATUS_RELIABILITY, type MatrixKey } from "@/lib/scoring/matrix";
 import type { MatrixResult, TileEvaluation } from "@/lib/scoring/matrixEval";
 import type { RouteOverride0 } from "@/lib/scoring/voxelFacts";
 import { shortName } from "@/lib/scoring/compare";
+import type { PreferenceOverride } from "@/lib/scoring/compareSet";
 
 export interface Adopted {
   keys: MatrixKey[];
@@ -39,6 +40,8 @@ export interface Overrides {
   pickReasons: Record<string, string>;
   /** the spatial intention you wrote for a typology (replaces the generated line), by typology key */
   intentions: Record<string, string>;
+  /** the preference you set for a criterion of a typology (replaces the system's assumption for it), by typology key then criterion */
+  targets: Record<string, Partial<Record<MatrixKey, PreferenceOverride>>>;
 }
 
 export interface EvaluationProfile {
@@ -49,8 +52,39 @@ export interface EvaluationProfile {
   migration?: { notes: string[]; dismissed?: boolean };
 }
 
-export const emptyOverrides = (): Overrides => ({ pins: {}, reasons: {}, interpretations: {}, assumptions: {}, routes: {}, picks: {}, pickReasons: {}, intentions: {} });
+export const emptyOverrides = (): Overrides => ({ pins: {}, reasons: {}, interpretations: {}, assumptions: {}, routes: {}, picks: {}, pickReasons: {}, intentions: {}, targets: {} });
 export const defaultProfile = (): EvaluationProfile => ({ version: 1, adopted: null, overrides: emptyOverrides() });
+
+/** Spatial density was saved for a while under its working name; every saved key of the profile is mapped back to it. */
+const RENAMED: Record<string, MatrixKey> = { compressed: "spatialDensity" };
+const renamed = (k: string): string => RENAMED[k] ?? k;
+const renameKeys = <T,>(rec: Record<string, T> | undefined): Record<string, T> => Object.fromEntries(Object.entries(rec ?? {}).map(([k, v]) => [renamed(k), v]));
+
+/** A saved profile read as the current one: an earlier key name is mapped to Spatial density everywhere (adopted criteria, pins, reasons, readings, the tiles' own words). */
+export function normalizeProfile(p: EvaluationProfile): EvaluationProfile {
+  const stale = (rec: Record<string, unknown> | undefined) => !!rec && Object.keys(rec).some((k) => k in RENAMED);
+  const a = p.adopted;
+  const retired = RETIRED_ASSUMPTIONS.filter((k) => k in p.overrides.assumptions);
+  const needs = retired.length > 0 || (a && (a.keys.some((k) => (k as string) in RENAMED) || stale(a.reasons) || stale(a.setAside))) || stale(p.overrides.pins) || stale(p.overrides.reasons) || Object.values(p.overrides.interpretations).some((r) => stale(r));
+  if (!needs) return p;
+  // route headroom and route step were Analysis-only settings; the walking rules are now ONE set shared with Arrange (lib/walking.ts). The old values are not applied, and the note says so.
+  const assumptions = { ...p.overrides.assumptions } as Record<string, unknown>;
+  const dropped = retired.map((k) => `${k === "routeHeadroomFt" ? "route headroom" : "route step"} ${assumptions[k]} ft`);
+  for (const k of retired) delete assumptions[k];
+  const migration = retired.length ? { notes: [...(p.migration?.notes ?? []), `Analysis used its own route headroom and step (${dropped.join(", ")} in this project). Routes now use the project's one set of walking rules, shared with Arrange (6.5 ft headroom, 2.5 ft clear width, 0.5 ft step unless you change them in Settings), so the earlier values were not applied.`] } : p.migration;
+  return {
+    ...p,
+    migration,
+    adopted: a ? { ...a, keys: [...new Set(a.keys.map((k) => renamed(k) as MatrixKey))], reasons: renameKeys(a.reasons), setAside: renameKeys(a.setAside) } : a,
+    overrides: {
+      ...p.overrides,
+      assumptions: assumptions as Partial<Assumptions>,
+      pins: renameKeys(p.overrides.pins as Record<string, "on" | "off">) as Overrides["pins"],
+      reasons: renameKeys(p.overrides.reasons as Record<string, string>) as Overrides["reasons"],
+      interpretations: Object.fromEntries(Object.entries(p.overrides.interpretations).map(([t, r]) => [t, renameKeys(r as Record<string, string>)])) as Overrides["interpretations"],
+    },
+  };
+}
 
 /** The assumptions in force: the automatic ones with your changes on top. */
 export const effectiveAssumptions = (p: EvaluationProfile): Assumptions => mergeAssumptions(p.overrides.assumptions);
@@ -60,7 +94,7 @@ export const effectiveAssumptions = (p: EvaluationProfile): Assumptions => merge
 /** Words in a typology or name that say what a tile is about, and the criteria they make relevant (the spatial intentions of the typologies). */
 export const INTENT: { words: RegExp; keys: MatrixKey[]; why: string }[] = [
   { words: /step|terrac|cascad|amphi|tier|ramp/i, keys: ["stepped", "graduated"], why: "stepped or terraced" },
-  { words: /compress|sequen|thresh|narrow|squeez|funnel/i, keys: ["compressed", "graduated", "nonHierarchical"], why: "a sequence of compression and release" },
+  { words: /compress|sequen|thresh|narrow|squeez|funnel/i, keys: ["spatialDensity", "graduated", "nonHierarchical"], why: "a sequence of compression and release" },
   { words: /void|vertical|atrium|shaft|tower|field/i, keys: ["monumental", "lightFilled", "porous"], why: "a void or vertical space" },
   { words: /continu|hall|linear|gallery|edge|flow/i, keys: ["continuous", "nonHierarchical", "threaded"], why: "a continuous or linear space" },
   { words: /plate|contain|room within|core|inserted|mezz/i, keys: ["resistant", "threaded", "carved"], why: "a retained or inserted element" },
@@ -239,6 +273,7 @@ export function diffSuggestion(profile: EvaluationProfile, s: Suggestion): Sugge
   return { add, remove, changed: add.length > 0 || remove.length > 0 };
 }
 
+const matrixName = (k: string) => MATRIX.find((m) => m.key === k)?.name ?? k;
 export const adoptFrom = (s: Suggestion, tiles: ParsedTile[]): Adopted => ({ keys: s.keys, reasons: s.reasons, setAside: s.setAside, basis: tiles.map((t) => t.id), at: Date.now() });
 
 /** A tile's interpretation as it should be shown: yours when you wrote one, else the generated text. */
@@ -283,6 +318,12 @@ export const withRoute = (p: EvaluationProfile, tileId: string, r: RouteOverride
 export const withPick = (p: EvaluationProfile, typology: string, tileId: string | null) => over(p, (o) => ({ ...o, picks: setOrDelete(o.picks, typology, tileId) }));
 export const withPickReason = (p: EvaluationProfile, typology: string, text: string) => over(p, (o) => ({ ...o, pickReasons: setOrDelete(o.pickReasons, typology, text) }));
 export const withIntention = (p: EvaluationProfile, typology: string, text: string) => over(p, (o) => ({ ...o, intentions: setOrDelete(o.intentions, typology, text) }));
+/** Sets (or, with null, restores) the preference for one criterion of one typology. Nothing else changes. */
+export const withTarget = (p: EvaluationProfile, typology: string, key: MatrixKey, t: PreferenceOverride | null) =>
+  over(p, (o) => {
+    const mine = setOrDelete((o.targets?.[typology] ?? {}) as Record<string, PreferenceOverride>, key, t);
+    return { ...o, targets: setOrDelete((o.targets ?? {}) as Record<string, Record<string, PreferenceOverride>>, typology, Object.keys(mine).length ? mine : null) as Ov["targets"] };
+  });
 
 // ---- migrating an older project -----------------------------------------------------------------------------------------------------------------
 
@@ -294,9 +335,12 @@ interface LegacyCriteria {
 }
 
 /**
- * The first version of the carry-forward saved `criteria`. Its pins and the reasons you wrote are kept (they are your overrides); the list it carried
- * is not converted, because the scores it chose from were an older blend, not the matrix measurements; a fresh suggestion replaces it. Spatial density,
- * which is not one of the twelve, is not turned into Compressed-then-released.
+ * The first version of the carry-forward saved `criteria`. What you set by hand is kept: the pins, the reasons you wrote, and the list you edited
+ * (each of its criteria becomes a pin "on", because choosing one by hand is an override). Spatial density is one of the twelve and keeps all of
+ * that. The list the program chose for you is not converted, because it was chosen from older scores (a 0-100 blend of proxies), not from the matrix
+ * measurements; a fresh suggestion replaces it. The older Spatial density NUMBERS used a different formula (the void's cross-section area along the
+ * main route, not the ratio of narrowest to widest passage width): they are kept as a legacy measurement, labelled, and the current criterion is
+ * recomputed; nothing is relabelled.
  */
 export function migrateLegacy(legacy: unknown): EvaluationProfile | null {
   const l = legacy as LegacyCriteria | null | undefined;
@@ -304,17 +348,29 @@ export function migrateLegacy(legacy: unknown): EvaluationProfile | null {
   const valid = new Set<string>(MATRIX.map((m) => m.key));
   const p = defaultProfile();
   const notes: string[] = [];
-  for (const [k, v] of Object.entries(l.pins ?? {})) {
-    if (valid.has(k)) p.overrides.pins[k as MatrixKey] = v;
-    else if (k === "spatialDensity") notes.push("Your pin on Spatial density was dropped: it is now a supplemental reading, not one of the matrix's twelve descriptors.");
+  const kept: string[] = [];
+  for (const [k0, v] of Object.entries(l.pins ?? {})) {
+    const k = renamed(k0);
+    if (valid.has(k)) {
+      p.overrides.pins[k as MatrixKey] = v;
+      kept.push(`pin on ${matrixName(k)}`);
+    }
   }
-  for (const [k, v] of Object.entries(l.notes ?? {})) {
-    if (valid.has(k) && v) p.overrides.reasons[k as MatrixKey] = v;
+  for (const [k0, v] of Object.entries(l.notes ?? {})) {
+    const k = renamed(k0);
+    if (valid.has(k) && v) {
+      p.overrides.reasons[k as MatrixKey] = v;
+      kept.push(`your note on ${matrixName(k)}`);
+    }
   }
   if (l.manual && l.keys?.length) {
-    notes.push(`The list you edited by hand (${l.keys.length} criteria) was written against the older scores and is not carried over as it stood; the criteria are suggested again from the matrix measurements${l.keys.includes("spatialDensity") ? ", and Spatial density (not a matrix descriptor) is no longer a criterion. It was not converted into Compressed-then-released" : ""}. Your pins and written reasons were kept.`);
-  } else if (l.keys?.includes("spatialDensity")) notes.push("Spatial density is no longer among the criteria: it is not one of the matrix's twelve. It was not converted into Compressed-then-released.");
-  if (Object.keys(l.pins ?? {}).length || Object.keys(l.notes ?? {}).length || notes.length) {
+    const picked = l.keys.map(renamed).filter((k) => valid.has(k));
+    for (const k of picked) if (!p.overrides.pins[k as MatrixKey]) p.overrides.pins[k as MatrixKey] = "on";
+    notes.push(`The list you edited by hand (${picked.length} criteria) is kept as pins: each is pinned on, and the rest are suggested automatically from the matrix measurements.`);
+  }
+  if (kept.length) notes.push(`Kept as your overrides: ${kept.join(", ")}.`);
+  if (kept.length || notes.length || l.keys?.includes("spatialDensity")) {
+    if (l.keys?.includes("spatialDensity") || kept.some((x) => /Spatial density/.test(x))) notes.push("Spatial density is one of the twelve descriptors, measured as the ratio of the narrowest to the widest passage width along a walkable route. Its earlier numbers used a different formula (the void's cross-section area along the main route): they are kept as a legacy measurement under the Spatial density card, and the current criterion is recomputed rather than relabelled.");
     notes.unshift("Earlier scores (a 0-100 blend of proxies) are unchanged and still shown as the app's presence index; the matrix measurements are new, so nothing was relabelled.");
     p.migration = { notes };
   }

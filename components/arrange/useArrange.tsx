@@ -13,6 +13,7 @@ import type { MeshColors, MeshVisibility } from "@/components/viewer/ThreeViewpo
 import type { ViewportHandle } from "@/lib/viewportCapture";
 import { capturePosePng } from "@/lib/arrange/capture";
 import { useHistory } from "@/lib/arrange/history";
+import { useWalkRules } from "@/lib/useWalkRules";
 import { analyzeLayout, entrancePoint as layoutEntrancePoint, type Layout } from "@/lib/arrange/layout";
 import { evaluateProgram } from "@/lib/arrange/program";
 import { snapPosition } from "@/lib/arrange/snap";
@@ -290,7 +291,9 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
 
   const rules = ui.rules;
   const shown = interlock?.doc ?? dragDoc ?? doc;
-  const layout = useMemo(() => analyzeLayout(shown, tileById, rules), [shown, tileById, rules]);
+  // the project's walking rules are applied before anything below reads them; a change to one recomputes the layout (and everything built on it)
+  const walk = useWalkRules();
+  const layout = useMemo(() => analyzeLayout(shown, tileById, rules), [shown, tileById, rules, walk.key]); // eslint-disable-line react-hooks/exhaustive-deps
   const joints = layout.joints;
   const sequence = useMemo(() => buildSequence(layout, rules), [layout, rules]);
   const autoName = useMemo(() => autoNames(layout, sequence, tileById), [layout, sequence, tileById]);

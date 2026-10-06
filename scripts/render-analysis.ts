@@ -73,7 +73,7 @@ async function main() {
   const rows = tiles.slice(0, 5).map((t) => ({ tile: t, ev: evals.get(t.id)!, reading: (r: { interpretation: { text: string } }) => r.interpretation.text }));
   await save("results_table.png", await resultsImage(rows as never, crit.keys, "dark", 1));
   const e0 = evals.get(tiles[1].id)!;
-  await save("diagram_compressed.png", await descriptorDiagram(tiles[1], e0.results.find((r) => r.key === "compressed")!, e0.results.find((r) => r.key === "compressed")!.interpretation.text, drawingStyle("dark"), 1));
+  await save("diagram_spatial_density.png", await descriptorDiagram(tiles[1], e0.results.find((r) => r.key === "spatialDensity")!, e0.results.find((r) => r.key === "spatialDensity")!.interpretation.text, drawingStyle("dark"), 1));
   await save("diagrams_sheet.png", await diagramSheet(tiles[1], e0.results, (r) => r.interpretation.text, "dark", 0.7));
   console.log(`wrote ${sheets.length + sheets2.length + 3} pictures to ${out}`);
 }

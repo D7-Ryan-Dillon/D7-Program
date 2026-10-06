@@ -199,18 +199,65 @@ export function pocket(id = "pocket"): ParsedTile {
   return tileOf({ id, category: "gathering", typology: "doorway into a closet" }, v);
 }
 
-/** corridor: 40 ft long, 12 ft wide, 10 ft tall: a 4 ft passage, then a 2 ft neck, then a 10 ft chamber, entered at one end. For reading passage widths. */
-export function corridor(id = "corridor", category: Spec["category"] = "gathering"): ParsedTile {
+/**
+ * corridor: 40 ft long, 12 ft wide, 10 ft tall: a 4 ft passage, then a neck (3 ft by default), then a 10 ft chamber, entered at one end. For reading passage
+ * widths. `neckFt` makes the neck narrower (2 ft is too narrow to walk: the walking rules need a 2.5 ft clear width); `lowFt` a neck whose ceiling is that
+ * high above the floor (5.5 ft is too low to walk under: the rules need 6.5 ft). Both are the cases an Analysis that used its own, looser, thresholds used
+ * to pass and Arrange failed.
+ */
+export function corridor(id = "corridor", category: Spec["category"] = "gathering", o: { neckFt?: number; lowFt?: number } = {}): ParsedTile {
   const v = vox(80, 24, 20);
   solid(v, [0, 0, 0, 80, 24, 20]);
   const mid = 12;
-  const band = (x0: number, x1: number, width: number) => carve(v, [x0, mid - width / 2, FLOOR, x1, mid + width / 2, 18]);
+  const neck = Math.round(((o.neckFt ?? 3) * 2) / 2) * 2; // cells: 3 ft = 6
+  const band = (x0: number, x1: number, width: number, top = 18) => carve(v, [x0, mid - width / 2, FLOOR, x1, mid + width / 2, top]);
   band(2, 26, 8);
-  band(26, 38, 4);
+  band(26, 38, neck, o.lowFt ? FLOOR + Math.round(o.lowFt * 2) : 18);
   band(38, 78, 20);
   solid(v, [0, 0, 0, 80, 24, FLOOR], 1);
   carve(v, [0, 8, FLOOR, W, 16, FLOOR + DOOR_H]); // the way in, at the end
   return tileOf({ id, category, typology: "passage, neck and chamber" }, v);
+}
+
+export type RampKind = "ramp" | "stair" | "sheer" | "lowCeiling" | "broken";
+
+/**
+ * rampHall: 36 x 10 x 15 ft. Entered at its west end at floor level (floor top 1 ft); its east end has a doorway at the UPPER floor, `riseFt` higher.
+ * What lies between them is the point:
+ *   ramp        a floor that climbs one 6 in riser every 2 ft (1 : 4): continuous, supported geometry
+ *   stair       one 6 in riser every 1 ft (1 : 2)
+ *   sheer       the same rise as one bare jump: a wall of `riseFt` with nothing to climb it
+ *   lowCeiling  the ramp with a lintel across it that leaves 5.5 ft of headroom: too low to walk under
+ *   broken      the ramp with one riser missing (a 1 ft jump in the middle of it)
+ * Meant to be entered from the west and left through the east doorway into a tile whose floor is as high as the upper floor.
+ */
+export function rampHall(id: string, kind: RampKind, riseFt = 3): ParsedTile {
+  const nx = 72;
+  const ny = 20;
+  const nz = 30;
+  const v = vox(nx, ny, nz);
+  solid(v, [0, 0, 0, nx, ny, nz]);
+  carve(v, [W, W, FLOOR, nx - W, ny - W, nz - W]);
+  const R = Math.round(riseFt * 2); // risers
+  const x0 = 24;
+  const per = kind === "stair" ? 2 : 4; // cells of run per riser
+  const fh = (x: number): number => {
+    if (x < x0) return FLOOR;
+    if (kind === "sheer") return FLOOR + R;
+    let n = Math.floor((x - x0) / per) + 1;
+    if (kind === "broken" && n >= Math.round(R / 2)) n += 1; // one riser is a double riser: a 1 ft jump
+    return FLOOR + Math.min(n, R);
+  };
+  solid(v, [0, 0, 0, nx, ny, FLOOR], 1);
+  for (let x = W; x < nx - W; x++) solid(v, [x, W, 0, x + 1, ny - W, fh(x)], 1);
+  if (kind === "lowCeiling") {
+    const xl = x0 + 10;
+    solid(v, [xl, W, fh(xl) + 11, xl + 4, ny - W, nz - W]); // 5.5 ft of clear height at the lintel
+  }
+  const up = FLOOR + R;
+  carve(v, [0, 6, FLOOR, W, 14, FLOOR + DOOR_H]); // the way in, at floor level
+  carve(v, [nx - W, 6, up, nx, 14, up + DOOR_H]); // the way out, at the upper floor
+  return tileOf({ id, category: "gathering", typology: `hall with a ${kind}` }, v);
 }
 
 /** skylit: a 10 ft cube with a doorway and an opening in its roof (an unglazed hole to the sky). */

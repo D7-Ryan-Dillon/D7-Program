@@ -5,6 +5,7 @@ import { Section } from "@/components/shared/Section";
 import { Select } from "@/components/ui/select";
 import { ASSUMPTION_FIELDS, DEFAULT_ASSUMPTIONS } from "@/lib/scoring/assumptions";
 import { useEvaluation } from "@/lib/useEvaluation";
+import { WalkRulesEditor } from "@/components/shared/WalkRulesEditor";
 import type { ParsedTile } from "@/lib/types";
 
 const CATS = ["gathering", "office", "lobby"] as const;
@@ -55,8 +56,10 @@ export function SettingsPanel({ tile }: { tile: ParsedTile | undefined }) {
       <Section id="analysis.settings" title="Assumptions and overrides" summary={`${Object.keys(changed).length + Object.keys(profile.overrides.routes).length} changed`} defaultOpen={false}>
         <p className="text-[11px] text-muted-foreground">Optional. The automatic values are used unless you change one, and every tile in the comparison is read with the same ones. A changed value is outlined; the arrow puts it back.</p>
 
+        <WalkRulesEditor />
+
         <div className="space-y-1.5">
-          <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Thresholds</div>
+          <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Thresholds · this tab only</div>
           {numeric}
         </div>
 

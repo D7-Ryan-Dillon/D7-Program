@@ -6,12 +6,14 @@
 //   Quantitative the measurement used to evaluate it
 //   Precedent    the original reference supporting the criterion
 //
-// The wording below is the project's own and is not edited by the app: boards and exports quote it as it stands.
+// The wording below is the project's own and is not edited by the app: boards and exports quote it as it stands. The twelfth descriptor is the project's
+// "Spatial density" (the matrix's "compressed-then-released" quality, renamed by the team on purpose): its criteria are the passage-width ratio below,
+// never occupancy, rooms per volume or a solid-to-void ratio.
 
 export type MatrixKey =
   | "carved" | "stepped" | "porous" | "continuous" | "resistant"
   | "threaded" | "graduated" | "nonHierarchical" | "forceDriven"
-  | "lightFilled" | "monumental" | "compressed";
+  | "lightFilled" | "monumental" | "spatialDensity";
 
 export type MatrixGroup = "Formal / geometrical" | "Organizational / spatial" | "Experiential / atmospheric";
 
@@ -43,7 +45,7 @@ export const MATRIX: MatrixCriterion[] = [
   // EXPERIENTIAL / ATMOSPHERIC
   { key: "lightFilled", group: "Experiential / atmospheric", name: "Light-filled", qualitative: "Perceived brightness/quality of daylight at the void’s base.", quantitative: "Skylight area as a percentage of void floor area below it.", precedent: "Gilder Center’s oval skylights; Valley’s grotto skylights/reflecting pools." },
   { key: "monumental", group: "Experiential / atmospheric", name: "Monumental", qualitative: "Perceived significance communicated by scale.", quantitative: "Void height-to-width ratio, or void volume as a percentage of total building volume.", precedent: "Gilder Center’s five-story atrium." },
-  { key: "compressed", group: "Experiential / atmospheric", name: "Compressed-then-released", qualitative: "Perceived contrast between narrowest and widest moments.", quantitative: "Ratio of narrowest to widest passage width along the sequence.", precedent: "Gilder Center entrance to exhibit threshold." },
+  { key: "spatialDensity", group: "Experiential / atmospheric", name: "Spatial density", qualitative: "Perceived contrast between narrowest and widest moments.", quantitative: "Ratio of narrowest to widest passage width along the sequence.", precedent: "Gilder Center entrance to exhibit threshold." },
 ];
 
 export const MATRIX_KEYS: MatrixKey[] = MATRIX.map((m) => m.key);
