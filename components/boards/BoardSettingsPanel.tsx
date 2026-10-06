@@ -160,6 +160,18 @@ export function BoardSettingsPanel({ config, onChange, criteriaCount }: { config
           <span className="mb-1 block text-muted-foreground">Board name</span>
           <Input value={config.name} onChange={(e) => onChange({ name: e.target.value })} className="h-8 text-xs" />
         </label>
+        <div className="flex flex-wrap gap-1.5" aria-label="Page sizes">
+          {[
+            { w: 13.33, h: 7.5, label: "13.33 × 7.5" },
+            { w: 22, h: 11, label: "22 × 11 (11 × 22 landscape)" },
+            { w: 17, h: 11, label: "17 × 11" },
+            { w: 36, h: 24, label: "36 × 24" },
+          ].map((p) => (
+            <button key={p.label} type="button" onClick={() => onChange({ widthIn: p.w, heightIn: p.h })} className={`rounded-full border px-2 py-0.5 text-[10px] ${config.widthIn === p.w && config.heightIn === p.h ? "border-magenta/60 text-foreground" : "border-border text-muted-foreground hover:text-foreground"}`}>
+              {p.label}
+            </button>
+          ))}
+        </div>
         <SliderWithExactInput label="Width" value={config.widthIn} min={6} max={48} step={0.5} suffix="in" onChange={(widthIn) => onChange({ widthIn })} />
         <SliderWithExactInput label="Height" value={config.heightIn} min={6} max={48} step={0.5} suffix="in" onChange={(heightIn) => onChange({ heightIn })} />
         <p className="text-[10px] text-muted-foreground">

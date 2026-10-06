@@ -162,6 +162,7 @@ npm run lint       # eslint
 npx tsc --noEmit   # typecheck
 npm run check:parity   # lib/tiles agrees with the Grasshopper engine's own analysis on the 15 typology tiles
 npm run build      # production build
+npm run check:arrange / check:interlock / check:analysis   # no-browser regression checks (Arrange, shaped tiles that interlock, the Analysis against the matrix)
 ```
 
 ## Layout

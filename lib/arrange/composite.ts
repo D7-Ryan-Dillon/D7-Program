@@ -230,6 +230,7 @@ export async function compositeToTile(comp: Composite, boxes: PlacedBox[], opts:
 function nameRooms(tile: ParsedTile, comp: Composite, boxes: PlacedBox[], doc: ArrangementDoc): ParsedTile {
   if (!tile.spaces) return tile;
   const used = new Map<string, number>();
+  const roomCategory: Record<string, string> = {};
   const rooms = tile.spaces.rooms.map((r) => {
     const [cx, cy, cz] = r.centroid_ft;
     const x = Math.min(comp.grid[0] - 1, Math.max(0, Math.floor(cx / comp.cell)));
@@ -238,12 +239,13 @@ function nameRooms(tile: ParsedTile, comp: Composite, boxes: PlacedBox[], doc: A
     const k = comp.owner[(x * comp.grid[1] + y) * comp.grid[2] + z];
     const box = k >= 0 ? boxes[k] : null;
     if (!box) return r;
+    roomCategory[String(r.id)] = categoryOf(box.tile);
     const base = doc.names[box.piece.id] || box.tile.name;
     const n = (used.get(base) ?? 0) + 1;
     used.set(base, n);
     return { ...r, name: n === 1 ? base : `${base} (${n})` };
   });
-  return { ...tile, spaces: { ...tile.spaces, rooms } };
+  return { ...tile, meta: { ...tile.meta, roomCategory }, spaces: { ...tile.spaces, rooms } };
 }
 
 export const tileCategoryLabel = (t: ParsedTile) => categoryOf(t);

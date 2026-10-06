@@ -1,4 +1,7 @@
-// Reads a tile as a set of spaces against the twelve studio descriptors (Assignment 1's list, unchanged). Each one comes
+// Reads a tile as a set of spaces against the twelve descriptors of Assignment 1 Part 3's matrix (lib/scoring/matrix.ts holds the matrix word for word;
+// matrixEval.ts is the evaluation that follows it honestly, with a status and a method for every number). THIS file is the app's own 0-100 "presence index"
+// for each descriptor: a blend of what the voxels show, kept for the bars, the carry-forward and the older boards. It is not the matrix measurement
+// and is not shown as one. Each one comes
 // back with the same five things:
 //   score          0-100, for the bar and the project's carry-forward
 //   quant          a headline value with units, and the measures behind it, each with how it was measured
@@ -11,13 +14,19 @@
 // settings for the one descriptor that is about how the tile was made (Force-driven). See measures.ts.
 
 import { measuresFor, type Measures } from "@/lib/scoring/measures";
+import { DEFAULT_ASSUMPTIONS } from "@/lib/scoring/assumptions";
+import { matrixOf } from "@/lib/scoring/matrix";
+import { compressedFor } from "@/lib/scoring/compressed";
 import { clamp, coefficientOfVariation, normalize, triangular } from "@/lib/scoring/utils";
 import { cap, count, countWord, fix, ft, ft2, ft3, levelHeights, list, num, numberWord, pct, roomShort, sentence } from "@/lib/scoring/words";
 import type { ParsedTile } from "@/lib/types";
 
 export type DescriptorKey =
   | "carved" | "stepped" | "porous" | "continuous" | "resistant" | "threaded"
-  | "graduated" | "nonHierarchical" | "forceDriven" | "lightFilled" | "monumental" | "spatialDensity";
+  | "graduated" | "nonHierarchical" | "forceDriven" | "lightFilled" | "monumental" | "compressed";
+
+/** The reading kept beside the twelve, not among them. */
+export type SupplementalKey = "spatialDensity";
 
 export interface Driver {
   label: string;
@@ -47,7 +56,12 @@ export interface QualitativeReading {
 export interface Evidence {
   rooms?: number[];
   levels?: number[];
+  /** the tile's main route (the engine's shortest way between two faces) */
   route?: boolean;
+  /** a floor-supported route found for the matrix (tile coordinates, ft): drawn instead of the main route when present */
+  routePoints?: number[][];
+  /** boxes (tile coordinates, ft) to mark on plans and sections */
+  regions?: { min: number[]; max: number[] }[];
 }
 
 export interface DescriptorResult {
@@ -69,7 +83,7 @@ export interface DescriptorResult {
 }
 
 type Computed = Pick<DescriptorResult, "score" | "quant" | "qualitative" | "drivers" | "explanation" | "evidence"> & { approximate?: boolean };
-type Def = { key: DescriptorKey; label: string; compute: (m: Measures) => Computed };
+type Def = { key: DescriptorKey | SupplementalKey; label: string; compute: (m: Measures) => Computed };
 
 const d = (label: string, value: string, pts: number, weight: number): Driver => ({ label, value, pts: clamp(pts, 0, 100), weight });
 const blend = (ds: Driver[]) => {
@@ -653,6 +667,62 @@ const DEFS: Def[] = [
     },
   },
 
+  // ------------------------------------------------------------------------------------------------ Compressed-then-released
+  {
+    key: "compressed",
+    label: "Compressed-then-released",
+    compute: (m) => {
+      const r = compressedFor(m.tile, DEFAULT_ASSUMPTIONS);
+      if (!r.ok) {
+        return {
+          score: 0,
+          approximate: true,
+          quant: { headline: "no passage to read", headlineHow: "narrowest over widest clear passage width along a floor-supported route", supporting: [] },
+          qualitative: read(["not assessable"], 0, "needs a floor-supported route from an opening"),
+          drivers: [],
+          explanation: r.reason,
+          evidence: {},
+        };
+      }
+      const p = r.profile;
+      const contrast = 1 - p.ratio;
+      const both = p.releases > 0;
+      const drivers = [
+        d("Contrast of widths", `narrowest ${ft(p.narrowFt, 1)} against widest ${ft(p.wideFt, 1)} (${num(p.ratio, 2)})`, normalize(contrast * 100, 10, 70), 0.6),
+        d("A squeeze followed by a release", both ? `${count(p.releases, "release")}` : "no squeeze followed by a wider stretch", both ? 100 : 20, 0.4),
+      ];
+      const score = blend(drivers);
+      const idx = p.ratio >= 0.8 ? 0 : p.ratio >= 0.55 ? 1 : p.ratio >= 0.35 ? 2 : 3;
+      return {
+        score,
+        quant: {
+          headline: `narrowest ${ft(p.narrowFt, 1)} to widest ${ft(p.wideFt, 1)} (${num(p.ratio, 2)})`,
+          headlineHow: "smoothed clear width of the passage along a floor-supported route from a ground-level opening",
+          supporting: [
+            { label: "Route", value: ft(p.route.lengthFt), how: "floor-supported path from the entry to the destination" },
+            { label: "Typical width", value: ft(p.typicalFt, 1), how: "median of the smoothed widths" },
+            { label: "Constrictions", value: String(p.stretches.filter((x) => x.kind === "constriction").length), how: "stretches of 2 ft or more narrower than 0.6 of the typical width" },
+            { label: "Expansions", value: String(p.stretches.filter((x) => x.kind === "expansion").length), how: "stretches of 2 ft or more wider than 1.4 times the typical width" },
+          ],
+        },
+        qualitative: read(["uniform", "gently varied", "compressed then released", "sharply compressed then released"], idx, "by the narrowest-to-widest ratio: over 0.8, to 0.55, to 0.35, below"),
+        drivers,
+        explanation: sentence([
+          `Along a ${ft(p.route.lengthFt)} route from the entry, the clear passage runs from ${ft(p.narrowFt, 1)} at its narrowest to ${ft(p.wideFt, 1)} at its widest (${num(p.ratio, 2)}).`,
+          both ? `${cap(countWord(p.releases, "squeeze"))} is followed by a wider stretch.` : "No narrow stretch is followed by a clearly wider one.",
+        ]),
+        evidence: { routePoints: p.route.points },
+      };
+    },
+  },
+];
+
+/**
+ * Spatial density: how much the void's cross-section narrows along the main route. It is NOT one of the matrix's twelve descriptors (the matrix's
+ * twelfth is Compressed-then-released, measured on passage width along a floor-supported route); it is kept as an optional supplemental reading
+ * and is never mixed into the matrix results or their carry-forward.
+ */
+const SUPPLEMENTAL: Def[] = [
   // ------------------------------------------------------------------------------------------------ Spatial density
   {
     key: "spatialDensity",
@@ -710,16 +780,16 @@ const DEFS: Def[] = [
 ];
 
 /** Every descriptor's key and label, in canonical order (no tile needed). */
-export const DESCRIPTOR_META: { key: DescriptorKey; label: string }[] = DEFS.map(({ key, label }) => ({ key, label }));
+export const DESCRIPTOR_META: { key: DescriptorKey; label: string }[] = DEFS.map(({ key, label }) => ({ key: key as DescriptorKey, label: matrixOf(key)?.name ?? label }));
 
-export function scoreTile(tile: ParsedTile): DescriptorResult[] {
+function run(defs: Def[], tile: ParsedTile): DescriptorResult[] {
   const m = measuresFor(tile);
-  return DEFS.map((def) => {
+  return defs.map((def) => {
     const c = m ? def.compute(m) : noData(def.label.toLowerCase());
     const score = Math.round(clamp(c.score, 0, 100));
     return {
-      key: def.key,
-      label: def.label,
+      key: def.key as DescriptorKey,
+      label: matrixOf(def.key)?.name ?? def.label,
       ...c,
       score,
       quantValue: c.quant.headline,
@@ -728,5 +798,12 @@ export function scoreTile(tile: ParsedTile): DescriptorResult[] {
       verdictCriterion: c.qualitative.how,
     };
   });
+}
+
+export const scoreTile = (tile: ParsedTile): DescriptorResult[] => run(DEFS, tile);
+
+/** The supplemental readings (Spatial density), for a tile. */
+export function supplementalFor(tile: ParsedTile): DescriptorResult[] {
+  return run(SUPPLEMENTAL, tile).map((r) => ({ ...r, key: r.key as unknown as DescriptorKey }));
 }
 

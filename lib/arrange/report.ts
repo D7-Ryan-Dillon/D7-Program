@@ -21,6 +21,8 @@ export interface ReportInput {
   joints: Joint[];
   warnings: ArrangeWarning[];
   names: (id: string) => string;
+  /** the matrix measurements of the whole (the same evaluation the Analysis tab shows): printed in the descriptors section instead of the older 0-100 bars */
+  matrix?: { name: string; headline: string; status: string }[];
   palette?: Palette;
 }
 
@@ -138,7 +140,22 @@ function paint(ctx: CanvasRenderingContext2D, inp: ReportInput, P: Palette, W: n
     });
   let dy = top;
   if (s) {
-    heading("DESCRIPTORS", Math.round(520 * u), dy, Math.round(640 * u));
+    heading(inp.matrix ? "THE MATRIX, MEASURED" : "DESCRIPTORS", Math.round(520 * u), dy, Math.round(640 * u));
+    if (inp.matrix) {
+      // the twelve descriptors, each with its measurement and how it was obtained (not 0-100 scores)
+      const rows = Math.ceil(inp.matrix.length / 2);
+      const cw = Math.round(310 * u);
+      inp.matrix.forEach((m, i) => {
+        const col = i < rows ? 0 : 1;
+        const row = i % rows;
+        const x = Math.round(520 * u) + col * (cw + 14);
+        const yy = top + 36 + row * 62;
+        drawBlock(ctx, m.name, x, yy, cw, 16, { max: 13, min: 8, maxLines: 1, color: P.muted });
+        const h1 = drawBlock(ctx, m.headline, x, yy + 17, cw, 30, { max: 12, min: 8, maxLines: 2, color: P.text });
+        drawBlock(ctx, m.status.toUpperCase(), x, yy + 19 + h1, cw, 12, { max: 9, min: 7, maxLines: 1, color: m.status === "measured" ? P.good : P.warn });
+      });
+      dy = top + 36 + rows * 62;
+    } else {
     const rows = Math.ceil(s.descriptors.length / 2);
     s.descriptors.forEach((d, i) => {
       const col = i < rows ? 0 : 1;
@@ -155,6 +172,7 @@ function paint(ctx: CanvasRenderingContext2D, inp: ReportInput, P: Palette, W: n
       drawBlock(ctx, String(d.score), x + Math.round(262 * u), yy, 40, 20, { max: 14, min: 9, color: P.text, align: "right" });
     });
     dy = top + 36 + rows * 40;
+    }
   }
   let fy = top;
   const fx = Math.round(1220 * u);

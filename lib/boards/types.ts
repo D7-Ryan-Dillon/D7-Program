@@ -229,6 +229,8 @@ export interface BoardConfig {
   /** Which descriptors page 2 lists, in order -- the project's carried-forward
    * criteria. Not persisted with the board (set from the project); null = all. */
   descriptorKeys?: string[] | null;
+  /** What page 2 prints under a descriptor's bar, by tile and descriptor: the matrix measurement with its status (set from the evaluation, so the board, the Analysis tab and the exports say the same). Not persisted. */
+  descriptorText?: Record<string, Record<string, string>>;
 }
 
 export const DPI = 300;

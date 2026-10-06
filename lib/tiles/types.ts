@@ -198,6 +198,8 @@ export interface TileMeta {
   typology?: string;
   variant?: string;
   slot?: number;
+  /** an assembly: the program category of the tile each room came from, by room id (so public program above ground can be counted) */
+  roomCategory?: Record<string, string>;
 }
 
 /** Everything lib/tiles/analyze.ts returns for one tile: the spaces, the structure, and the room each void cell belongs to. */

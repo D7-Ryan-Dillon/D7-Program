@@ -4,14 +4,18 @@ import { useMemo, useState } from "react";
 import { useProject, useProjectUi } from "@/lib/project-store";
 import { usePresets } from "@/lib/presets";
 import { newLinkHub, type CameraLink } from "@/lib/cameraLink";
-import { useCriteria } from "@/lib/useCriteria";
-import { scoreTileCached } from "@/lib/scoring/selection";
-import { compareSentence } from "@/lib/scoring/compare";
-import type { DescriptorKey, DescriptorResult } from "@/lib/scoring/descriptors";
+import { useEvaluation } from "@/lib/useEvaluation";
+import { compareMatrix } from "@/lib/scoring/compare";
+import type { Evidence } from "@/lib/scoring/descriptors";
+import { interpretationFor } from "@/lib/scoring/profile";
+import { MATRIX, type MatrixGroup } from "@/lib/scoring/matrix";
 import { ResultsPanel } from "@/components/analysis/ResultsPanel";
 import { UploadZone } from "@/components/viewer/UploadZone";
-import { DescriptorCard } from "@/components/analysis/DescriptorCard";
+import { MatrixCard } from "@/components/analysis/MatrixCard";
 import { CriteriaPanel } from "@/components/analysis/CriteriaPanel";
+import { SettingsPanel } from "@/components/analysis/SettingsPanel";
+import { UsablePanel } from "@/components/analysis/UsablePanel";
+import { VariantsPanel } from "@/components/analysis/VariantsPanel";
 import { PresetBar } from "@/components/shared/PresetBar";
 import { Segmented } from "@/components/shared/Segmented";
 import { Section } from "@/components/shared/Section";
@@ -48,11 +52,12 @@ export function AnalysisTab() {
   const { mode, count, match } = ui;
   const single = useMemo(() => normalizeAnalysisPane(ui.single), [ui.single]);
   const panes = useMemo(() => ui.panes.map(normalizeAnalysisPane), [ui.panes]);
-  const { keys: carriedKeys } = useCriteria();
+  const ev = useEvaluation();
+  const { keys: carriedKeys, profile, actions } = ev;
   /** Which card's evidence the views are lighting (pane 0 is the single viewport). */
-  const [evidence, setEvidence] = useState<{ pane: number; key: DescriptorKey } | null>(null);
-  const toggleEvidence = (pane: number, key: DescriptorKey) => setEvidence((prev) => (prev && prev.pane === pane && prev.key === key ? null : { pane, key }));
-  const evidenceOf = (pane: number, rs: DescriptorResult[]) => (evidence && evidence.pane === pane ? rs.find((r) => r.key === evidence.key)?.evidence : undefined);
+  const [evidence, setEvidence] = useState<{ pane: number; key: string; ev: Evidence } | null>(null);
+  const toggleEvidence = (pane: number, key: string, e: Evidence) => setEvidence((prev) => (prev && prev.pane === pane && prev.key === key ? null : { pane, key, ev: e }));
+  const evidenceOf = (pane: number): Evidence | undefined => (evidence && evidence.pane === pane ? evidence.ev : undefined);
   const presets = usePresets<ComparePresetData>("compare");
   const [hub] = useState(newLinkHub);
 
@@ -60,9 +65,22 @@ export function AnalysisTab() {
   const compareTile = (i: number): ParsedTile | undefined => tiles.find((t) => t.id === panes[i].tileId) ?? tiles[(activeIndex + i) % Math.max(tiles.length, 1)];
   const compareTiles = [0, 1, 2].slice(0, count).map(compareTile);
 
-  const results = useMemo(() => (activeTile ? scoreTileCached(activeTile) : []), [activeTile]);
-  // scoreTileCached memoizes per tile, so this is cheap to redo on every render.
-  const compareResults = compareTiles.map((t) => (t ? scoreTileCached(t) : []));
+  // the tile on screen is read at once (evaluations are cached per tile and settings, so this is cheap to redo on every render)
+  const evaluation = useMemo(() => (activeTile ? ev.evaluate(activeTile) : null), [activeTile, ev]);
+  const results = evaluation?.results ?? [];
+  const compareResults = compareTiles.map((t) => (t ? ev.evaluate(t).results : []));
+  const cardFor = (tile: ParsedTile, r: (typeof results)[number], pane: number, mark: "high" | "low" | null = null) => (
+    <MatrixCard
+      key={`${tile.id}-${r.key}`}
+      result={r}
+      carried={carriedKeys.includes(r.key)}
+      mark={mark}
+      evidenceOn={evidence?.pane === pane && evidence.key === r.key}
+      onEvidence={() => toggleEvidence(pane, r.key, r.evidence)}
+      interpretation={interpretationFor(profile, tile.id, r)}
+      onInterpretation={(text) => actions.setInterpretation(tile.id, r.key, text)}
+    />
+  );
 
   const patchSingle = (patch: Partial<PaneState>) => setUi((prev) => ({ ...prev, single: { ...normalizeAnalysisPane(prev.single), ...patch } }));
   /** One setting copied onto every compared viewport. */
@@ -137,26 +155,51 @@ export function AnalysisTab() {
           {/* The tile you are reading stays in view: pinned to the top on narrow screens, beside the cards on wide ones. */}
           <div className="sticky top-0 z-20 self-start bg-background/95 pb-2 lg:top-0">
             <div className="h-[44vh] w-full lg:h-[min(64vh,560px)]">
-              <TilePane tile={activeTile} pane={single} onPane={patchSingle} emphasis={evidenceOf(0, results)} />
+              <TilePane tile={activeTile} pane={single} onPane={patchSingle} emphasis={evidenceOf(0)} />
             </div>
           </div>
           <div className="min-w-0">
             <div className="mb-3">
               <div className="text-base font-medium">{activeTile.name}</div>
-              <div className="font-mono text-[11px] text-muted-foreground">scored against all twelve studio descriptors · id {activeTile.id}</div>
+              <div className="font-mono text-[11px] text-muted-foreground">read against the matrix&apos;s twelve descriptors, automatically · id {activeTile.id}</div>
             </div>
             <div className="glass-panel rounded-lg">
               <Section id="analysis.descriptors" title={`Descriptors (${results.length})`} summary={`${carriedKeys.length} carried`}>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {results.map((r) => (
-                    <DescriptorCard key={r.key} result={r} carried={carriedKeys.includes(r.key)} evidenceOn={evidence?.pane === 0 && evidence.key === r.key} onEvidence={() => toggleEvidence(0, r.key)} />
-                  ))}
-                </div>
+                {(["Formal / geometrical", "Organizational / spatial", "Experiential / atmospheric"] as MatrixGroup[]).map((g) => (
+                  <div key={g} className="space-y-2">
+                    <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">{g}</div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{results.filter((r) => r.criterion.group === g).map((r) => cardFor(activeTile, r, 0))}</div>
+                  </div>
+                ))}
+                {evaluation && evaluation.supplemental.length > 0 && (
+                  <details className="rounded-md border-hair px-3 py-2 text-xs">
+                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Supplemental reading (not one of the matrix&apos;s twelve): Spatial density</summary>
+                    <div className="mt-2 space-y-1 text-muted-foreground">
+                      {evaluation.supplemental.map((s) => (
+                        <div key={s.label}>
+                          <div className="font-mono text-foreground">{s.quant.headline}</div>
+                          <div>{s.explanation}</div>
+                          <div className="text-[10px]">The older 0-100 index for it was {s.score}. It is kept as a measurement of the void&apos;s cross-section along its main route; it is not the matrix&apos;s Compressed-then-released, and it is not used to choose criteria.</div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </Section>
             </div>
           </div>
         </div>
+        {evaluation && (
+          <UsablePanel
+            usable={evaluation.usable}
+            name={activeTile.name}
+            showing={evidence?.pane === 0 && evidence.key.startsWith("usable:") ? evidence.key.slice(7) : null}
+            onShow={(e, what) => setEvidence(e ? { pane: 0, key: `usable:${what}`, ev: e } : null)}
+          />
+        )}
         <CriteriaPanel />
+        <VariantsPanel />
+        <SettingsPanel tile={activeTile} />
         <ResultsPanel tiles={tiles} keys={carriedKeys} activeTile={activeTile} />
       </div>
     );
@@ -198,7 +241,7 @@ export function AnalysisTab() {
                 link={linkFor(i)}
                 compact
                 onApplyAll={applyAll}
-                emphasis={evidenceOf(i, compareResults[i])}
+                emphasis={evidenceOf(i)}
               />
             </div>
           ) : null,
@@ -207,31 +250,22 @@ export function AnalysisTab() {
 
       <div className="glass-panel rounded-lg">
       <Section id="analysis.compare" title={`Descriptors (${(compareResults[0] ?? []).length})`} summary={`${carriedKeys.length} carried`}>
+      <p className="mb-2 text-[11px] text-muted-foreground">Every tile is read with the same criteria and assumptions. Raw values come first, with how each was obtained; nothing is ranked.</p>
       <div className="space-y-3">
-        {(compareResults[0] ?? []).map((_, d) => {
+        {MATRIX.map((crit, d) => {
           const row = compareResults.map((r) => r[d]).filter(Boolean);
-          const scores = row.map((r) => r.score);
-          const spread = scores.length > 1 ? Math.max(...scores) - Math.min(...scores) : 0;
-          const hi = scores.indexOf(Math.max(...scores));
-          const lo = scores.indexOf(Math.min(...scores));
+          if (!row.length) return null;
           return (
-            <div key={row[0].key} className={`grid grid-cols-1 gap-3 ${rowCols}`}>
+            <div key={crit.key} className={`grid grid-cols-1 gap-3 ${rowCols}`}>
               {row.map((r, i) => (
                 <div key={i} className={i === 2 ? "max-xl:hidden" : ""}>
                   <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-muted-foreground md:hidden">{compareTiles[i]?.name}</div>
-                  <DescriptorCard
-                    result={r}
-                    carried={carriedKeys.includes(r.key)}
-                    mark={spread >= 25 && i === hi ? "high" : spread >= 25 && i === lo ? "low" : null}
-                    spread={spread}
-                    evidenceOn={evidence?.pane === i && evidence.key === r.key}
-                    onEvidence={() => toggleEvidence(i, r.key)}
-                  />
+                  {compareTiles[i] && cardFor(compareTiles[i]!, r, i)}
                 </div>
               ))}
               {row.length > 1 && (
                 <p className="text-xs leading-relaxed text-muted-foreground md:col-span-full">
-                  {compareSentence(row.map((r, i) => ({ tile: compareTiles[i]!, result: r })).filter((e) => e.tile))}
+                  {compareMatrix(row.map((r, i) => ({ tile: compareTiles[i]!, result: r })).filter((e) => e.tile))}
                 </p>
               )}
             </div>
@@ -243,6 +277,8 @@ export function AnalysisTab() {
       </div>
 
       <CriteriaPanel />
+      <VariantsPanel />
+      <SettingsPanel tile={activeTile} />
       <ResultsPanel tiles={tiles} keys={carriedKeys} activeTile={activeTile} />
     </div>
   );

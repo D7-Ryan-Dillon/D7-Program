@@ -9,7 +9,8 @@
     "lint": "eslint",
     "check:parity": "tsx scripts/check-parity.ts",
     "check:arrange": "tsx scripts/check-arrange.ts",
-    "check:interlock": "tsx scripts/check-interlock.ts"
+    "check:interlock": "tsx scripts/check-interlock.ts",
+    "check:analysis": "tsx scripts/check-analysis.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

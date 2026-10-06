@@ -490,9 +490,9 @@ function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile:
       ctx.font = `${small}px "${config.fontFamily}"`;
       ctx.fillStyle = `${color}b3`;
       ctx.textBaseline = "top";
-      let text = r.quant.headline;
+      let text = config.descriptorText?.[tile.id]?.[r.key] ?? r.quant.headline;
       while (text.length > 4 && ctx.measureText(text).width > labelMaxWidth) text = text.slice(0, -2);
-      ctx.fillText(text === r.quant.headline ? text : `${text.trimEnd()}…`, descX + padding, textY);
+      ctx.fillText(text === (config.descriptorText?.[tile.id]?.[r.key] ?? r.quant.headline) ? text : `${text.trimEnd()}…`, descX + padding, textY);
     }
   });
 }

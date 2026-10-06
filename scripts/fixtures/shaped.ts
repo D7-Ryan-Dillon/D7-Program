@@ -198,3 +198,48 @@ export function pocket(id = "pocket"): ParsedTile {
   door(v, 0, 0, 0, W, 6, FLOOR, DOOR_H, 6);
   return tileOf({ id, category: "gathering", typology: "doorway into a closet" }, v);
 }
+
+/** corridor: 40 ft long, 12 ft wide, 10 ft tall: a 4 ft passage, then a 2 ft neck, then a 10 ft chamber, entered at one end. For reading passage widths. */
+export function corridor(id = "corridor", category: Spec["category"] = "gathering"): ParsedTile {
+  const v = vox(80, 24, 20);
+  solid(v, [0, 0, 0, 80, 24, 20]);
+  const mid = 12;
+  const band = (x0: number, x1: number, width: number) => carve(v, [x0, mid - width / 2, FLOOR, x1, mid + width / 2, 18]);
+  band(2, 26, 8);
+  band(26, 38, 4);
+  band(38, 78, 20);
+  solid(v, [0, 0, 0, 80, 24, FLOOR], 1);
+  carve(v, [0, 8, FLOOR, W, 16, FLOOR + DOOR_H]); // the way in, at the end
+  return tileOf({ id, category, typology: "passage, neck and chamber" }, v);
+}
+
+/** skylit: a 10 ft cube with a doorway and an opening in its roof (an unglazed hole to the sky). */
+export function skylit(id = "skylit", category: Spec["category"] = "gathering"): ParsedTile {
+  const v = vox(20, 20, 20);
+  solid(v, [0, 0, 0, 20, 20, 20]);
+  carve(v, [W, W, FLOOR, 20 - W, 20 - W, 20 - W]);
+  solid(v, [0, 0, 0, 20, 20, FLOOR], 1);
+  carve(v, [6, 6, 18, 14, 14, 20]); // the roof opening
+  door(v, 0, 0, 0, W, 6, FLOOR);
+  return tileOf({ id, category, typology: "room with a roof opening" }, v);
+}
+
+/** closed: a room with no opening at all: nobody can come in. */
+export function closed(id = "closed", category: Spec["category"] = "office"): ParsedTile {
+  const v = vox(20, 20, 20);
+  solid(v, [0, 0, 0, 20, 20, 20]);
+  carve(v, [W, W, FLOOR, 20 - W, 20 - W, 20 - W]);
+  solid(v, [0, 0, 0, 20, 20, FLOOR], 1);
+  return tileOf({ id, category, typology: "sealed room" }, v);
+}
+
+/** the L again with its notch filled with foam and no mask (the container is the whole box): the denominators must differ from the real L. */
+export function Lfilled(id = "L_filled"): ParsedTile {
+  const t = L(id, "gathering", false);
+  const v = { ...t.voxels };
+  const n = 40 * 40 * 20;
+  const vd = new Uint8Array(n);
+  const mask = t.voxels.mask!;
+  for (let i = 0; i < n; i++) vd[i] = mask[i] && t.voxels.void![i] ? 1 : 0;
+  return { ...t, voxels: { void: vd, plates: v.plates }, spaces: undefined, structure: undefined } as ParsedTile;
+}

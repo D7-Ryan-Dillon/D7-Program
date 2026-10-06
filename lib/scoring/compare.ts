@@ -31,3 +31,23 @@ export function compareSentence(entries: { tile: ParsedTile; result: DescriptorR
   }
   return `${say(hi)}; ${say(lo)}.${driver && best >= 20 ? ` The difference comes mostly from ${driver.label.toLowerCase()}: ${driver.hi} against ${driver.lo}.` : ""}`;
 }
+
+/**
+ * The sentence a Compare row adds under a descriptor, from the matrix measurements: each tile's own value with its status, and where they differ the
+ * difference in the measure itself. It does not say which is "better": that depends on what the typology is about.
+ */
+export function compareMatrix(entries: { tile: ParsedTile; result: import("@/lib/scoring/matrixEval").MatrixResult }[]): string {
+  if (entries.length < 2) return "";
+  const say = (e: (typeof entries)[number]) => `${shortName(e.tile)}: ${e.result.measure.headline}${e.result.measure.status === "measured" ? "" : ` (${e.result.measure.status === "unavailable" ? "not assessable" : e.result.measure.status})`}`;
+  const vals = entries.map((e) => e.result.measure.value);
+  const real = vals.filter((v): v is number => v !== null);
+  const note =
+    real.length < entries.length
+      ? " Not every tile can be assessed on this criterion, so the rest are not compared with it."
+      : real.length >= 2 && Math.max(...real) - Math.min(...real) < 1e-9
+        ? " The values are the same."
+        : real.length >= 2
+          ? ` The difference is ${Math.round((Math.max(...real) - Math.min(...real)) * 100) / 100} ${entries[0].result.measure.unit.split(" (")[0]}.`
+          : "";
+  return `${entries.map(say).join("; ")}.${note}`;
+}

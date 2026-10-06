@@ -268,36 +268,8 @@ GLB is stored -- opening one re-lofts from the stored traces.
   `max-lg:sticky max-lg:top-0` inside the tab's scroll container, with heights
   capped around 30-38vh; from `lg` up nothing changes.
 
-### Analysis (`components/analysis/`, `lib/scoring/`)
-Scores the active tile against the 12 studio descriptors, works identically
-regardless of which tab produced the tile. The tab has a Single view (an
-auto-rotating axo viewport beside the cards) and a Compare view (2 columns, a
-3rd shown from `xl` up; per-descriptor rows are aligned and the highest/lowest
-tile is marked when the tiles differ by >= 25 points).
-
-**What a descriptor is now** (`lib/scoring/descriptors.ts`, `measures.ts`, `words.ts`): every descriptor reads the tile's spaces (`tile.spaces`,
-`tile.structure`) and returns a score, a `quant` block (headline + measures with how each was measured), a `qualitative` reading on a named scale, `drivers`
-(factor, value, how well it did, weight), an `explanation` (one or two sentences about this tile's spaces, built from the data, never canned) and
-`evidence` (rooms / levels / route, lit by the Evidence button). The old compat fields (`quantValue`, `verdict`, ...) are still set for the Boards
-descriptor page. Calibrated for mostly-eroded tiles (Carved peaks at 58% void); there is no old-calibration switch. `compare.ts` writes the Compare
-sentence, `exportResults.ts` the results table (CSV / image) and the annotated diagrams.
-
-**Criteria carry-forward** (`lib/scoring/selection.ts`, `lib/useCriteria.ts`,
-`CriteriaPanel.tsx`): for the project's own tiles, picks the 6-12 strongest
-descriptors -- spread across tiles (what separates them), measured not inferred
-(`approximate` is penalised), low overlap with ones already picked
-(correlation, only trusted with >= 6 tiles), greedy. Editable: swap/add/remove
-(never below 6), per-criterion pin (Always on / Auto / Always off), and a short
-generated reason per carried (and set-aside) descriptor that you can overwrite.
-Untouched selections re-pick themselves as tiles change; hand-edited ones stay
-(a "Refresh suggestion" button re-picks). The metric list is whatever
-`scoreTile` returns (`DESCRIPTOR_META`), so new architectural descriptors
-slot in without changing the selector. The Boards descriptor page lists only
-the carried criteria (`BoardConfig.descriptorKeys`, injected at render time,
-never stored in the board). `lib/scoring/primitives.ts`
-computes ~20 architectural measures (branching, porosity, compression,
-layering, floor levels, etc.) from the raw tile data; `lib/scoring/
-descriptors.ts` blends those into the 12 named scores.
+### Analysis (`components/analysis/`, `lib/scoring/`) -- rebuilt against the matrix 2026-10
+The authority is Assignment 1 Part 3's matrix, word for word (`lib/scoring/matrix.ts`); **`docs/ANALYSIS.md`** is the full description. In short: `matrixEval.ts` `evaluateTile` reads a tile or assembly against the twelve descriptors automatically and honestly (value with unit, a status of measured / inferred / proxy / assumed / not assessable, the method, what it cannot establish, a generated reading, evidence); `voxelFacts.ts` reads the container's cells (a shaped container's notch is air, never in a denominator) and finds floor-supported routes; `compressed.ts` the passage widths; `usable.ts` reachable against carved space (Arrange's walkable thresholds); `profile.ts` + `lib/useEvaluation.ts` the shared evaluation profile (criteria suggested automatically with no minimum, adopted at once, a changed suggestion shown and adopted with one click, optional restorable overrides saved in the project row `evaluation`; the old `criteria` row is migrated, not converted); `compareSet.ts` variants of a typology and a pick only where the evidence supports one. Spatial density is no longer a descriptor (the twelfth is Compressed-then-released); it is a supplemental reading, and the app's older 0-100 index is a small labelled "presence index". The Analysis tab, the Boards descriptor page (`BoardConfig.descriptorText`), the **Analysis sheets** (`lib/boards/analysisSheets.ts`, 22 × 11 in landscape on black, Boards → Export), the results table / diagrams (`exportResults.ts`) and the arrangement report read the same results. `npm run check:analysis` is the test; `scripts/render-analysis.ts` draws the exports in node.
 
 ### Arrange (`components/arrange/`, `lib/arrange/`) -- rebuilt 2026-10-05
 One connected, walkable building composed from the tiles, judged as

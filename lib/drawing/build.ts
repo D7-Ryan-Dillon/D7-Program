@@ -27,6 +27,10 @@ export interface DrawingHighlight {
   rooms?: number[];
   levels?: number[];
   route?: boolean;
+  /** a floor-supported route (tile coordinates, ft): drawn instead of the main route */
+  routePoints?: number[][];
+  /** boxes to mark (tile coordinates, ft): problem areas, constrictions */
+  regions?: { min: number[]; max: number[] }[];
 }
 
 export interface DrawingLabel {
@@ -166,8 +170,22 @@ export function buildDrawing(tile: ParsedTile, spec: DrawingSpec, highlight?: Dr
       : [];
   let route: number[][] | null = null;
   const main = tile.spaces?.main_route;
-  if (spec.kind === "plan" && main && highlight?.route) route = main.points_ft.map((p) => [p[0], p[1]]);
-  if (spec.kind === "section" && main && highlight?.route) route = main.points_ft.map((p) => [spec.axis === "x" ? p[1] : p[0], p[2]]);
+  const line = highlight?.routePoints?.length ? highlight.routePoints : main && highlight?.route ? main.points_ft : null;
+  if (spec.kind === "plan" && line) route = line.map((p) => [p[0], p[1]]);
+  if (spec.kind === "section" && line) route = line.map((p) => [spec.axis === "x" ? p[1] : p[0], p[2]]);
+  // regions (a constriction, a floor with no way to it): a box on a plan, the box seen across the section's line on a section
+  if (highlight?.regions?.length) {
+    const near = (lo: number, hi: number, at: number) => at >= lo - 2 && at <= hi + 2;
+    for (const r of highlight.regions) {
+      if (spec.kind === "plan") emphasis = [...emphasis, [[r.min[0], r.min[1]], [r.max[0], r.min[1]], [r.max[0], r.max[1]], [r.min[0], r.max[1]]]];
+      else {
+        const k = spec.axis === "x" ? 0 : 1;
+        if (!near(r.min[k], r.max[k], spec.positionFt ?? 0)) continue;
+        const u = spec.axis === "x" ? 1 : 0;
+        emphasis = [...emphasis, [[r.min[u], r.min[2]], [r.max[u], r.min[2]], [r.max[u], r.max[2]], [r.min[u], r.max[2]]]];
+      }
+    }
+  }
 
   const posText = spec.kind === "section" ? `${spec.axis!.toUpperCase()} = ${(spec.positionFt ?? widthFt / 2).toFixed(1)} ft` : level ? `${level.name}, cut at ${(level.z_ft + PLAN_CUT_FT).toFixed(1)} ft` : `cut at ${(spec.cutFt ?? 0).toFixed(1)} ft`;
   return {

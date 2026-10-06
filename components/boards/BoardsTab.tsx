@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import { useProject, useProjectUi } from "@/lib/project-store";
 import { useShortcuts } from "@/lib/shortcuts";
 import { usePresets } from "@/lib/presets";
-import { useCriteria } from "@/lib/useCriteria";
+import { useEvaluation } from "@/lib/useEvaluation";
+import { descriptorText as textOf } from "@/lib/scoring/boardText";
+import { AnalysisSheetsPanel } from "./AnalysisSheetsPanel";
 import { mergeDefaults } from "@/lib/mergeDefaults";
 import { GlowPanel } from "@/components/shared/GlowPanel";
 import { PresetBar } from "@/components/shared/PresetBar";
@@ -46,7 +48,7 @@ export function BoardsTab() {
   const { tiles } = useProject();
   const [ui, setUi] = useProjectUi<BoardsUi>("boards", defaultBoardsUi);
   const { config, previewPage } = ui;
-  const criteria = useCriteria();
+  const criteria = useEvaluation();
   const boardPresets = usePresets<BoardPresetData>("boards");
   const [presetWithTiles, setPresetWithTiles] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -63,7 +65,9 @@ export function BoardsTab() {
   // What gets drawn: the saved board plus the project's carried-forward
   // criteria (which the descriptor page lists) -- the criteria belong to the
   // project, not to any one board, so they are never stored in `config`.
-  const renderConfig = useMemo<BoardConfig>(() => ({ ...config, descriptorKeys: criteria.keys }), [config, criteria.keys]);
+  // The text under each descriptor's bar comes from the same evaluation as the Analysis tab: the measurement with its unit, and its status when it is not a plain measurement.
+  const descriptorText = useMemo(() => textOf(criteria.evals), [criteria.evals]);
+  const renderConfig = useMemo<BoardConfig>(() => ({ ...config, descriptorKeys: criteria.keys, descriptorText }), [config, criteria.keys, descriptorText]);
 
   useEffect(() => {
     const el = previewAreaRef.current;
@@ -321,6 +325,7 @@ export function BoardsTab() {
               <p className="text-[10px] text-muted-foreground">Width is set below; the height follows the page size ({config.widthIn} × {config.heightIn} in, changed under Board settings → Page).</p>
               <AnimatedExportPanel config={renderConfig} tileById={tileById} onChange={patchAnimation} onBusyChange={setAnimBusy} />
             </div>
+            <AnalysisSheetsPanel config={config} dpiFromBoard={exportDpi} />
           </div>
         </DialogContent>
       </Dialog>

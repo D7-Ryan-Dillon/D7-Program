@@ -32,6 +32,8 @@ import { buildRhinoZip } from "@/lib/arrange/exportRhino";
 import { buildReport } from "@/lib/arrange/report";
 import { applyTourLook, capturePosePng, createPoseAnimation, toScene, type PoseFt } from "@/lib/arrange/capture";
 import { findViews } from "@/lib/arrange/views";
+import { evaluateTile } from "@/lib/scoring/matrixEval";
+import { STATUS_LABEL } from "@/lib/scoring/matrix";
 import type { Vec3 } from "@/lib/arrange/types";
 import { planDrone, type DronePlan } from "@/lib/arrange/drone";
 import { namesFor } from "@/lib/arrange/whole";
@@ -326,7 +328,9 @@ export function ExportDialog({ open, onOpenChange, onPreviewTour }: { open: bool
         const pw = Math.min(3600, Math.max(600, Math.round(rep.width * 0.5)));
         const picture = h && pose ? await capturePosePng(h, pose, { width: pw, height: Math.round(pw * 0.62), background: "#000000" }) : null;
         const seq = A.sequence.steps.map((s) => ({ name: A.nameOf(s.pieceId), category: CATEGORY_LABEL[categoryOf(A.layout.byId.get(s.pieceId)!.tile)], score: s.joint?.score ?? null }));
-        return [{ name: `${name}_report.png`, blob: await buildReport({ widthPx: rep.width, heightPx: rep.autoH ? undefined : rep.height, title: A.ui.currentName, picture, summary: A.whole.summary, sequence: seq, joints: A.joints, warnings: A.warnings, names: A.nameOf, palette }) }];
+        // the descriptors are the matrix's, measured on the assembly as a tile (the same evaluation as the Analysis tab)
+        const matrix = evaluateTile(await buildTile()).results.map((r) => ({ name: r.criterion.name, headline: r.measure.headline, status: STATUS_LABEL[r.measure.status] }));
+        return [{ name: `${name}_report.png`, blob: await buildReport({ widthPx: rep.width, heightPx: rep.autoH ? undefined : rep.height, title: A.ui.currentName, picture, summary: A.whole.summary, sequence: seq, joints: A.joints, warnings: A.warnings, names: A.nameOf, matrix, palette }) }];
       }
       case "png": {
         if (!h || !pose) throw new Error("The viewport isn't ready yet.");
