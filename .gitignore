@@ -45,3 +45,6 @@ next-env.d.ts
 /public/sample-tile-temp/
 /public/sample-tiles-temp/
 /erosion-workspace/
+
+# the packaged V4 tile set (zips, ~100 MB): rebuilt by engine/tiles/v4/package.py
+/engine/tiles/v4/package/

@@ -162,7 +162,8 @@ npm run lint       # eslint
 npx tsc --noEmit   # typecheck
 npm run check:parity   # lib/tiles agrees with the Grasshopper engine's own analysis on the 15 typology tiles
 npm run build      # production build
-npm run check:arrange / check:interlock / check:analysis   # no-browser regression checks (Arrange, shaped tiles that interlock, the Analysis against the matrix)
+npm run check:arrange / check:interlock / check:analysis   # no-browser regression checks (Arrange, shaped tiles that interlock, the Analysis against the matrix and the one walking model)
+npm run check:v4       # assembly evidence for the V4 tile set: all pairs, repeat / mirror / shift in 2, 4, 8, nesting, Auto Generate, vertical meetings (writes pictures)
 ```
 
 ## Layout
@@ -182,6 +183,7 @@ lib/
   tiles/                  How a tile is read from its voxels (levels, rooms, routes, light, structure, plates): the ONE shared pipeline
   drawing/                Plan and section drawings (canvas + SVG), used by the Viewer, Boards, Analysis and the exports
   scoring/                The 12-descriptor scoring (measures, drivers, sentences, results exports)
+  walking.ts              The ONE walking model (what can be stood on, what is a step, what is a zone; editable rules) read by Arrange and Analysis alike
   arrange/                Placement and collisions by occupied cells (shaped tiles nest), snapping, joints, walkable routes, layout (the connected rule), generator, composite model, smoothing, views (Arrange tab)
   sections/               Photo -> trace -> lofted volume -> ParsedTile (Sections tab)
   boards/                 Grid layout, frame shape, text fitting, canvas export, GIF/MP4 turntable export (Boards tab)

@@ -446,11 +446,24 @@ async function engineOutput() {
   console.log(`  engine output: the L exported by erosion_engine_7.py holds ${o.inside} cells, ${o.voidCells} carved; it nests with a block, orients, composes and round-trips like the fixtures`);
 }
 
+// ---- 12. two joints of one layout that share a plane, neighbours and cell count are still two joints ------------------------------------------------------------------
+// (a 2 x 2 of one tile: the joints between the far pieces have the same plane, the same near pieces and the same size as the first pair's. The joint cache once keyed on those alone and
+// handed the second pair the first pair's crossings, naming the wrong pieces: the far corner of a 2 x 2 was reported unreachable although both of its doors were open.)
+function sameTileJoints() {
+  const doc = docOf([{ tile: tCube, at: [0, 0, 0] }, { tile: tCube, at: [10, 0, 0] }, { tile: tCube, at: [0, 10, 0] }, { tile: tCube, at: [10, 10, 0] }]);
+  const l = lay(doc);
+  ok(l.joints.length === 4, `a 2 x 2 of cubes has ${l.joints.length} joints, expected 4`);
+  for (const j of l.joints) ok(j.connect.crossings.length > 0 && j.connect.crossings.every((x) => [j.aId, j.bId].includes(x.aId) && [j.aId, j.bId].includes(x.bId)), `joint ${j.id} carries crossings of other pieces: ${j.connect.crossings.map((x) => x.aId + "~" + x.bId).join(", ")}`);
+  ok(l.unreachable.length === 0 && l.reach.size === 4 && [...l.reach.values()].every((r) => r.main), "the far corner of a 2 x 2 of one tile is not reachable although every joint is open");
+  console.log("  a 2 x 2 of one tile: four joints, each carries its own pair's crossings, every piece reachable");
+}
+
 void WALK;
 (async () => {
   await roundTrips();
   await engineOutput();
   helpers();
+  sameTileJoints();
   generation();
   console.log(`  pictures written to ${out}`);
   console.log(failures ? `\n${failures} interlock check(s) failed` : "\nAll interlock checks passed");

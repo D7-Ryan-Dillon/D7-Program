@@ -317,7 +317,9 @@ export function jointFromContacts(contacts: Contact[], all: PlacedBox[], connect
   const first = contacts[0];
   const near = new Map<string, PlacedBox>();
   for (const c of contacts) for (const b of nearContact(all, c)) near.set(b.piece.id, b);
-  const key = [...near.values()].map((b) => `${b.piece.id}@${pieceSig(b.piece)}`).sort().join("|") + `|${connectorFt}|${walkKey()}|${contacts.map((c) => `${c.axis}${c.plane}:${c.count}`).join(",")}`;
+  // the key names the PAIR and where its patches are: two joints of one layout can share the same neighbours, plane and cell count (the joints of a 2 x 2 of one tile do), and the
+  // crossings the core holds carry piece ids, so a core is never shared between different pairs
+  const key = `${first.a.piece.id}~${first.b.piece.id}|` + [...near.values()].map((b) => `${b.piece.id}@${pieceSig(b.piece)}`).sort().join("|") + `|${connectorFt}|${walkKey()}|${contacts.map((c) => `${c.axis}${c.plane}:${c.count}@${c.lo.join(",")}-${c.hi.join(",")}`).join(",")}`;
   let core = cache.get(key);
   if (!core) {
     core = scoreContacts(contacts, [...near.values()], connectorFt);

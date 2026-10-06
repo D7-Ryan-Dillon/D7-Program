@@ -73,6 +73,9 @@ const ctxFor = (shape: (typeof SHAPES)[number]["key"], seed: number, amount = 8,
   priorities: defaultPriorities(),
   site: defaultSite(),
   settings: { ...defaultGen(), shape, seed, amount },
+  // the generator stops searching after a wall-clock budget (6 s by default); the first run also warms the walking caches of every tile, so on a slower or busy machine it could stop early and
+  // place only a few pieces. The checks test validity, not speed: give the search room.
+  budgetMs: 30000,
 });
 
 // ---- 1. every shape gives one connected, walkable, overlap-free building --------------------------------------------

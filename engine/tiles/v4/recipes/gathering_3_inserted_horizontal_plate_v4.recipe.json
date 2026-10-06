@@ -1,0 +1,64 @@
+{
+  "schema": "erosion-recipe/2",
+  "name": "gathering_3_inserted_horizontal_plate_v4",
+  "engine_version": "7.0",
+  "meta": {"category": "gathering", "typology": "inserted horizontal plate", "slot": 3, "variant": "V4"},
+  "sim": {"tile_w": 20.0, "tile_h": 20.0, "cell": 0.5, "steps": 170, "gravity": 0.5, "drain": false, "n_frames": 8, "smooth": 0.8, "seed": 31},
+  "cleanup": {"min_void_ft3": 6.0, "min_foam_ft3": 8.0, "weld": ""},
+  "foam": {"v": 1, "noise": 0.55, "scale": 3.6, "grain": 0.22, "seed": 113, "web": 0.0, "web_open": 0.3, "web_thickness": 0.5, "layers": false, "layer_count": 3, "layer_axis": 2, "layer_thickness": 0.75, "layer_strength": 0.85},
+  "plates": [
+    {"v": 1, "kind": "plates", "name": "ground slab", "thickness": 1.0, "resistance": 3.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "auto_support": false, "min_support": 8.0, "max_span": 10.0, "strut_size": 1.5, "verticality": 0.3, "branch_from_top": false, "support_pts": [],
+     "shapes": [
+       {"type": "poly", "pts": [[0.0, 0.0, 1.0], [20.0, 0.0, 1.0], [20.0, 20.0, 1.0], [0.0, 20.0, 1.0]]}
+     ]},
+    {"v": 1, "kind": "plates", "name": "inserted plate", "thickness": 1.0, "resistance": 3.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "auto_support": false, "min_support": 8.0, "max_span": 10.0, "strut_size": 1.5, "verticality": 0.3, "branch_from_top": false, "support_pts": [],
+     "shapes": [
+       {"type": "poly", "pts": [[0.0, 0.0, 11.0], [20.0, 0.0, 11.0], [20.0, 11.0, 11.0], [18.0, 12.0, 11.0], [15.0, 12.8, 11.0], [11.5, 13.0, 11.0], [8.0, 12.5, 11.0], [5.0, 12.0, 11.0], [2.0, 11.4, 11.0], [0.0, 11.0, 11.0]]}
+     ]},
+    {"v": 1, "kind": "plates", "name": "door frames", "thickness": 1.0, "resistance": 3.0, "anchor_ft": 1.5, "anchor_strength": 3.0, "auto_support": false, "min_support": 8.0, "max_span": 10.0, "strut_size": 1.5, "verticality": 0.3, "branch_from_top": false, "support_pts": [],
+     "shapes": [
+       {"type": "box", "min": [5.5, 0.0, 1.0], "max": [7.0, 1.5, 10.5]},
+       {"type": "box", "min": [13.0, 0.0, 1.0], "max": [14.5, 1.5, 10.5]},
+       {"type": "box", "min": [7.0, 0.0, 9.0], "max": [13.0, 1.5, 10.5]},
+       {"type": "box", "min": [5.5, 18.5, 1.0], "max": [7.0, 20.0, 10.5]},
+       {"type": "box", "min": [13.0, 18.5, 1.0], "max": [14.5, 20.0, 10.5]},
+       {"type": "box", "min": [7.0, 18.5, 9.0], "max": [13.0, 20.0, 10.5]},
+       {"type": "box", "min": [0.0, 10.5, 1.0], "max": [1.5, 12.0, 10.5]},
+       {"type": "box", "min": [0.0, 18.0, 1.0], "max": [1.5, 19.5, 10.5]},
+       {"type": "box", "min": [0.0, 12.0, 9.0], "max": [1.5, 18.0, 10.5]},
+       {"type": "box", "min": [18.5, 10.5, 1.0], "max": [20.0, 12.0, 10.5]},
+       {"type": "box", "min": [18.5, 18.0, 1.0], "max": [20.0, 19.5, 10.5]},
+       {"type": "box", "min": [18.5, 12.0, 9.0], "max": [20.0, 18.0, 10.5]},
+       {"type": "box", "min": [5.5, 0.0, 11.0], "max": [7.0, 1.5, 20.5]},
+       {"type": "box", "min": [13.0, 0.0, 11.0], "max": [14.5, 1.5, 20.5]},
+       {"type": "box", "min": [7.0, 0.0, 19.0], "max": [13.0, 1.5, 20.5]},
+       {"type": "box", "min": [0.0, 0.5, 11.0], "max": [1.5, 2.0, 20.5]},
+       {"type": "box", "min": [0.0, 8.0, 11.0], "max": [1.5, 9.5, 20.5]},
+       {"type": "box", "min": [0.0, 2.0, 19.0], "max": [1.5, 8.0, 20.5]},
+       {"type": "box", "min": [18.5, 0.5, 11.0], "max": [20.0, 2.0, 20.5]},
+       {"type": "box", "min": [18.5, 8.0, 11.0], "max": [20.0, 9.5, 20.5]},
+       {"type": "box", "min": [18.5, 2.0, 19.0], "max": [20.0, 8.0, 20.5]}
+     ]}
+  ],
+  "sources": [
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[5.0, 6.2, 1.4], [5.0, 6.2, 9.6]], "dose": 514, "spread": 3.785166240409208, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 6.0, 1.4], [10.0, 6.0, 9.6]], "dose": 514, "spread": 3.785166240409208, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[15.0, 6.2, 1.4], [15.0, 6.2, 9.6]], "dose": 514, "spread": 3.785166240409208, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[5.4, 7.2, 11.4], [5.4, 7.2, 17.0]], "dose": 195, "spread": 3.273657289002558, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 7.2, 11.4], [10.0, 7.2, 17.0]], "dose": 195, "spread": 3.273657289002558, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[14.6, 7.2, 11.4], [14.6, 7.2, 17.0]], "dose": 195, "spread": 3.273657289002558, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[6.2, 15.4, 1.4], [6.2, 15.4, 17.2]], "dose": 718, "spread": 3.5805626598465476, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[13.8, 15.4, 1.4], [13.8, 15.4, 17.2]], "dose": 718, "spread": 3.5805626598465476, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 12.6, 3.4], [10.0, 12.6, 17.2]], "dose": 648, "spread": 3.5805626598465476, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 7.0, 4.79], [10.0, -1.2, 4.79]], "dose": 793, "spread": 4.4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 13.0, 4.79], [10.0, 21.2, 4.79]], "dose": 793, "spread": 4.4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[7.0, 15.0, 4.79], [-1.2, 15.0, 4.79]], "dose": 793, "spread": 4.4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[13.0, 15.0, 4.79], [21.2, 15.0, 4.79]], "dose": 793, "spread": 4.4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[10.0, 7.0, 14.79], [10.0, -1.2, 14.79]], "dose": 793, "spread": 4.4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[7.0, 5.0, 14.79], [-1.2, 5.0, 14.79]], "dose": 793, "spread": 4.4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false},
+    {"v": 1, "mode": "line", "kind": "crv", "pts": [[13.0, 5.0, 14.79], [21.2, 5.0, 14.79]], "dose": 793, "spread": 4.4, "start": 0, "duration": 0, "dir": null, "plate_mode": "pool", "cut": false}
+  ],
+  "frame": null,
+  "expect": {"tile_id": "af2103ef8b0cf070"},
+  "container": {"kind": "box", "min": [0.0, 0.0, 0.0], "size": [20.0, 20.0, 20.0]}
+}

@@ -1,15 +1,15 @@
 // Proves lib/tiles/analyze.ts (the browser's reading of a tile) agrees with the Grasshopper engine's own analysis
 // (data/spaces.json, data/structure.json) on the 15 typology tiles. Run: npm run check:parity
-// Fixtures come from engine/tiles/make_fixtures.py. Exit code 1 if anything that matters disagrees.
+// Fixtures come from engine/tiles/make_fixtures.py (lib/tiles/fixtures: the first set; lib/tiles/fixtures-v4: the V4 set, with masks for its L-shaped and single-storey tiles). Exit code 1 if anything that matters disagrees.
 
 import { gunzipSync } from "node:zlib";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { analyzeTile } from "../lib/tiles/analyze";
 import type { SpacesData, StructureData } from "../lib/tiles/types";
 
-const root = join(__dirname, "..", "lib", "tiles", "fixtures");
-const names = existsSync(root) ? readdirSync(root).filter((n) => existsSync(join(root, n, "meta.json"))) : [];
+const roots = ["fixtures", "fixtures-v4"].map((d) => join(__dirname, "..", "lib", "tiles", d)).filter((r) => existsSync(r));
+const names = roots.flatMap((r) => readdirSync(r).filter((n) => existsSync(join(r, n, "meta.json"))).map((n) => join(r, n)));
 if (!names.length) {
   console.error("No fixtures found in lib/tiles/fixtures. Run engine/tiles/make_fixtures.py first.");
   process.exit(1);
@@ -49,15 +49,15 @@ function compare(a: Json, b: Json, path: string, out: string[]) {
   if (a !== b) out.push(`${path}: engine ${JSON.stringify(a)} vs app ${JSON.stringify(b)}`);
 }
 
-for (const name of names) {
-  const dir = join(root, name);
+for (const dir of names) {
+  const name = basename(dir) + (dir.includes("fixtures-v4") ? " (v4)" : "");
   const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf8")) as { grid: [number, number, number]; cell_ft: number };
   const engineSpaces = JSON.parse(readFileSync(join(dir, "spaces.json"), "utf8")) as SpacesData;
   const engineStructure = JSON.parse(readFileSync(join(dir, "structure.json"), "utf8")) as StructureData;
   const vd = read(dir, "void.u8.gz");
   if (!vd) throw new Error(`${name}: void.u8.gz missing`);
   const t0 = Date.now();
-  const result = analyzeTile({ void: vd, grid: meta.grid, cell: meta.cell_ft, plates: read(dir, "plates.u8.gz"), struts: read(dir, "struts.u8.gz") });
+  const result = analyzeTile({ void: vd, grid: meta.grid, cell: meta.cell_ft, plates: read(dir, "plates.u8.gz"), struts: read(dir, "struts.u8.gz"), mask: read(dir, "mask.u8.gz") ?? undefined });
   const ms = Date.now() - t0;
 
   const hard: string[] = [];
