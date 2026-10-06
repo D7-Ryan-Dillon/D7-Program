@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, type MutableRefObject, type RefObject } from "react";
+import { AutoRotateRig } from "@/lib/useAutoRotate";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, useGLTF, Environment } from "@react-three/drei";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
@@ -101,9 +102,11 @@ function Model({ tile, displayMode, visibility, colors, opacity, clip, tint, emp
     const ghosted = displayMode === "ghosted";
     const foam = scene.getObjectByName("foam");
     const voidMesh = scene.getObjectByName("void");
-    if (foam instanceof THREE.Mesh) applyMaterial(foam, colors.foam, visibility.foam, ghosted, "foam", opacity.foam);
+    // the Analysis lights rooms / levels in the void: with the default (solid foam alone) that would show nothing, so the void is shown and the foam let through
+    const lit = !!emphasis?.rooms?.length || !!emphasis?.levels?.length;
+    if (foam instanceof THREE.Mesh) applyMaterial(foam, colors.foam, visibility.foam, ghosted, "foam", lit ? Math.min(opacity.foam, 0.12) : opacity.foam);
     if (voidMesh instanceof THREE.Mesh) {
-      applyMaterial(voidMesh, colors.void, visibility.void, ghosted, "void", opacity.void);
+      applyMaterial(voidMesh, colors.void, visibility.void || lit, ghosted, "void", opacity.void);
       // rooms / levels: colour the void by what each vertex sits in (own copy of the geometry: the loaded one is shared)
       const tinted = tint !== "none" || !!emphasis?.rooms?.length || !!emphasis?.levels?.length;
       if (tinted) {
@@ -189,17 +192,33 @@ function CameraRig({
   bounds,
   controlsRef,
   nonce,
+  settledRef,
 }: {
   activeViewKey: string;
   bounds: Bounds;
   controlsRef: RefObject<ComponentRef<typeof OrbitControls> | null>;
   nonce: number;
+  /** Written: false while the camera is still flying to the chosen view (auto-rotate waits for it). */
+  settledRef: MutableRefObject<boolean>;
 }) {
   const { camera } = useThree();
   // Read when a view is chosen (not a dependency): resizing the pane must not throw away the camera you orbited to.
   const get = useThree((s) => s.get);
   const target = useRef({ pos: new THREE.Vector3(8, 6, 8), up: new THREE.Vector3(0, 1, 0) });
   const animating = useRef(true);
+  const frames = useRef(0);
+
+  // grabbing the model hands it back to you: the fly-to-view must not keep pulling the camera
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    const stop = () => {
+      animating.current = false;
+      settledRef.current = true;
+    };
+    controls.addEventListener("start", stop);
+    return () => controls.removeEventListener("start", stop);
+  }, [controlsRef, settledRef]);
 
   useEffect(() => {
     const preset = ALL_VIEWS.find((v) => v.key === activeViewKey) ?? AXO_VIEWS.find((v) => v.key === activeViewKey) ?? ALL_VIEWS[ALL_VIEWS.length - 1];
@@ -213,21 +232,22 @@ function CameraRig({
     target.current.pos.copy(bounds.center).addScaledVector(dir, distance);
     target.current.up.set(...preset.up);
     animating.current = true;
-  }, [activeViewKey, bounds, nonce, camera, get]);
+    settledRef.current = false;
+    frames.current = 0;
+  }, [activeViewKey, bounds, nonce, camera, get, settledRef]);
 
   useFrame(() => {
     if (!animating.current) return;
     camera.position.lerp(target.current.pos, 0.18);
     camera.up.lerp(target.current.up, 0.18);
     const controls = controlsRef.current;
-    if (controls) {
-      controls.target.lerp(bounds.center, 0.18);
-      controls.update();
-    } else {
-      camera.lookAt(bounds.center);
-    }
-    if (camera.position.distanceTo(target.current.pos) < 0.01) {
+    if (controls) controls.target.lerp(bounds.center, 0.18); // the controls' own per-frame update applies it
+    else camera.lookAt(bounds.center);
+    frames.current++;
+    // arrived, or 1 s is enough: the 0.01 test alone never finishes while anything else is moving the camera
+    if (camera.position.distanceTo(target.current.pos) < 0.01 || frames.current > 60) {
       animating.current = false;
+      settledRef.current = true;
     }
   });
 
@@ -237,7 +257,7 @@ function CameraRig({
 /** Keeps this viewport's camera in step with the others sharing a LinkHub
  * (lib/cameraLink.ts): writes its own while it is being orbited (or while the
  * leader auto-rotates), copies the hub's otherwise. */
-function LinkRig({ link, controlsRef, bounds, autoRotate }: { link: CameraLink; controlsRef: RefObject<ComponentRef<typeof OrbitControls> | null>; bounds: Bounds; autoRotate: boolean }) {
+function LinkRig({ link, controlsRef, bounds, autoRotate, idleRef, settledRef }: { link: CameraLink; controlsRef: RefObject<ComponentRef<typeof OrbitControls> | null>; bounds: Bounds; autoRotate: boolean; idleRef: MutableRefObject<boolean>; settledRef: MutableRefObject<boolean> }) {
   const camera = useThree((s) => s.camera);
   const interacting = useRef(false);
   const seen = useRef(-1);
@@ -267,7 +287,7 @@ function LinkRig({ link, controlsRef, bounds, autoRotate }: { link: CameraLink; 
     const now = performance.now();
     if (interacting.current) markActive(hub, link.id, now);
     const otherDriving = hub.driver !== null && hub.driver !== link.id && now - hub.lastActive < 700;
-    controls.autoRotate = autoRotate && link.leader && !otherDriving;
+    controls.autoRotate = autoRotate && link.leader && !otherDriving && idleRef.current && settledRef.current && !interacting.current;
     const iDrive = interacting.current || controls.autoRotate || (hub.driver === link.id && now - hub.lastActive < 700);
     const c = bounds.center;
     if (iDrive) {
@@ -328,6 +348,8 @@ export function ThreeViewport({
   link?: CameraLink;
 }) {
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
+  const settledRef = useRef(false);
+  const idleRef = useRef(true);
   const [bounds, setBounds] = useState<Bounds>(DEFAULT_BOUNDS);
   useShiftToPan(controlsRef);
   const fallbackHandle = useRef<ViewportHandle | null>(null);
@@ -353,9 +375,10 @@ export function ThreeViewport({
             <Environment preset="city" environmentIntensity={0.25} />
           </ErrorBoundary>
         </Suspense>
-        <CameraRig activeViewKey={activeViewKey} bounds={bounds} controlsRef={controlsRef} nonce={viewNonce} />
-        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} autoRotate={link ? false : autoRotate} autoRotateSpeed={autoRotateSpeed} />
-        {link && <LinkRig link={link} controlsRef={controlsRef} bounds={bounds} autoRotate={autoRotate} />}
+        <CameraRig activeViewKey={activeViewKey} bounds={bounds} controlsRef={controlsRef} nonce={viewNonce} settledRef={settledRef} />
+        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} autoRotate={false} />
+        <AutoRotateRig controlsRef={controlsRef} enabled={autoRotate} secs={60 / Math.max(autoRotateSpeed, 0.05)} manage={!link} settledRef={settledRef} idleRef={idleRef} />
+        {link && <LinkRig link={link} controlsRef={controlsRef} bounds={bounds} autoRotate={autoRotate} idleRef={idleRef} settledRef={settledRef} />}
         <CaptureBridge handleRef={handleRef ?? fallbackHandle} framing={framing} />
       </Canvas>
     </div>

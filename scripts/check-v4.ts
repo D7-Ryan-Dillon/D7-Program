@@ -37,7 +37,7 @@ const want = (n: number) => !only || only.includes(n);
 const out = process.env.V4_OUT ?? join(__dirname, "..", "engine", "tiles", SET, "assemblies");
 mkdirSync(out, { recursive: true });
 /** every picture-worthy assembly is also written as a voxel box (void, plates, struts, mask, owner per cell) that engine/tiles/v4/render_assemblies.py draws as an isometric cutaway with one colour per piece */
-const ASM = process.env.V4_ASM ?? `C:/tmp/tiles${SET === "v5" ? 5 : 4}_asm`;
+const ASM = process.env.V4_ASM ?? `C:/tmp/tiles${SET.replace(/\D/g, "")}_asm`;
 if (!only || only.includes(4)) rmSync(ASM, { recursive: true, force: true });
 function dump(name: string, l: Layout) {
   const comp = buildComposite(l.boxes);
@@ -190,12 +190,14 @@ for (const t of list) {
   if ((inValid.get(t.id) ?? 0) > 0) continue;
   let hit = 0;
   const hosts = list.filter((h) => h !== t);
-  for (const h of hosts) {
-    const bp = bestPair(h, t);
-    const pa: Piece = { id: "a", tileId: h.id, pos: [0, 0, 0], rotZ: 0, mirrorX: false, scale: 1, locked: false };
-    const pb: Piece = { id: "b", tileId: t.id, pos: bp.pos, rotZ: bp.rotZ, mirrorX: bp.mirrorX, scale: 1, locked: false };
-    if (valid(lay({ ...emptyDoc(), pieces: [pa, pb], entranceId: "a" }))) hit++;
-  }
+  // the pair matrix stands the second tile on the first tile's +x side only, so a pair works if either order does (as in section 2)
+  const works = (first: ParsedTile, second: ParsedTile) => {
+    const bp = bestPair(first, second);
+    const pa: Piece = { id: "a", tileId: first.id, pos: [0, 0, 0], rotZ: 0, mirrorX: false, scale: 1, locked: false };
+    const pb: Piece = { id: "b", tileId: second.id, pos: bp.pos, rotZ: bp.rotZ, mirrorX: bp.mirrorX, scale: 1, locked: false };
+    return valid(lay({ ...emptyDoc(), pieces: [pa, pb], entranceId: "a" }));
+  };
+  for (const h of hosts) if (works(h, t) || works(t, h)) hit++;
   say(`  ${short(t)} was not chosen by the objective in any run; its best two-piece assembly with each other tile is valid for ${hit} of ${hosts.length} hosts`);
   ok(hit >= hosts.length - 2, `${t.id} could not be assembled with most hosts`);
 }
@@ -205,8 +207,52 @@ for (const s of samples.filter((q) => !q.name.startsWith("gen_02")).slice(0, 12)
   }
 }
 
-// ---- 5. nesting: L-shaped tiles into each other's notches ----------------------------------------------------------------------------------------------------------
+// ---- 5. nesting: tiles with a notch (L-plans in V4 / V5, stepped tops in V6) with a tile that fills it -----------------------------------------------------------------------
 if (want(5)) {
+if (SET === "v6") {
+say("\n5. NESTING (stepped tops): each stepped tile (G1, G5, O2, L4, L5) with each of the fifteen tiles at the 10 ft lattice shifts (every orientation, offsets of 10 ft in x, y and z): valid = no collision, a nested fit, attached, both reachable on foot");
+const STEPPED = ["G1", "G5", "O2", "L4", "L5"].map((k) => list.find((t) => short(t) === k)!);
+const samples: { name: string; l: Layout }[] = [];
+for (const a of STEPPED) {
+  let partners = 0;
+  let nestedAll = 0;
+  let walkAll = 0;
+  const who: string[] = [];
+  for (const b of list) {
+    let found = 0;
+    let validFound = 0;
+    let first: Layout | null = null;
+    for (let rot = 0; rot < 4; rot++)
+      for (const mirror of [false, true])
+        for (const dx of [-10, 0, 10])
+          for (const dy of [-10, 0, 10])
+            for (const dz of [-10, 0, 10]) {
+              const pa: Piece = { id: "a", tileId: a.id, pos: [0, 0, 0], rotZ: 0, mirrorX: false, scale: 1, locked: false };
+              const pb: Piece = { id: "b", tileId: b.id, pos: [dx, dy, dz], rotZ: rot, mirrorX: mirror, scale: 1, locked: false };
+              const l = lay({ ...emptyDoc(), pieces: [pa, pb], entranceId: "a" });
+              if (l.overlaps.length || !l.nested.length) continue;
+              found++;
+              if (valid(l) && l.joints.some((j) => j.connect.walkable)) {
+                validFound++;
+                if (!first) first = l;
+              }
+            }
+    nestedAll += found;
+    walkAll += validFound;
+    if (found) {
+      partners++;
+      who.push(short(b) + (validFound ? "*" : ""));
+      if (first && !samples.find((q) => q.name.startsWith(`nest_${short(a)}_`))) samples.push({ name: `nest_${short(a)}_${short(b)}`, l: first });
+    }
+  }
+  say(`  ${short(a)}: nests with ${partners} of ${list.length} tiles (${nestedAll} collision-free nested placements, ${walkAll} of them also walkable with both pieces reachable; * = a walkable one exists): ${who.join(" ")}`);
+  ok(partners >= 3, `${a.id} nests with only ${partners} tiles`);
+}
+for (const q of samples) {
+  crude(q.l.boxes, join(out, q.name + ".png"), { sliceZ: [4, 14] });
+  dump(q.name, q.l);
+}
+} else {
 say("\n5. NESTING: the three L-plan tiles (G5, O4, L5) placed into each other's 10 x 10 ft notch (every orientation, offsets of 10 ft): valid = no collision, attached, both reachable on foot");
 const LS = ["G5", "O4", "L5"].map((k) => list.find((t) => short(t) === k)!);
 const nestedSamples: { name: string; l: Layout }[] = [];
@@ -243,6 +289,7 @@ for (const s of nestedSamples) {
   say(`  (${total} ordered pairs of L-plan tiles; nested pairs that also walk: see the counts above)`);
 }
 }
+}
 
 // ---- 6. vertical meetings: a ramp that arrives at another tile's floor ----------------------------------------------------------------------------------------------
 if (want(6)) {
@@ -255,17 +302,24 @@ for (const [hostKey, label] of [["L1", "the ring ramp of L1"], ["G5", "the galle
   for (const guest of list) {
     if (guest === host) continue;
     let okGuest = 0;
+    // the guest stands one or two storeys up, at the 10 ft lattice offsets round the host (and, found by lining up doors and floors, wherever the host's own levels say)
     for (let hr = 0; hr < 4; hr++)
-      for (const hm of [false, true])
-        for (const c of pairCandidates(host, guest, 1.5, { aRot: hr, aMirror: hm, openings: 4, allLevels: true })) {
-          if (c.piece.pos[2] < 10 || !c.joint.connect.walkable) continue;
-          tried++;
+      for (const hm of [false]) {
+        const cands: Piece[] = [...pairCandidates(host, guest, 1.5, { aRot: hr, aMirror: hm, openings: 4, allLevels: true })].filter((c) => c.joint.connect.walkable).map((c) => c.piece);
+        for (const rot of [0, 1, 2, 3])
+          for (const [dx, dy] of [-10, 0, 10].flatMap((d) => [[-20, d], [20, d], [d, -20], [d, 20]] as [number, number][]))
+            for (const dz of [10, 20]) cands.push({ id: "b", tileId: guest.id, pos: [dx, dy, dz], rotZ: rot, mirrorX: false, scale: 1, locked: false });
+        for (const cp of cands) {
+          if (cp.pos[2] < 10) continue;
           const pa: Piece = { id: "a", tileId: host.id, pos: [0, 0, 0], rotZ: hr, mirrorX: hm, scale: 1, locked: false };
-          const l = lay({ ...emptyDoc(), pieces: [pa, c.piece], entranceId: "a" });
+          const l = lay({ ...emptyDoc(), pieces: [pa, { ...cp, id: "b" }], entranceId: "a" });
+          if (l.overlaps.length || !l.joints.some((j) => j.connect.walkable)) continue;
+          tried++;
           if (!valid(l)) continue;
-                    okGuest++;
+          okGuest++;
           if (!sample) sample = l;
         }
+      }
     hits.set(guest.id, okGuest);
   }
   const withHit = [...hits.entries()].filter(([, n]) => n > 0).map(([id]) => short(tiles.get(id)!));

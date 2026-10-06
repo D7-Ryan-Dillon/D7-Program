@@ -1,8 +1,10 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, type MutableRefObject, type RefObject } from "react";
+import type { ConnectorMade } from "@/lib/arrange/connectors";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, Line, OrbitControls, useGLTF } from "@react-three/drei";
+import { AutoRotateRig } from "@/lib/useAutoRotate";
 import * as THREE from "three";
 import { CaptureBridge } from "@/components/shared/CaptureBridge";
 import type { ViewportHandle } from "@/lib/viewportCapture";
@@ -33,6 +35,8 @@ export interface ArrangeViewportProps {
   pieces: Piece[];
   tileById: Map<string, ParsedTile>;
   joints: Joint[];
+  /** the stairs and ramps built into the pieces' floors (drawn as wedges when the smoothed model is not shown) */
+  connectors?: ConnectorMade[];
   selected: Set<string>;
   highlight?: Set<string>;
   selectedJointId?: string | null;
@@ -189,6 +193,34 @@ function CompositeView({ meshes, look, onDown }: { meshes: CompositeMeshes; look
 }
 
 // ---- overlays ------------------------------------------------------------------------------------------------------
+
+/** A stair or ramp built into a floor: a wedge from the doorway down to the room's floor. */
+function ConnectorWedges({ connectors }: { connectors: ConnectorMade[] }) {
+  const geos = useMemo(
+    () =>
+      connectors.map((c) => {
+        const w = c.wedge;
+        const P = (a: number, l: number, z: number): Vec3 => (w.axis === 0 ? [a, l, z] : [l, a, z]);
+        const v = [P(w.from, w.l0, w.z0), P(w.from, w.l1, w.z0), P(w.from, w.l1, w.z1), P(w.from, w.l0, w.z1), P(w.to, w.l0, w.z0), P(w.to, w.l1, w.z0)];
+        const idx = [0, 1, 2, 0, 2, 3, 3, 2, 5, 3, 5, 4, 0, 3, 4, 1, 5, 2, 0, 4, 5, 0, 5, 1];
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(v.flat(), 3));
+        g.setIndex(idx);
+        g.computeVertexNormals();
+        return g;
+      }),
+    [connectors],
+  );
+  return (
+    <>
+      {geos.map((g, i) => (
+        <mesh key={connectors[i].jointId} geometry={g}>
+          <meshStandardMaterial color="#db7228" roughness={0.8} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
+    </>
+  );
+}
 
 function JointPlates({ joints, selectedId, onPick }: { joints: Joint[]; selectedId?: string | null; onPick?: (id: string) => void }) {
   return (
@@ -521,7 +553,7 @@ function FitRig({ frame, fitKey, controlsRef, fitRef }: { frame: { center: Vec3;
   return null;
 }
 
-function LinkRig({ link, controlsRef, center, autoRotate }: { link: CameraLink; controlsRef: RefObject<ComponentRef<typeof OrbitControls> | null>; center: THREE.Vector3; autoRotate: boolean }) {
+function LinkRig({ link, controlsRef, center, autoRotate, idleRef }: { link: CameraLink; controlsRef: RefObject<ComponentRef<typeof OrbitControls> | null>; center: THREE.Vector3; autoRotate: boolean; idleRef: MutableRefObject<boolean> }) {
   const camera = useThree((s) => s.camera);
   const interacting = useRef(false);
   const seen = useRef(-1);
@@ -547,7 +579,7 @@ function LinkRig({ link, controlsRef, center, autoRotate }: { link: CameraLink; 
     const now = performance.now();
     if (interacting.current) markActive(hub, link.id, now);
     const otherDriving = hub.driver !== null && hub.driver !== link.id && now - hub.lastActive < 700;
-    controls.autoRotate = autoRotate && link.leader && !otherDriving;
+    controls.autoRotate = autoRotate && link.leader && !otherDriving && idleRef.current && !interacting.current;
     const drive = interacting.current || controls.autoRotate || (hub.driver === link.id && now - hub.lastActive < 700);
     if (drive) {
       if (controls.autoRotate) markActive(hub, link.id, now);
@@ -568,6 +600,7 @@ function LinkRig({ link, controlsRef, center, autoRotate }: { link: CameraLink; 
 export function ArrangeViewport(props: ArrangeViewportProps) {
   const { pieces, tileById, joints, selected, highlight, selectedJointId, showJoints, visibility, colors, foamOpacity, composite, entrancePoint, site, ghosts, evidence, measure, levelCut, mode, hidden } = props;
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
+  const idleRef = useRef(true);
   const fallbackHandle = useRef<ViewportHandle | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const fitRef = useRef<(() => void) | null>(null);
@@ -693,6 +726,11 @@ export function ArrangeViewport(props: ArrangeViewportProps) {
                   <SelectionBoxes boxes={props.selectionBoxes} />
                 </group>
               )}
+              {!!props.connectors?.length && !composite && (
+                <group userData={{ overlay: true }}>
+                  <ConnectorWedges connectors={props.connectors} />
+                </group>
+              )}
               {showJoints && !composite && (
                 <group userData={{ overlay: true }}>
                   <JointPlates joints={joints} selectedId={selectedJointId} onPick={props.onPickJoint} />
@@ -728,8 +766,9 @@ export function ArrangeViewport(props: ArrangeViewportProps) {
             </group>
           </>
         </Suspense>
-        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} zoomToCursor screenSpacePanning panSpeed={1.4} mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }} touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }} autoRotate={props.link ? false : !!props.autoRotate} autoRotateSpeed={props.autoRotateSpeed ?? 2} />
-        {props.link && <LinkRig link={props.link} controlsRef={controlsRef} center={center} autoRotate={!!props.autoRotate} />}
+        <OrbitControls ref={controlsRef} makeDefault enableDamping dampingFactor={0.08} zoomToCursor screenSpacePanning panSpeed={1.4} mouseButtons={{ LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN }} touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }} autoRotate={false} />
+        <AutoRotateRig controlsRef={controlsRef} enabled={!!props.autoRotate} secs={60 / Math.max(props.autoRotateSpeed ?? 2, 0.05)} manage={!props.link} idleRef={idleRef} />
+        {props.link && <LinkRig link={props.link} controlsRef={controlsRef} center={center} autoRotate={!!props.autoRotate} idleRef={idleRef} />}
         <Interaction mode={mode} controlsRef={controlsRef} dragRef={dragRef} onDrag={props.onDrag} onDragEnd={props.onDragEnd} pieces={pieces} tileById={tileById} onBox={props.onBoxSelect} onBoxRect={setRect} />
         <ApiRig apiRef={props.apiRef} controlsRef={controlsRef} fitRef={fitRef} />
         <FitRig frame={frame} fitKey={props.fitKey} controlsRef={controlsRef} fitRef={fitRef} />

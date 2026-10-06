@@ -272,6 +272,57 @@ const nestedDoc = docOf([{ tile: tL, at: [0, 0, 0] }, { tile: tCube, at: [10, 10
   console.log(`  low doorway: ${jl.connect.why}`);
 }
 
+// ---- 5b. connectors: a stair or ramp built into the lower room, only when asked for ---------------------------------------------------------------------------------
+{
+  const tall = reg(L("L_tall_c", "gathering", true, 26));
+  const tallCube = reg(cubeTall("cube_tall_c"));
+  const cr = (auto: boolean, over: Partial<ProgramRules> = {}): ProgramRules => ({ ...rules, levelTolerance: "ramp", rampRiseFt: 10, autoConnectors: auto, ...over });
+  const at = (rise: number) => docOf([{ tile: tall, at: [0, 0, 0] }, { tile: tallCube, at: [10, 10, rise] }]);
+  for (const rise of [1, 2, 3]) {
+    const off = lay(at(rise), cr(false));
+    ok(!off.joints[0].connect.walkable && off.joints[0].connect.kind === "connector" && off.connectors.length === 0, `connectors off: a ${rise} ft rise stays a connector report, never a route: ${kind(off)}`);
+    const on = lay(at(rise), cr(true));
+    const m = on.connectors[0];
+    ok(!!m && on.joints[0].connect.walkable && on.joints[0].connect.stepFt === 0, `connectors on: a ${rise} ft rise is joined: ${kind(on)} / ${on.connectorFails.map((f) => f.why).join(";")}`);
+    ok(on.unreachable.length === 0 && on.overlaps.length === 0, `a ${rise} ft connector leaves a piece unreachable or colliding`);
+    ok(!!m && Math.abs(m.riseFt - rise) < 1e-6 && m.widthFt >= 2.5 && m.runFt >= (m.kind === "ramp" ? 4 : 2) * rise - 1e-6, `the ${rise} ft connector is too steep or narrow: ${JSON.stringify(m)}`);
+  }
+  // asked for one joint only (the rule off): the choice is kept in the document, undone by "off"
+  {
+    const base = at(2);
+    const j0 = lay(base, cr(false)).joints[0];
+    const one = lay({ ...base, connectors: { [j0.id]: { kind: "stair" } } }, cr(false));
+    ok(one.connectors.length === 1 && one.connectors[0].kind === "stair" && one.connectors[0].auto === false && one.joints[0].connect.walkable, `a stair asked for at one joint: ${JSON.stringify(one.connectors)}`);
+    const none = lay({ ...base, connectors: { [j0.id]: { kind: "auto", off: true } } }, cr(true));
+    ok(none.connectors.length === 0 && !none.joints[0].connect.walkable, "a connector taken out at its joint is not built even with the rule on");
+  }
+  // no room: a 4 ft rise needs more floor than the L's arm has: reported honestly, never faked
+  {
+    const l4 = lay(at(4), cr(true));
+    ok(l4.connectors.length === 0 && l4.connectorFails.length === 1 && l4.connectorFails[0].why.length > 10 && !l4.joints[0].connect.walkable, `a connector that does not fit is a plain report: ${JSON.stringify(l4.connectorFails)} / ${kind(l4)}`);
+  }
+  // the connector follows the pieces and the rule: no walkable joint appears from nothing, and a flat joint gets none
+  {
+    const flat = lay(at(0), cr(true));
+    ok(flat.connectors.length === 0 && flat.joints[0].connect.walkable, `a level joint needs no connector: ${kind(flat)}`);
+  }
+  // Auto Generate with the rule on reaches pieces by connectors; every piece it places has a walkable way in (the same check the rule-off case passes)
+  {
+    const rr = cr(true);
+    const ctx: GenContext = { tileById: tiles, bank: [tall, tallCube, tCube], rules: rr, priorities: defaultPriorities(), site: defaultSite(), settings: { ...defaultGen(), amount: 5, seed: 3 } };
+    const g = generateArrangement(ctx, emptyDoc());
+    const lg = lay(g.doc, rr);
+    ok(lg.unreachable.length === 0 && lg.overlaps.length === 0, `Auto Generate with connectors left ${lg.unreachable.length} unreachable and ${lg.overlaps.length} colliding`);
+    console.log(`  connectors: 1, 2 and 3 ft rises are joined by a ramp or stair that the walking rules then read as a route; 4 ft does not fit (${l4Why()}); Auto Generate placed ${g.doc.pieces.length} pieces with ${lg.connectors.length} connector(s)`);
+  }
+}
+function l4Why() {
+  const rr: ProgramRules = { ...rules, levelTolerance: "ramp", rampRiseFt: 10, autoConnectors: true };
+  const t = tiles.get("L_tall_c")!;
+  const c = tiles.get("cube_tall_c")!;
+  return lay(docOf([{ tile: t, at: [0, 0, 0] }, { tile: c, at: [10, 10, 4] }]), rr).connectorFails[0]?.why ?? "";
+}
+
 // ---- 6. a vertical void connection with no usable vertical route; a doorway into a pocket -------------------------------------------------------------------
 {
   const stacked = docOf([{ tile: tShaftLo, at: [0, 0, 0] }, { tile: tShaftUp, at: [0, 0, 10] }]);

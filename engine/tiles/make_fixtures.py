@@ -6,7 +6,7 @@
 Run build_tiles.py first (it exports every tile to C:/tmp/tiles/<name>/<name>_analysis). For each tile this writes
   <out>/<name>/void.u8.gz, plates.u8.gz, struts.u8.gz   the voxel grids (gzip: they are mostly zeros)
   <out>/<name>/mask.u8.gz                               the container (only when the tile is not a full box)
-  <out>/<name>/meta.json                                name, grid, cell_ft, meta (category, typology, slot, variant)
+  <out>/<name>/meta.json                                name, grid, cell_ft, meta (category, typology, slot, variant), config (sources, gravity, drain, plates)
   <out>/<name>/spaces.json, structure.json              what the ENGINE measured (data/spaces.json, data/structure.json)
 `npm run check:parity` then runs lib/tiles/analyze.ts on the same voxels and compares. Regenerate these whenever the
 analysis in erosion_engine_7.py (or the engine's tiles) changes, together with lib/tiles/analyze.ts.
@@ -37,7 +37,11 @@ for tile_dir in sorted(glob.glob(os.path.join(src, "*_*_*"))):
         if os.path.exists(p):
             with open(p, "rb") as f, gzip.open(os.path.join(dst, fname + ".gz"), "wb", 9) as g:
                 g.write(f.read())
-    json.dump({"name": name, "grid": tile["grid"], "cell_ft": tile["cell_ft"], "meta": tile.get("meta", {})}, open(os.path.join(dst, "meta.json"), "w"))
+    cfg = tile.get("config", {})
+    # the recipe's own inputs (what the Force-driven descriptor reads), as the app reads them from tile.json
+    config = {"gravity": cfg.get("gravity"), "drain": cfg.get("drain"), "sources": cfg.get("sources", []),
+              "plates": [{"name": p.get("name"), "resistance": p.get("resistance")} for p in cfg.get("plates", []) if isinstance(p, dict)]}
+    json.dump({"name": name, "grid": tile["grid"], "cell_ft": tile["cell_ft"], "meta": tile.get("meta", {}), "config": config}, open(os.path.join(dst, "meta.json"), "w"))
     for fname in ("spaces.json", "structure.json"):
         shutil.copy(os.path.join(ana, "data", fname), os.path.join(dst, fname))
     n += 1

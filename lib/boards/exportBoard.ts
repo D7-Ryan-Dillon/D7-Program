@@ -9,6 +9,7 @@
 // so what you see really is what you get.
 
 import { scoreTile, type DescriptorResult } from "@/lib/scoring/descriptors";
+import type { BarSpec } from "@/lib/scoring/bars";
 import type { ParsedTile } from "@/lib/types";
 import { createTileRenderer, createTileRig, renderTileToDataUrl, type TileRenderOptions, type TileRig } from "@/lib/renderTile";
 import { traceModuleOutline, traceSquareOnly, DIVIDER_X, TOP_EDGE_FRACTION, type TagGeometry } from "./frameShape";
@@ -416,19 +417,62 @@ function drawModuleChrome(ctx: CanvasRenderingContext2D, cell: GridCell, slot: B
   drawNameTag(ctx, cell, slot, tile.name, config, dpi);
 }
 
+/** One bar of the matrix evaluation: segments for the app's scale, filled to where the measurement falls; a proxy or an assumption is drawn lighter and outlined, a descriptor that cannot be assessed as a dashed empty bar. */
+function drawSegmentedBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, bar: BarSpec, color: string) {
+  const n = Math.max(1, bar.steps);
+  const gap = Math.max(1, h * 0.35);
+  const segW = (w - gap * (n - 1)) / n;
+  ctx.save();
+  for (let i = 0; i < n; i++) {
+    const sx = x + i * (segW + gap);
+    const on = bar.index !== null && i <= bar.index;
+    if (bar.index === null) {
+      ctx.strokeStyle = `${color}80`;
+      ctx.lineWidth = Math.max(1, h * 0.12);
+      ctx.setLineDash([Math.max(2, h * 0.5), Math.max(2, h * 0.4)]);
+      ctx.strokeRect(sx, y, segW, h);
+    } else if (on) {
+      ctx.fillStyle = bar.solid ? color : `${color}73`;
+      ctx.fillRect(sx, y, segW, h);
+      if (!bar.solid) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(1, h * 0.12);
+        ctx.strokeRect(sx, y, segW, h);
+      }
+    } else {
+      ctx.fillStyle = `${color}26`;
+      ctx.fillRect(sx, y, segW, h);
+    }
+  }
+  ctx.restore();
+}
+
 function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile: ParsedTile, config: BoardConfig) {
   const imageWidth = cell.size * DIVIDER_X;
   const descX = cell.x + imageWidth;
   const descWidth = cell.size - imageWidth;
 
-  const all: DescriptorResult[] = scoreTile(tile);
-  const wanted = config.descriptorKeys;
-  const results = wanted ? wanted.map((k) => all.find((r) => r.key === k)).filter((r): r is DescriptorResult => !!r) : all;
-  if (!results.length) return;
+  // the bars come from the matrix evaluation when the board was given it (the Boards tab always is); otherwise the older 0-100 index
+  const bars = config.descriptorBars?.[tile.id];
+  const legacy: DescriptorResult[] = bars ? [] : scoreTile(tile);
+  interface Row {
+    key: string;
+    label: string;
+    rank: number;
+    bar: BarSpec | null;
+    score: number;
+    text: string;
+  }
+  const keys = config.descriptorKeys;
+  const rowsAll: Row[] = bars
+    ? Object.values(bars).map((b) => ({ key: b.key, label: b.label, rank: (b.index ?? -1) * 2 + (b.solid ? 1 : 0), bar: b, score: 0, text: `${b.word ? `${b.word}: ` : ""}${config.descriptorText?.[tile.id]?.[b.key] ?? b.headline}` }))
+    : legacy.map((r) => ({ key: r.key, label: r.label, rank: r.score, bar: null, score: r.score, text: config.descriptorText?.[tile.id]?.[r.key] ?? r.quant.headline }));
+  const rows = keys ? keys.map((k) => rowsAll.find((r) => r.key === k)).filter((r): r is Row => !!r) : rowsAll;
+  if (!rows.length) return;
   const topKeys = new Set(
     config.highlight.enabled
-      ? [...results]
-          .sort((a, b) => b.score - a.score)
+      ? [...rows]
+          .sort((a, b) => b.rank - a.rank)
           .slice(0, config.highlight.count)
           .map((r) => r.key)
       : [],
@@ -438,13 +482,13 @@ function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile:
   const chamferInset = cell.size * 0.03;
   const listTop = cell.y + Math.max(padding, chamferInset);
   const listHeight = cell.y + cell.size - padding - listTop;
-  const rowHeight = listHeight / results.length;
+  const rowHeight = listHeight / rows.length;
   const labelMaxWidth = descWidth - padding * 2;
-  const barHeight = Math.max(2, rowHeight * 0.1);
+  const barHeight = Math.max(2, rowHeight * (bars ? 0.13 : 0.1));
 
   // one label size for the whole list (the smallest any row needs), so the rows read as a set and none runs past the frame
   const labelSize = Math.min(
-    ...results.map((r) =>
+    ...rows.map((r) =>
       fitText(ctx, r.label.toUpperCase(), labelMaxWidth, rowHeight * 0.55, {
         maxFontSize: rowHeight * 0.3,
         minFontSize: 6,
@@ -455,7 +499,7 @@ function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile:
     ),
   );
 
-  results.forEach((r, i) => {
+  rows.forEach((r, i) => {
     const rowTop = listTop + i * rowHeight;
     const highlighted = topKeys.has(r.key);
     const color = highlighted ? config.highlightColor : config.descriptorColor;
@@ -474,14 +518,19 @@ function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile:
 
     const barY = rowTop + fit.lines.length * fit.fontSize * 1.15 + barHeight * 0.6;
     const barWidth = labelMaxWidth - fit.fontSize * 2;
-    ctx.fillStyle = `${color}33`;
-    ctx.fillRect(descX + padding, barY, barWidth, barHeight);
-    ctx.fillStyle = color;
-    ctx.fillRect(descX + padding, barY, (barWidth * r.score) / 100, barHeight);
+    if (r.bar) {
+      drawSegmentedBar(ctx, descX + padding, barY, barWidth, barHeight, r.bar, color);
+    } else {
+      ctx.fillStyle = `${color}33`;
+      ctx.fillRect(descX + padding, barY, barWidth, barHeight);
+      ctx.fillStyle = color;
+      ctx.fillRect(descX + padding, barY, (barWidth * r.score) / 100, barHeight);
+    }
 
+    ctx.fillStyle = color;
     ctx.font = `${fit.fontSize}px "${config.fontFamily}"`;
     ctx.textBaseline = "middle";
-    ctx.fillText(String(r.score), descX + padding + barWidth + fit.fontSize * 0.4, barY + barHeight / 2);
+    ctx.fillText(r.bar ? (r.bar.index === null ? "–" : `${r.bar.index + 1}/${r.bar.steps}`) : String(r.score), descX + padding + barWidth + fit.fontSize * 0.4, barY + barHeight / 2);
 
     // the measured quantity under the bar (switched on in the descriptor page settings), when the row is tall enough to hold it
     const small = fit.fontSize * 0.62;
@@ -490,9 +539,9 @@ function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile:
       ctx.font = `${small}px "${config.fontFamily}"`;
       ctx.fillStyle = `${color}b3`;
       ctx.textBaseline = "top";
-      let text = config.descriptorText?.[tile.id]?.[r.key] ?? r.quant.headline;
+      let text = r.text;
       while (text.length > 4 && ctx.measureText(text).width > labelMaxWidth) text = text.slice(0, -2);
-      ctx.fillText(text === (config.descriptorText?.[tile.id]?.[r.key] ?? r.quant.headline) ? text : `${text.trimEnd()}…`, descX + padding, textY);
+      ctx.fillText(text === r.text ? text : `${text.trimEnd()}…`, descX + padding, textY);
     }
   });
 }

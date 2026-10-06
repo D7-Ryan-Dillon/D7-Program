@@ -7,8 +7,9 @@ import { useProject, useProjectUi } from "@/lib/project-store";
 import { useShortcuts } from "@/lib/shortcuts";
 import { usePresets } from "@/lib/presets";
 import { useEvaluation } from "@/lib/useEvaluation";
-import { descriptorText as textOf } from "@/lib/scoring/boardText";
+import { descriptorBars as barsOf, descriptorText as textOf } from "@/lib/scoring/boardText";
 import { AnalysisSheetsPanel } from "./AnalysisSheetsPanel";
+import { AssignmentSheetsPanel } from "./AssignmentSheetsPanel";
 import { mergeDefaults } from "@/lib/mergeDefaults";
 import { GlowPanel } from "@/components/shared/GlowPanel";
 import { PresetBar } from "@/components/shared/PresetBar";
@@ -67,7 +68,8 @@ export function BoardsTab() {
   // project, not to any one board, so they are never stored in `config`.
   // The text under each descriptor's bar comes from the same evaluation as the Analysis tab: the measurement with its unit, and its status when it is not a plain measurement.
   const descriptorText = useMemo(() => textOf(criteria.evals), [criteria.evals]);
-  const renderConfig = useMemo<BoardConfig>(() => ({ ...config, descriptorKeys: criteria.keys, descriptorText }), [config, criteria.keys, descriptorText]);
+  const descriptorBars = useMemo(() => barsOf(criteria.evals, tiles), [criteria.evals, tiles]);
+  const renderConfig = useMemo<BoardConfig>(() => ({ ...config, descriptorKeys: criteria.keys, descriptorText, descriptorBars }), [config, criteria.keys, descriptorText, descriptorBars]);
 
   useEffect(() => {
     const el = previewAreaRef.current;
@@ -249,7 +251,7 @@ export function BoardsTab() {
                 Include the tile selection when saving
               </label>
             </PaneMenu>
-            <Button size="sm" disabled={!config.slots.length} onClick={() => setExportOpen(true)} title="PNG, GIF or MP4 (E)">
+            <Button size="sm" disabled={!config.slots.length && !tileById.size} onClick={() => setExportOpen(true)} title="PNG, GIF or MP4 (E); the analysis and Assignment 2 sheets read the whole project">
               <Download className="mr-1.5 h-3.5 w-3.5" />
               {animBusy ? "Exporting…" : "Export"}
             </Button>
@@ -326,6 +328,7 @@ export function BoardsTab() {
               <AnimatedExportPanel config={renderConfig} tileById={tileById} onChange={patchAnimation} onBusyChange={setAnimBusy} />
             </div>
             <AnalysisSheetsPanel config={config} dpiFromBoard={exportDpi} />
+            <AssignmentSheetsPanel config={config} dpiFromBoard={exportDpi} />
           </div>
         </DialogContent>
       </Dialog>

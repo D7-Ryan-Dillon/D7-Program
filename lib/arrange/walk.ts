@@ -71,6 +71,13 @@ export interface Connector {
   zoneB: number;
   /** the height difference the connector would climb, ft */
   riseFt: number;
+  /** where: the contact's axis and plane (cells), the column of piece a's side (world cells) and the two floors (world cell heights), and the lateral cells (along the contact's first other axis) of every doorway column that pairs them */
+  axis?: 0 | 1;
+  plane?: number;
+  col?: [number, number];
+  za?: number;
+  zb?: number;
+  lat?: [number, number];
 }
 
 export interface CrossingResult {
@@ -152,8 +159,17 @@ export function crossingsOf(c: Contact, voidA: Uint8Array, voidB: Uint8Array, wo
         if (!isStep) {
           // clear, open, but a stair or ramp short: a connector that does not exist yet
           const prev = near.get(key);
-          if (!prev) near.set(key, { aId: A.piece.id, bId: B.piece.id, zoneA, zoneB, riseFt: rise });
-          else if (rise < prev.riseFt) prev.riseFt = rise;
+          const lat = c.axis === 0 ? ay : ax;
+          if (!prev) near.set(key, { aId: A.piece.id, bId: B.piece.id, zoneA, zoneB, riseFt: rise, axis: c.axis, plane: c.plane, col: [ax, ay], za, zb, lat: [lat, lat] });
+          else {
+            if (rise < prev.riseFt) {
+              prev.riseFt = rise;
+              prev.col = [ax, ay];
+              prev.za = za;
+              prev.zb = zb;
+            }
+            if (prev.lat) prev.lat = [Math.min(prev.lat[0], lat), Math.max(prev.lat[1], lat)];
+          }
           continue;
         }
         reached.clear = true;

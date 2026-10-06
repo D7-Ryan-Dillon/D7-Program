@@ -25,7 +25,9 @@ export const withPiece = (doc: ArrangementDoc, piece: Piece): ArrangementDoc => 
 export function removePieces(doc: ArrangementDoc, ids: Set<string>): ArrangementDoc {
   const names = { ...doc.names };
   for (const id of ids) delete names[id];
-  return { ...doc, pieces: doc.pieces.filter((p) => !ids.has(p.id)), names, entranceId: doc.entranceId && ids.has(doc.entranceId) ? null : doc.entranceId };
+  // a connector belongs to the joint of two pieces: it goes when either does
+  const connectors = doc.connectors ? Object.fromEntries(Object.entries(doc.connectors).filter(([joint]) => !joint.split("~").some((id) => ids.has(id)))) : undefined;
+  return { ...doc, pieces: doc.pieces.filter((p) => !ids.has(p.id)), names, ...(connectors ? { connectors } : {}), entranceId: doc.entranceId && ids.has(doc.entranceId) ? null : doc.entranceId };
 }
 
 export function patchPieces(doc: ArrangementDoc, ids: Set<string>, patch: Partial<Piece> | ((p: Piece) => Partial<Piece>)): ArrangementDoc {

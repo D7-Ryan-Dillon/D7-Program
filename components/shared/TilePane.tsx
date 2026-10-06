@@ -43,7 +43,12 @@ export interface PaneState {
   tint: TintMode;
   /** 3D model, or the automatic plan / section drawing of the tile. */
   draw: DrawState;
+  /** Which default look this pane was saved with (see LOOK_VERSION). */
+  look?: number;
 }
+
+/** The default look is solid white foam alone (void, plates and branches off). Panes saved with an older look are brought to it once. */
+export const LOOK_VERSION = 2;
 
 export const defaultPane = (autoRotate = false): PaneState => ({
   tileId: null,
@@ -51,17 +56,25 @@ export const defaultPane = (autoRotate = false): PaneState => ({
   autoRotate,
   rotateSecs: 24,
   displayMode: "rendered",
-  visibility: { foam: true, void: true, plates: true, struts: true },
-  // the same look as a board: ghosted white foam, magenta void, peach plates, orange branches, on black
+  // solid white foam alone; void (magenta), plates (peach) and branches (orange) are one switch away under Layers
+  visibility: { foam: true, void: false, plates: false, struts: false },
   colors: { foam: "#ffffff", void: "#c43383", plates: PLATE_COLOR, struts: STRUT_COLOR },
-  opacity: { foam: 0.12, void: 1, plates: 1, struts: 1 },
+  opacity: { foam: 1, void: 1, plates: 1, struts: 1 },
   clip: defaultClipState(),
   tint: "none",
   draw: defaultDrawState(),
+  look: LOOK_VERSION,
 });
 
-/** Fills in anything an older saved pane doesn't have yet. */
-export const normalizePane = (p: Partial<PaneState> | undefined, autoRotate = false): PaneState => mergeDefaults(defaultPane(autoRotate), p);
+/** Fills in anything an older saved pane doesn't have yet; a pane saved with an older default look takes the current one (view, tile, clip and drawing are kept). */
+export const normalizePane = (p: Partial<PaneState> | undefined, autoRotate = false): PaneState => {
+  if (p && (p.look ?? 0) < LOOK_VERSION) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { visibility, colors, opacity, autoRotate: _rotate, displayMode, tint, ...keep } = p;
+    return mergeDefaults(defaultPane(autoRotate), keep);
+  }
+  return mergeDefaults(defaultPane(autoRotate), p);
+};
 
 /** Which groups of settings "Sync all" copies. */
 export type SyncField = "view" | "display" | "visibility" | "clip" | "rotation";
@@ -190,7 +203,7 @@ export function TilePane({
       hint: "the void tinted room by room",
       patch: { displayMode: "rendered", tint: "rooms", visibility: { ...pane.visibility, foam: true, void: true }, opacity: { ...pane.opacity, foam: 0.12, void: 1 } },
     },
-    { label: "Reset", hint: "everything back to solid foam and void", patch: { displayMode: "rendered", tint: "none", visibility: defaults.visibility, opacity: defaults.opacity, colors: defaults.colors } },
+    { label: "Reset", hint: "everything back to solid white foam", patch: { displayMode: "rendered", tint: "none", visibility: defaults.visibility, opacity: defaults.opacity, colors: defaults.colors } },
   ];
 
   return (
@@ -313,7 +326,7 @@ export function TilePane({
           <Segmented value={pane.displayMode} options={[{ value: "rendered", label: "Rendered" }, { value: "ghosted", label: "Ghosted" }]} onChange={(displayMode) => onPane({ displayMode })} />
         </PaneMenu>
 
-        <PaneMenu icon={Eye} label="Layers" showLabel={!compact} active={!pane.visibility.foam || !pane.visibility.void || pane.tint !== "none"} onApplyAll={all({ visibility: pane.visibility, colors: pane.colors, opacity: pane.opacity, tint: pane.tint })}>
+        <PaneMenu icon={Eye} label="Layers" showLabel={!compact} active={pane.visibility.foam !== defaults.visibility.foam || pane.visibility.void !== defaults.visibility.void || !!pane.visibility.plates !== !!defaults.visibility.plates || !!pane.visibility.struts !== !!defaults.visibility.struts || pane.opacity.foam !== defaults.opacity.foam || pane.tint !== "none"} onApplyAll={all({ visibility: pane.visibility, colors: pane.colors, opacity: pane.opacity, tint: pane.tint })}>
           {(hasParts || hasRooms) && (
             <div className="space-y-1.5">
               <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Quick looks</div>

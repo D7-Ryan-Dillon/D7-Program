@@ -30,6 +30,7 @@ import { buildComposite, compositeToTile } from "../lib/arrange/composite";
 import { makePiece, withPiece } from "../lib/arrange/ops";
 import { defaultRules, emptyDoc } from "../lib/arrange/types";
 import { L, Lfilled, block, closed, corridor, cube, pocket, skylit } from "./fixtures/shaped";
+import { loadFixture } from "./v4/load";
 
 let failures = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -120,10 +121,10 @@ const cubes: ParsedTile[] = names.map((name) => {
 {
   const e = evaluateTile(cubes[1]);
   const c = e.results.find((r) => r.key === "continuous")!;
-  ok(c.measure.status !== "measured", "Continuous cannot be 'measured': the files hold no panel or joint model");
-  ok(/seam|material|joint/i.test(c.measure.cannot) && /voxel|triangle|mesh/i.test(c.measure.cannot), "Continuous does not say that mesh triangles and voxel edges are not seams");
-  ok(/material change/.test(c.measure.unit) || c.measure.status === "unavailable", "Continuous proxy is not in material changes");
-  ok(!/connect|circulation/i.test(c.measure.unit), "Continuous must not substitute circulation connectivity");
+  // Continuous reads the continuity of SPACE (how much of the void and of the walkable floor is one connected body); it does not claim to count seams
+  ok(c.measure.status === "measured" && c.measure.value !== null && c.measure.value >= 0 && c.measure.value <= 100, `Continuous should be a measured 0-100 continuity: ${c.measure.status} ${c.measure.value}`);
+  ok(/connected/.test(c.measure.headline) && /continuity of space/.test(c.measure.unit), `Continuous names what it measures: ${c.measure.headline} / ${c.measure.unit}`);
+  ok(/seamless|construction/i.test(c.measure.cannot), "Continuous does not say it cannot show seamless construction");
   const k = new Map(MATRIX.map((m) => [m.key, m]));
   ok(/passage width/.test(k.get("spatialDensity")!.quantitative), "Spatial density: narrowest to widest passage width");
   // a known passage: 4 ft, then a 3 ft neck, then a 10 ft chamber (widths are read between the walls, one cell added)
@@ -144,10 +145,13 @@ const cubes: ParsedTile[] = names.map((name) => {
   // a tile with no way in has no supported route: not assessable, with a reason, and no line through open air
   const sealed = ensureAnalysis(closed());
   const es = evaluateTile(sealed);
-  for (const key of ["spatialDensity", "graduated", "nonHierarchical", "continuous"] as const) {
+  for (const key of ["spatialDensity", "graduated", "nonHierarchical"] as const) {
     const x = es.results.find((q) => q.key === key)!;
     ok(x.measure.status === "unavailable" && x.measure.value === null && /opening|entry|floor/.test(x.interpretation.text), `${key} on a sealed room: ${x.measure.status} / ${x.interpretation.text}`);
   }
+  // a sealed room is still one connected space: Continuous reads the geometry, which needs no way in
+  const xc = es.results.find((q) => q.key === "continuous")!;
+  ok(xc.measure.status === "measured" && /one connected space/.test(xc.measure.headline), `continuous on a sealed room: ${xc.measure.headline}`);
   console.log(`  a sealed room: routes, passages and enclosure are "not assessable" with the reason (no opening at ground level)`);
 }
 
@@ -155,9 +159,10 @@ const cubes: ParsedTile[] = names.map((name) => {
 {
   const noCat = ensureAnalysis({ ...cubes[0], id: "nocat", name: "nocat", meta: undefined, guessed: {} } as ParsedTile);
   const th = evaluateTile(noCat).results.find((r) => r.key === "threaded")!;
-  ok(th.measure.status === "unavailable" && th.measure.value === null, `an unlabelled tile must not be assumed public: ${th.measure.status} ${th.measure.headline}`);
+  // spaces are counted from the walkable floors whether or not the tile has a program label; an unlabelled tile is never assumed public
+  ok(th.measure.value !== null && th.measure.supporting.some((s) => /Public program/.test(s.label) && /^0 of/.test(s.value)), `an unlabelled tile must not be assumed public: ${th.measure.status} ${th.measure.headline} / ${th.measure.supporting.map((s) => s.value).join(" | ")}`);
   const withCat = evaluateTile(cubes[0]).results.find((r) => r.key === "threaded")!;
-  ok(withCat.measure.status === "assumed" && withCat.measure.used.some((u) => /public/.test(u)), "Threaded with a category should be 'assumed', naming the assumption");
+  ok(withCat.measure.status === "inferred" && withCat.measure.used.some((u) => /public/.test(u)), "Threaded with a category should say it is inferred, naming the public assumption");
   // no plates, no retained element
   const flat = ensureAnalysis({ ...cubes[0], id: "noplates", name: "noplates", voxels: { ...cubes[0].voxels, plates: undefined, struts: undefined }, structure: undefined, spaces: undefined } as ParsedTile);
   const rs = evaluateTile(flat).results.find((r) => r.key === "resistant")!;
@@ -185,7 +190,7 @@ const cubes: ParsedTile[] = names.map((name) => {
   const rs = evaluateTile(shaped).results.find((r) => r.key === "resistant")!;
   const rf = evaluateTile(filled).results.find((r) => r.key === "resistant")!;
   ok(rs.measure.supporting.some((s) => /Container/.test(s.label) && /notch is not counted/.test(s.how ?? "")), "Retained/Resistant does not say the notch is excluded");
-  ok(rs.measure.value !== null && rf.measure.value !== null && rs.measure.value > rf.measure.value, `plan-area share should be larger against the L's 300 ft2 footprint than the box's 400 ft2 (${rs.measure.value} vs ${rf.measure.value})`);
+  ok(rs.measure.supporting.some((s) => /Container/.test(s.label) && /300/.test(s.value)) && rf.measure.supporting.some((s) => /Container/.test(s.label) && /400/.test(s.value)), `the retained floors read against the L's own footprint: ${rs.measure.supporting.map((s) => s.value).join(" | ")}`);
   const lf = evaluateTile(shaped).results.find((r) => r.key === "lightFilled")!;
   ok(lf.measure.value !== null, "Light-filled on the L");
   console.log(`  non-cubic: the L reads against ${f.containerFt3} ft3 and ${f.footprintFt2} ft2 (box ${g.containerFt3} ft3, ${g.footprintFt2} ft2); retained plan share ${rs.measure.value?.toFixed(0)}% vs ${rf.measure.value?.toFixed(0)}%`);
@@ -221,9 +226,9 @@ async function assemblies() {
   const stack = await asTile([{ tile: lobby, at: [0, 0, 0] }, { tile: gath, at: [0, 0, 10] }], "stack");
   ok(!!stack.meta?.roomCategory && Object.values(stack.meta!.roomCategory!).includes("lobby") && Object.values(stack.meta!.roomCategory!).includes("gathering"), "the assembly tile does not carry the program of its rooms");
   const th = evaluateTile(stack).results.find((r) => r.key === "threaded")!;
-  ok(th.measure.value === 1, `a gathering room above a lobby: ${th.measure.headline}`);
+  ok(th.measure.value === 1 && th.measure.supporting.some((s) => /Public program/.test(s.label) && /^1 of 1/.test(s.value)), `a gathering room above a lobby: ${th.measure.headline} / ${th.measure.supporting.map((s) => s.value).join(" | ")}`);
   const th2 = evaluateTile(stack, { assumptions: { ...DEFAULT_ASSUMPTIONS, publicCategories: ["lobby"] } }).results.find((r) => r.key === "threaded")!;
-  ok(th2.measure.value === 0, `if only lobbies are public the upper room is not a public instance: ${th2.measure.headline}`);
+  ok(th2.measure.value === 1 && th2.measure.supporting.some((s) => /Public program/.test(s.label) && /^0 of 1/.test(s.value)), `if only lobbies are public the upper room is a space but not a public instance: ${th2.measure.headline} / ${th2.measure.supporting.map((s) => s.value).join(" | ")}`);
   console.log(`  assembly program: ${th.measure.headline}; with only lobby public: ${th2.measure.headline}`);
 }
 
@@ -503,6 +508,33 @@ async function assemblies() {
     for (const r of e.results) ok(line.includes(r.measure.headline.replace(/"/g, '""')), `the CSV for ${t.name} / ${r.criterion.name} differs from the analysis`);
   }
   console.log(`  one source: the CSV rows and the Boards text equal the Analysis results for ${ts.length} tiles x 12 criteria`);
+}
+
+// ---- 9. the descriptors that used to read the same on every tile now differ across the first set ------------------------------------------------------------------
+{
+  const root = join(__dirname, "..", "lib", "tiles", "fixtures");
+  const names = readdirSync(root).filter((n) => existsSync(join(root, n, "meta.json"))).sort();
+  const tiles = names.map((n) => loadFixture(n, root)).filter((t): t is ParsedTile => !!t);
+  if (tiles.length >= 10) {
+    const keys: MatrixKey[] = ["carved", "stepped", "continuous", "resistant", "threaded", "graduated", "nonHierarchical", "forceDriven"];
+    const seen = new Map<string, Set<string>>();
+    const by = new Map<string, Map<string, { value: number | null; idx: number | undefined }>>();
+    for (const t of tiles) {
+      const e = evaluateTile(t);
+      for (const k of keys) {
+        const r = e.results.find((q) => q.key === k)!;
+        (seen.get(k) ?? seen.set(k, new Set()).get(k)!).add(`${r.interpretation.index}/${r.measure.value === null ? "n" : Math.round(r.measure.value)}`);
+        (by.get(t.name) ?? by.set(t.name, new Map()).get(t.name)!).set(k, { value: r.measure.value, idx: r.interpretation.index });
+      }
+    }
+    for (const k of keys) ok((seen.get(k)?.size ?? 0) >= 3, `${k} reads the same on (nearly) every tile of the first set: ${[...(seen.get(k) ?? [])].join(", ")}`);
+    // the tiles with many steps and terraces say so
+    const g1 = by.get("gathering_1_stepped_amphitheater");
+    ok(!!g1 && (g1.get("stepped")!.idx ?? 0) >= 3, `the stepped amphitheater should read as terraced: ${JSON.stringify(g1?.get("stepped"))}`);
+    const o2 = by.get("office_2_cascaded_terraced_plates");
+    ok(!!o2 && (o2.get("stepped")!.idx ?? 0) >= 2 && (o2.get("resistant")!.idx ?? 0) >= 2, `the cascaded plates should read as stepped with retained floors: ${JSON.stringify([o2?.get("stepped"), o2?.get("resistant")])}`);
+    console.log(`  the eight fixed descriptors take ${keys.map((k) => `${k} ${seen.get(k)?.size}`).join(", ")} distinct values across ${tiles.length} first-set tiles`);
+  }
 }
 
 (async () => {

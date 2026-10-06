@@ -68,6 +68,16 @@ V4 met every rule above and still read as built: a perfect box, framed doorways,
 - **Source counts**: a door costs two sources (tunnel and foyer), so a tile with many doors is tight (three V5 tiles are at the limit of 24). The recipe stays under 26,000 characters.
 - **Pair search**: openings of different heights are lined up at their floors (`pairCandidates` also tries the bottoms of the two openings and the same level, and up to four openings per face), because an eroded doorway's centre is not at its floor.
 
+## V6: a cubic set with stepped tops and wide openings (D, `engine/tiles/v6`)
+V6 goes back to the 20 ft cube (V3 assembled best) and keeps what V5 learned about eroding. What it does, and why each choice is safe for Arrange:
+- **A cube with a thin worn skin** (`kit6.cube_env`), held flat round every opening so tiles meet face to face. Heights stay 20 ft (O3 is 10, L1 is 40).
+- **Clear heights**: 8 ft in main spaces and 7 ft under shelves, ledges and soffits. The walking rule is 6.5 ft; the margin is what erosion noise costs.
+- **Wide openings** (`kit6.WidePorts`, 4.8 to 5.6 ft wide, 8.4 to 9.4 ft high, floor at the datum 1 / 11 / 21 ft), mixed per typology. Keep a door small only where the concept needs it (G4's inner room, L2's slots). A large door floods the interior: calibrate against the tile (`lab_door6.py`); a west door opened G5's wall.
+- **Interlock by stepped tops** (`kit6.box_cut`, `step_top`): a 10 ft notch cut from the top, filled by a cube shifted 10 ft in x or y and 10 ft up (the 10 ft shifted lattice). A nest is walkable only if the notch wall carries a door and the notch's floor level matches the nest's ground floor (G5 does it: a landing and a door on the notch wall); the other four tiles nest collision-free but are views, not routes. `kit6.step_bottom` is the mirror for tiles that stand over a notch.
+- **A cubic backup for every notched tile**: the same recipe with the notch left out, named `<tile>_v6c` (`defs_*.py` take `cubic=True`). It must pass the same bars.
+- **Plates**: `plate_mode` ("pool", "stop", "around", "through") in `WidePorts` and `path_pods` says what a door or path pod does when it meets a floor plate; the default is "pool" and G5 passes "stop" so its ledge stays intact.
+- **Checks**: `npm run check:v6` (`TILESET=v6` in the shared scripts); the vertical section tests guests at every lattice offset, not only face to face.
+
 ## Quick checklist before exporting a tile
 1. cell 0.5; the container is the shape you want (the exported `mask.u8` exists if it is not a box); tile height is one, two or three 20 ft increments if the type is a lobby void, stair or sectional gathering, one increment otherwise.
 2. at least one floor plate; one connected main floor; reachable from at least one doorway; real stairs or ramps (not bare jumps) wherever the floor changes by more than 0.5 ft.

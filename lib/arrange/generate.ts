@@ -14,6 +14,7 @@
 // The same candidate machinery serves "suggest next", "fill the gap" and "auto replace" (lib/arrange/suggest.ts).
 
 import type { ParsedTile } from "@/lib/types";
+import { connectJoint } from "./connectors";
 import { boundsOfBoxes, boxesOverlap, contactsBetween, placeBox, toCell, toFt, type PlacedBox } from "./geometry";
 import { placementFree } from "./collision";
 import { groupByPair, jointFromContacts } from "./joints";
@@ -213,6 +214,8 @@ export function placeAgainst(
   minScore: number,
   align = 0,
   why?: Rejections,
+  /** a nest probe: the new piece's box low corner, in cells from the neighbour's (a notch is filled by a piece shifted along the lattice), instead of lining openings up */
+  nestAt?: [number, number, number],
 ): Candidate | null {
   if (why) why.tried++;
   const parent = st.boxes.find((b) => b.piece.id === slot.pieceId);
@@ -221,21 +224,27 @@ export function placeAgainst(
   const occ = getOcc(o);
   const myFace = OPPOSITE[slot.face];
   const myOpenings = occ.features[myFace];
-  if (!myOpenings.length) {
+  if (!myOpenings.length && !nestAt) {
     if (why) why.noOpening++;
     return null;
   }
-  const q = myOpenings[Math.min(patchPick, myOpenings.length - 1)];
+  const q = myOpenings.length ? myOpenings[Math.min(patchPick, myOpenings.length - 1)] : undefined;
   const dims = o.dims;
   const axis = FACE_AXIS[slot.face];
   const [o1, o2] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1];
   const min: [number, number, number] = [0, 0, 0];
-  // along the axis: the new piece's opening plane lies on the slot's plane (a box face of either piece, or the wall of a notch)
-  min[axis] = slot.plane - q.plane;
-  const sp = slot.patch;
-  min[o1] = Math.round(parent.min[o1] + anchor(align % 3, sp.u0, sp.u1, sp.cu, q.u0, q.u1, q.cu));
-  min[o2] = Math.round(parent.min[o2] + anchor(Math.floor(align / 3) % 3, sp.v0, sp.v1, sp.cv, q.v0, q.v1, q.cv));
-  if (levelPick !== null && axis !== 2) {
+  if (nestAt) {
+    min[0] = parent.min[0] + nestAt[0];
+    min[1] = parent.min[1] + nestAt[1];
+    min[2] = parent.min[2] + nestAt[2];
+  } else if (q) {
+    // along the axis: the new piece's opening plane lies on the slot's plane (a box face of either piece, or the wall of a notch)
+    min[axis] = slot.plane - q.plane;
+    const sp = slot.patch;
+    min[o1] = Math.round(parent.min[o1] + anchor(align % 3, sp.u0, sp.u1, sp.cu, q.u0, q.u1, q.cu));
+    min[o2] = Math.round(parent.min[o2] + anchor(Math.floor(align / 3) % 3, sp.v0, sp.v1, sp.cv, q.v0, q.v1, q.cv));
+  }
+  if (!nestAt && levelPick !== null && axis !== 2) {
     // vertical choices beyond "opening to opening": a storey up or down (floor 1 meets floor 2), or any floor of this piece to any floor of the neighbour
     const facts = getFacts(tile, rot, mirror, 1);
     const code = levelPick & 7;
@@ -279,11 +288,31 @@ export function placeAgainst(
   }
   // a walkable route from a floor that can already be reached into the new piece's own main floor (not into a pocket of it)
   const wk = getWalk(box.occ);
-  const route = primary.connect.crossings.some((x) => {
+  let route = primary.connect.crossings.some((x) => {
     const mine = x.aId === "candidate" ? x.zoneA : x.bId === "candidate" ? x.zoneB : -1;
     const theirs = x.aId === "candidate" ? `${x.bId}#${x.zoneB}` : `${x.aId}#${x.zoneA}`;
     return mine === wk.main && (!st.reached || st.reached.has(theirs));
   });
+  // floors a doorway apart: with connectors switched on, a stair or ramp built into the lower room may make the way (lib/arrange/connectors.ts)
+  if (!route && ctx.rules.autoConnectors && primary.connect.kind === "connector") {
+    const via = connectJoint(withMe, primary, ctx.rules);
+    if (via) {
+      const made = via.made[0];
+      const cand = via.boxes.find((b) => b.piece.id === "candidate")!;
+      const par = via.boxes.find((b) => b.piece.id === parent.piece.id)!;
+      const cs = contactsBetween(cand, par);
+      if (cs.length) {
+        const j2 = jointFromContacts(cs, via.boxes, tol);
+        const candMain = getWalk(cand.occ).main;
+        route = j2.connect.crossings.some((x) => {
+          const mine = x.aId === "candidate" ? x.zoneA : x.bId === "candidate" ? x.zoneB : -1;
+          const theirsZone = x.aId === "candidate" ? x.zoneB : x.zoneA;
+          const theirs = made.hostId === parent.piece.id ? `${parent.piece.id}#${made.hostZoneBefore}` : `${parent.piece.id}#${theirsZone}`;
+          return mine === candMain && (!st.reached || st.reached.has(theirs));
+        });
+      }
+    }
+  }
   if (!route) {
     if (why) why.noRoute++;
     return null;
@@ -438,7 +467,14 @@ function step(ctx: GenContext, st: State, rng: () => number, minScore: number, t
     const slot = pickSlot(st, rng);
     const tile = slot && pickTile(ctx, st, rng, total);
     if (!slot || !tile) break;
-    const c = placeAgainst(ctx, st, slot, tile, Math.floor(rng() * 4), rng() < 0.5, Math.floor(rng() * 3), pickLevel(rng), minScore, Math.floor(rng() * 9), why);
+    // a notch (a stepped top, a bay) is filled by a piece shifted along the lattice: probe those spots against a notched neighbour
+    let nest: [number, number, number] | undefined;
+    const parent = st.boxes.find((b) => b.piece.id === slot.pieceId);
+    if (parent && rng() < 0.4 && parent.occ.inside < parent.o.dims[0] * parent.o.dims[1] * parent.o.dims[2] * 0.97) {
+      const pickOff = () => [-20, -20, 0, 20, 20][Math.floor(rng() * 5)];
+      nest = [pickOff(), pickOff(), [-20, 0, 20, 20][Math.floor(rng() * 4)]];
+    }
+    const c = placeAgainst(ctx, st, slot, tile, Math.floor(rng() * 4), rng() < 0.5, Math.floor(rng() * 3), nest ? null : pickLevel(rng), minScore, Math.floor(rng() * 9), why, nest);
     if (c) {
       c.score = scoreCandidate(ctx, st, c) + rng() * 0.15;
       found.push(c);

@@ -144,12 +144,15 @@ function Toolbar({ onExport, panelOpen, onPanel }: { onExport: () => void; panel
             <Opt label="Snap to a 10 ft lattice (Shift+L)" hint="Off: pieces snap to each other's faces, openings and floors">
               <Switch checked={A.ui.lattice} onCheckedChange={(v) => A.patchUi({ lattice: v })} />
             </Opt>
+            <Opt label="Auto-rotate" hint="Turns slowly; any touch of the model pauses it for a moment">
+              <Switch checked={A.ui.autoRotate} onCheckedChange={(v) => A.patchUi({ autoRotate: v })} />
+            </Opt>
             <Opt label="Compare before / after" hint="Two viewports: the model before your last big change and now">
               <Switch checked={A.compare !== "off"} onCheckedChange={(v) => A.setCompare(v ? "side" : "off")} />
             </Opt>
           </div>
           <div className="space-y-2 border-t border-border pt-2">
-            <VisibilityPanel visibility={A.ui.visibility} onVisibility={(v) => A.patchUi({ visibility: v })} colors={A.ui.colors} onColors={(c) => A.patchUi({ colors: c })} />
+            <VisibilityPanel parts visibility={A.ui.visibility} onVisibility={(v) => A.patchUi({ visibility: v })} colors={A.ui.colors} onColors={(c) => A.patchUi({ colors: c })} />
             <label className="block text-[11px] text-muted-foreground">
               Foam see-through {Math.round((1 - A.ui.foamOpacity) * 100)}%
               <input type="range" min={0} max={0.95} step={0.01} value={1 - A.ui.foamOpacity} onChange={(e) => A.patchUi({ foamOpacity: 1 - Number(e.target.value) })} className="mt-1 w-full accent-[var(--magenta)]" aria-label="Foam transparency" />
@@ -212,6 +215,7 @@ function CenterStage({ onExport, panelOpen, onPanel }: { onExport: () => void; p
       {...common}
       pieces={A.shown.pieces}
       joints={A.joints}
+      connectors={A.layout.connectors}
       selected={A.sel}
       highlight={A.highlight.size ? A.highlight : compareOn ? A.diff.added : undefined}
       selectedJointId={A.selJoint}

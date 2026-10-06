@@ -2,7 +2,7 @@
 
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import type { MeshColors, MeshVisibility } from "@/components/viewer/ThreeViewport";
+import { PLATE_COLOR, STRUT_COLOR, type MeshColors, type MeshVisibility } from "@/components/viewer/ThreeViewport";
 
 const SWATCHES = ["#ffffff", "#e8a6c8", "#c43383", "#db7228", "#f2b878", "#9a9a9a", "#e6e6e6", "#1c1c1c"];
 
@@ -48,11 +48,14 @@ export function VisibilityPanel({
   onVisibility,
   colors,
   onColors,
+  parts = false,
 }: {
   visibility: MeshVisibility;
   onVisibility: (v: MeshVisibility) => void;
   colors: MeshColors;
   onColors: (c: MeshColors) => void;
+  /** Also offer the floor plates and the support branches (a tile or arrangement that has them). */
+  parts?: boolean;
 }) {
   return (
     <div className="divide-y divide-border">
@@ -70,6 +73,24 @@ export function VisibilityPanel({
         color={colors.void}
         onColor={(c) => onColors({ ...colors, void: c })}
       />
+      {parts && (
+        <>
+          <Row
+            label="Floor plates"
+            visible={visibility.plates ?? true}
+            onToggleVisible={(v) => onVisibility({ ...visibility, plates: v })}
+            color={colors.plates ?? PLATE_COLOR}
+            onColor={(c) => onColors({ ...colors, plates: c })}
+          />
+          <Row
+            label="Branches"
+            visible={visibility.struts ?? true}
+            onToggleVisible={(v) => onVisibility({ ...visibility, struts: v })}
+            color={colors.struts ?? STRUT_COLOR}
+            onColor={(c) => onColors({ ...colors, struts: c })}
+          />
+        </>
+      )}
     </div>
   );
 }

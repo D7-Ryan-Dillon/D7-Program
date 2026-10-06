@@ -302,7 +302,7 @@ export function scoreContacts(contacts: Contact[], all: PlacedBox[], connectorFt
     walkable,
     stepFt,
     crossings: [...new Map(crossings.map((x) => [`${x.aId}#${x.zoneA}~${x.bId}#${x.zoneB}`, { aId: x.aId, zoneA: x.zoneA, bId: x.bId, zoneB: x.zoneB }])).values()],
-    connector: needsConnector ? { riseFt: connectorRise!, count: connectors.length } : null,
+    connector: needsConnector ? { riseFt: connectorRise!, count: connectors.length, items: connectors } : null,
     kind: walkable ? "walkable" : needsConnector ? "connector" : voidConnected ? "void" : "contact",
     why,
   };

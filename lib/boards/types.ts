@@ -8,6 +8,7 @@
 // moved there too, used by the shared lib/renderTile.ts, not just Boards) --
 // re-exported here so nothing importing them from this file had to change.
 import type { AxoViewKey } from "@/lib/faceViews";
+import type { BarSpec } from "@/lib/scoring/bars";
 import type { ClipState } from "@/lib/clipping";
 export type { AxoViewKey } from "@/lib/faceViews";
 export { DEFAULT_AXO_VIEW } from "@/lib/faceViews";
@@ -231,11 +232,13 @@ export interface BoardConfig {
   descriptorKeys?: string[] | null;
   /** What page 2 prints under a descriptor's bar, by tile and descriptor: the matrix measurement with its status (set from the evaluation, so the board, the Analysis tab and the exports say the same). Not persisted. */
   descriptorText?: Record<string, Record<string, string>>;
+  /** The bar of each descriptor of each tile from the matrix evaluation (strength band, status, fit). Not persisted. Without it a page falls back to the older 0-100 index. */
+  descriptorBars?: Record<string, Record<string, BarSpec>>;
 }
 
 export const DPI = 300;
 export const MIN_TILES = 1;
-export const MAX_TILES = 12;
+export const MAX_TILES = 15;
 
 /** How a tile's own name is shown on a board -- underscores read as
  * placeholders in a stored id, not as part of a title. */

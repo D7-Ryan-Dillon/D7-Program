@@ -4,6 +4,7 @@ import { RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ratingFor, type Joint } from "@/lib/arrange/types";
+import { connectorNeeds } from "@/lib/arrange/connectors";
 import { Bar, scoreTone } from "@/components/arrange/ui";
 import { useArrange } from "@/components/arrange/useArrange";
 
@@ -15,6 +16,53 @@ const PART_LABEL: { key: keyof Joint["parts"]; label: string }[] = [
   { key: "circulation", label: "Routes" },
   { key: "foam", label: "Foam" },
 ];
+
+/** A joint whose floors are a doorway apart: what a connector would need, the one that is built, and the buttons to build or take it out. */
+function ConnectorLine({ j }: { j: Joint }) {
+  const A = useArrange();
+  const made = A.layout.connectors.find((c) => c.jointId === j.id);
+  const failed = A.layout.connectorFails.find((c) => c.jointId === j.id);
+  const choice = A.doc.connectors?.[j.id];
+  if (made) {
+    return (
+      <div className="flex items-center justify-between gap-2 text-[10px]">
+        <span className="font-mono text-pink" title="A wedge of floor built into the lower room, worked out again from the pieces whenever they move">
+          {made.kind} built · {made.riseFt.toFixed(1)} ft up over {made.runFt.toFixed(1)} ft, {made.widthFt.toFixed(1)} ft wide{made.auto ? " (automatic)" : ""}
+        </span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            A.setConnector(j.id, made.auto ? { kind: "auto", off: true } : null);
+          }}
+          className="rounded border-hair px-1.5 py-0.5 text-muted-foreground hover:text-foreground"
+        >
+          Remove
+        </button>
+      </div>
+    );
+  }
+  if (j.connect.kind !== "connector" || !j.connect.connector) return choice?.off ? <div className="text-[10px] text-muted-foreground">connector taken out here</div> : null;
+  const need = connectorNeeds(j.connect.connector.riseFt);
+  return (
+    <div className="space-y-1 text-[10px]">
+      <div>
+        A stair up {j.connect.connector.riseFt.toFixed(1)} ft needs about {need.stairFt.toFixed(0)} ft of run in the lower room, a ramp about {need.rampFt.toFixed(0)} ft.
+        {failed ? <span className="text-orange"> {failed.why}.</span> : null}
+      </div>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          A.setConnector(j.id, { kind: "auto" });
+        }}
+        className="rounded border-hair px-1.5 py-0.5 text-foreground hover:border-white/30"
+      >
+        Add a connector
+      </button>
+    </div>
+  );
+}
 
 /** Every place two pieces touch, worst first, with the four parts of the score. Thumbs mark joints good or bad for "Regenerate marked". */
 export function JointsPanel() {
@@ -74,6 +122,7 @@ export function JointsPanel() {
                   </span>
                 </div>
                 {!j.connect.walkable && j.connect.why && <div>{j.connect.why}</div>}
+                <ConnectorLine j={j} />
               </div>
             </div>
           );

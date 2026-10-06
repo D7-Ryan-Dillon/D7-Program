@@ -1,7 +1,8 @@
 "use client";
 
 import { Select } from "@/components/ui/select";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
+import { AutoRotateRig } from "@/lib/useAutoRotate";
 import { Canvas } from "@react-three/fiber";
 import { Bounds, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -300,6 +301,8 @@ interface BuilderUi {
   pool: "checked" | "all";
   autoRotate: boolean;
   rotateSecs: number;
+  /** Which default look was saved (2 = white foam); an older one is brought to it once. */
+  look?: number;
 }
 const defaultBuilderUi = (): BuilderUi => ({
   shape: "cube",
@@ -314,11 +317,12 @@ const defaultBuilderUi = (): BuilderUi => ({
   typology: "",
   displayMode: "rendered",
   visibility: { foam: true, void: false },
-  colors: { foam: "#e8a6c8", void: "#1c1c1c" },
+  colors: { foam: "#ffffff", void: "#1c1c1c" },
   clip: defaultClipState(),
   pool: "checked",
   autoRotate: false,
   rotateSecs: 24,
+  look: 2,
 });
 
 export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: BankTile[]; allTiles: BankTile[]; onSaved: (tile: ParsedTile) => void }) {
@@ -334,6 +338,11 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
   const [name, setName] = useUiField(bui, setBui, "name");
   const [category, setCategory] = useUiField(bui, setBui, "category");
   const [typology, setTypology] = useUiField(bui, setBui, "typology");
+  const orbitRef = useRef<ComponentRef<typeof OrbitControls>>(null);
+  useEffect(() => {
+    if ((bui.look ?? 0) >= 2) return;
+    setBui((p) => ({ ...p, colors: { ...p.colors, foam: "#ffffff" }, autoRotate: false, look: 2 }));
+  }, [bui.look, setBui]);
   const [autoRotate, setAutoRotate] = useUiField(bui, setBui, "autoRotate");
   const [rotateSecs, setRotateSecs] = useUiField(bui, setBui, "rotateSecs");
   const viewportHandle = useRef<ViewportHandle | null>(null);
@@ -888,7 +897,8 @@ export function CubeHexBuilder({ bankTiles, allTiles, onSaved }: { bankTiles: Ba
                       shape={raw.shape}
                     />
                   </Bounds>
-                  <OrbitControls makeDefault enableDamping dampingFactor={0.08} autoRotate={autoRotate} autoRotateSpeed={60 / Math.max(rotateSecs, 1)} />
+                  <OrbitControls ref={orbitRef} makeDefault enableDamping dampingFactor={0.08} autoRotate={false} />
+                  <AutoRotateRig controlsRef={orbitRef} enabled={autoRotate} secs={rotateSecs} />
                   <CaptureBridge handleRef={viewportHandle} />
                 </Canvas>
               </div>

@@ -33,7 +33,7 @@ export const DEFAULT_ASSUMPTIONS: Assumptions = {
   constrictionRatio: 0.6,
   expansionRatio: 1.4,
   passageHeightFt: 4,
-  routeBlockFt: 1.5,
+  routeBlockFt: 5,
   maxRoutes: 6,
   openSky: 0.5,
   semiSky: 0.15,
@@ -47,8 +47,8 @@ export const ASSUMPTION_FIELDS: { key: keyof Assumptions; label: string; unit: s
   { key: "constrictionRatio", label: "Constriction below", unit: "× typical width", hint: "Spatial density: narrower than this share of the typical width is a constriction", min: 0.2, max: 0.9, step: 0.05 },
   { key: "expansionRatio", label: "Expansion above", unit: "× typical width", hint: "Spatial density: wider than this multiple of the typical width is an expansion", min: 1.1, max: 3, step: 0.05 },
   { key: "passageHeightFt", label: "Width read at", unit: "ft above the floor", hint: "Spatial density: height at which a passage's clear width is read", min: 1, max: 7, step: 0.5 },
-  { key: "routeBlockFt", label: "Routes differ by", unit: "ft", hint: "Non-hierarchical: after a route is found its corridor this wide is closed off; another route must find another way", min: 0.5, max: 6, step: 0.5 },
-  { key: "maxRoutes", label: "Routes searched", unit: "routes", hint: "Non-hierarchical: the search stops at this many distinct routes", min: 2, max: 12, step: 1 },
+  { key: "routeBlockFt", label: "Routes differ by", unit: "ft", hint: "Non-hierarchical: the walkable floor is cut into stretches this wide; two routes are independent when they share no stretch (a corridor narrower than this is one way)", min: 2.5, max: 10, step: 0.5 },
+  { key: "maxRoutes", label: "Routes searched", unit: "routes", hint: "Non-hierarchical: counting stops at this many independent routes", min: 2, max: 12, step: 1 },
 ];
 
 /** Settings an earlier version kept here that are now the project's shared walking rules (lib/walking.ts): never read from the assumptions again. */

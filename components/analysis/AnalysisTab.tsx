@@ -12,6 +12,9 @@ import { MATRIX, type MatrixGroup } from "@/lib/scoring/matrix";
 import { ResultsPanel } from "@/components/analysis/ResultsPanel";
 import { UploadZone } from "@/components/viewer/UploadZone";
 import { MatrixCard } from "@/components/analysis/MatrixCard";
+import { OverviewStrip } from "@/components/analysis/OverviewStrip";
+import { barOf, spreadMarks } from "@/lib/scoring/bars";
+import { typologyKey } from "@/lib/scoring/compareSet";
 import { CriteriaPanel } from "@/components/analysis/CriteriaPanel";
 import { SettingsPanel } from "@/components/analysis/SettingsPanel";
 import { UsablePanel } from "@/components/analysis/UsablePanel";
@@ -24,9 +27,9 @@ import { SyncAllMenu } from "@/components/shared/SyncAllMenu";
 import { TilePane, defaultPane, normalizePane, syncPane, type PaneState, type SyncField } from "@/components/shared/TilePane";
 import type { ParsedTile } from "@/lib/types";
 
-/** An axo corner, slowly turning -- the Analysis viewports' default. */
-const analysisPane = (): PaneState => ({ ...defaultPane(true), view: "iso-top-ne" });
-const normalizeAnalysisPane = (p: Partial<PaneState> | undefined) => normalizePane({ view: "iso-top-ne", ...p }, true);
+/** An axo corner, still until you start it turning -- the Analysis viewports' default. */
+const analysisPane = (): PaneState => ({ ...defaultPane(false), view: "iso-top-ne" });
+const normalizeAnalysisPane = (p: Partial<PaneState> | undefined) => normalizePane({ view: "iso-top-ne", ...p }, false);
 
 /** Everything about the Analysis tab that is remembered per project. */
 interface AnalysisUi {
@@ -73,6 +76,7 @@ export function AnalysisTab() {
     <MatrixCard
       key={`${tile.id}-${r.key}`}
       result={r}
+      typology={typologyKey(tile)}
       carried={carriedKeys.includes(r.key)}
       mark={mark}
       evidenceOn={evidence?.pane === pane && evidence.key === r.key}
@@ -165,6 +169,7 @@ export function AnalysisTab() {
             </div>
             <div className="glass-panel rounded-lg">
               <Section id="analysis.descriptors" title={`Descriptors (${results.length})`} summary={`${carriedKeys.length} carried`}>
+                <OverviewStrip tiles={[{ name: activeTile.name, typology: typologyKey(activeTile), results }]} carried={carriedKeys} />
                 {(["Formal / geometrical", "Organizational / spatial", "Experiential / atmospheric"] as MatrixGroup[]).map((g) => (
                   <div key={g} className="space-y-2">
                     <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">{g}</div>
@@ -250,7 +255,8 @@ export function AnalysisTab() {
 
       <div className="glass-panel rounded-lg">
       <Section id="analysis.compare" title={`Descriptors (${(compareResults[0] ?? []).length})`} summary={`${carriedKeys.length} carried`}>
-      <p className="mb-2 text-[11px] text-muted-foreground">Every tile is read with the same criteria and assumptions. Raw values come first, with how each was obtained; nothing is ranked.</p>
+      <p className="mb-2 text-[11px] text-muted-foreground">Every tile is read with the same criteria and assumptions. Raw values come first, with how each was obtained; nothing is ranked. Rings mark the highest and lowest where two tiles are at least two bands apart.</p>
+      <OverviewStrip tiles={compareTiles.map((t, i) => (t ? { name: t.name, typology: typologyKey(t), results: compareResults[i] ?? [] } : null)).filter((x): x is { name: string; typology: string; results: (typeof results) } => !!x)} carried={carriedKeys} />
       <div className="space-y-3">
         {MATRIX.map((crit, d) => {
           const row = compareResults.map((r) => r[d]).filter(Boolean);
@@ -260,7 +266,7 @@ export function AnalysisTab() {
               {row.map((r, i) => (
                 <div key={i} className={i === 2 ? "max-xl:hidden" : ""}>
                   <div className="mb-1 font-mono text-[10px] uppercase tracking-label text-muted-foreground md:hidden">{compareTiles[i]?.name}</div>
-                  {compareTiles[i] && cardFor(compareTiles[i]!, r, i)}
+                  {compareTiles[i] && cardFor(compareTiles[i]!, r, i, spreadMarks(row.map((x, k) => barOf(x, compareTiles[k] ? typologyKey(compareTiles[k]!) : undefined)))[i])}
                 </div>
               ))}
               {row.length > 1 && (

@@ -51,7 +51,7 @@ export interface UsableSpace {
 const CRAWL_FT = 3;
 
 /** Floor cells: void with material directly under it and at least CRAWL_FT of clear height straight above, so a low gap is not counted as floor. */
-function floorCells(f: VoxelFacts): Uint8Array {
+export function floorCells(f: VoxelFacts): Uint8Array {
   const out = new Uint8Array(f.cls.length);
   const head = Math.max(2, Math.round(CRAWL_FT / f.cell));
   const { nx, ny, nz } = f;

@@ -61,9 +61,9 @@ export interface Sheet {
   blob: Blob;
 }
 
-const toBlob = (c: HTMLCanvasElement) => new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error("Couldn't make the sheet."))), "image/png"));
+export const toBlob = (c: HTMLCanvasElement) => new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error("Couldn't make the sheet."))), "image/png"));
 
-class Page {
+export class Page {
   ctx: CanvasRenderingContext2D;
   constructor(public canvas: HTMLCanvasElement, public px: number, public p: Palette, public family: string) {
     const ctx = canvas.getContext("2d");
@@ -110,9 +110,9 @@ class Page {
   }
 }
 
-const M = 0.55;
+export const M = 0.55;
 
-function header(pg: Page, W: number, title: string, sub: string, project: string) {
+export function header(pg: Page, W: number, title: string, sub: string, project: string) {
   pg.text(title.toUpperCase(), M, 0.34, W * 0.6, 0.55, 0.42, { weight: "600", color: pg.p.accent, lines: 1 });
   pg.text(sub, M, 0.92, W * 0.62, 0.28, 0.15, { color: pg.p.muted, lines: 1 });
   pg.text(project.toUpperCase(), W - M - W * 0.3, 0.42, W * 0.3, 0.3, 0.15, { color: pg.p.muted, align: "right", lines: 1 });
@@ -120,7 +120,7 @@ function header(pg: Page, W: number, title: string, sub: string, project: string
   pg.rule(M, 1.28, W - 2 * M);
 }
 
-const statusColor = (pg: Page, s: string) => (s === "measured" ? pg.p.good : s === "unavailable" || s === "not-applicable" ? pg.p.muted : pg.p.warn);
+export const statusColor = (pg: Page, s: string) => (s === "measured" ? pg.p.good : s === "unavailable" || s === "not-applicable" ? pg.p.muted : pg.p.warn);
 
 // ---- sheet 1: the typology, the matrix, what is carried ----------------------------------------------------------------------------------------------
 

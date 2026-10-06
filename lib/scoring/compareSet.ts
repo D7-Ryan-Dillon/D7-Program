@@ -78,12 +78,12 @@ const RESOLUTION: Record<MatrixKey, number> = {
   carved: 4, // % points
   stepped: 0.3, // setbacks per 10 ft
   porous: 3,
-  continuous: 1.5,
-  resistant: 3,
+  continuous: 4, // % points of continuity
+  resistant: 8, // % of the plan
   threaded: 1,
   graduated: 1,
   nonHierarchical: 1,
-  forceDriven: 1,
+  forceDriven: 5, // % points of the dose
   lightFilled: 2,
   monumental: 0.15,
   spatialDensity: 0.07,
@@ -108,8 +108,8 @@ const none = (why: string): Preference => ({ mode: "descriptive", why });
 /** The system's default preferences per criterion: informed by whether the typology is about the quality, and always a range, never "as much as possible". */
 const RULES: Record<MatrixKey, RuleSet> = {
   carved: {
-    about: { mode: "higher", lo: 50, hi: 90, why: "A typology about carving reads more as one subtracted surface the more of it is a single eroded surface, up to nearly all of it." },
-    otherwise: none("This typology is not about the carved surface, so more or less of it is not preferred."),
+    about: { mode: "target", lo: 40, hi: 65, why: "A typology about carving wants a hollowed mass: about 40 to 65% of the block carved void; less is a solid with pockets, more is a shell." },
+    otherwise: none("This typology is not about carving, so how hollow it is is described, not preferred."),
   },
   stepped: {
     about: { mode: "target", lo: 1.5, hi: 6, why: "Setbacks read as legible terraces at roughly 1.5 to 6 per 10 ft of height; fewer is a plain section, many more is noise rather than more terracing." },
@@ -120,19 +120,19 @@ const RULES: Record<MatrixKey, RuleSet> = {
     otherwise: none("Openness is not preferred for this typology: walls and openings are both legitimate."),
   },
   continuous: {
-    about: { mode: "lower", lo: 2, hi: 20, why: "A continuous typology wants few changes of material along its surfaces; this is a proxy for seams (the files hold no joint model)." },
-    otherwise: none("Seam count is not preferred for this typology."),
+    about: { mode: "higher", lo: 60, hi: 95, why: "A continuous typology wants its space and its walkable floor to be one connected body: about 60% rising to 95% or more of each in one piece." },
+    otherwise: none("Continuity of space is not preferred for this typology: separate rooms and one connected space are both legitimate."),
   },
   resistant: {
-    about: { mode: "target", lo: 8, hi: 40, why: "A typology built around a retained element wants it to be present and legible without taking over: about 8 to 40% of the plan." },
-    otherwise: none("More retained mass is not better by itself: it is described, not preferred."),
+    about: { mode: "target", lo: 30, hi: 150, why: "A typology built around retained floors wants them present and legible without taking over: about 30 to 150% of the plan (up to one and a half floors' worth), the ground slab not counted." },
+    otherwise: none("More retained floor is not better by itself: it is described, not preferred."),
   },
   threaded: {
     about: { mode: "higher", lo: 0, hi: 2, why: "A typology about meeting public program above the ground floor wants at least two instances; more adds nothing to the quality (this rests on an assumption about which program is public)." },
     otherwise: none("Public program above ground is not preferred for this typology."),
   },
   graduated: {
-    about: { mode: "target", lo: 2, hi: 4, why: "A graduated typology wants a smooth transition in a few steps (about 2 to 4 enclosure steps); one is abrupt, many is fussy (a proxy: private and public are not assigned)." },
+    about: { mode: "target", lo: 1, hi: 3, why: "A graduated typology wants a smooth transition in a few steps (about 1 to 3 enclosure steps from the way in outward); none is uniform, many is fussy (a proxy: private and public are not assigned)." },
     otherwise: none("The number of enclosure steps is not preferred for this typology."),
   },
   nonHierarchical: {

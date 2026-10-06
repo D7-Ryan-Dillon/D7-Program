@@ -39,7 +39,7 @@ import {
   type Piece,
   type Priorities,
   type ProgramRules,
-  type Rating,
+  type ConnectorChoice, type Rating,
   type SavedArrangement,
   type Site,
   type SmoothSettings,
@@ -61,6 +61,8 @@ export interface ArrangeUi {
   foamOpacity: number;
   autoRotate: boolean;
   rotateSecs: number;
+  /** Which default look was saved (2 = solid white foam alone); an older one is brought to it once. */
+  look?: number;
   lattice: boolean;
   snapRadiusFt: number;
   showJoints: boolean;
@@ -80,12 +82,13 @@ export const defaultArrangeUi = (): ArrangeUi => ({
   rules: defaultRules(),
   site: defaultSite(),
   smooth: defaultSmooth(),
-  // the board look: ghosted foam, magenta void, peach plates, orange branches, on black
-  visibility: { foam: true, void: true, plates: true, struts: true },
+  // solid white foam alone; void, plates and branches are one switch away in Display
+  visibility: { foam: true, void: false, plates: false, struts: false },
   colors: { foam: "#ffffff", void: "#c43383", plates: "#f2b878", struts: "#db7228" },
-  foamOpacity: 0.14,
+  foamOpacity: 1,
   autoRotate: false,
   rotateSecs: 24,
+  look: 2,
   lattice: false,
   snapRadiusFt: 8,
   showJoints: true,
@@ -190,6 +193,8 @@ export interface ArrangeController {
   rename(id: string, name: string): void;
   autoNameAll(): void;
   rateJoint(id: string, r: Rating | null): void;
+  /** Build (or take out) a stair or ramp at a joint whose floors are a doorway apart; null puts the joint back to what the rule says. */
+  setConnector(jointId: string, choice: ConnectorChoice | null): void;
   // generating
   busy: string | null;
   /** what the viewport is waiting for, or null: a generation (until the whole result is built and read) or a tile being built */
@@ -257,6 +262,12 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
   const { tiles, addTile: addProjectTile, setActiveTile } = useProject();
   const [ui, setUi] = useProjectUi<ArrangeUi>("arrange", defaultArrangeUi);
   const patchUi = useCallback((patch: Partial<ArrangeUi>) => setUi((p) => ({ ...p, ...patch })), [setUi]);
+  // a project saved with the old default look (ghosted foam, magenta void) takes the new one once
+  useEffect(() => {
+    if ((ui.look ?? 0) >= 2) return;
+    const d = defaultArrangeUi();
+    setUi((p) => ({ ...p, visibility: d.visibility, colors: d.colors, foamOpacity: d.foamOpacity, autoRotate: false, look: 2 }));
+  }, [ui.look, setUi]);
   const hist = useHistory<ArrangementDoc>(ui.current);
   const doc = hist.doc;
 
@@ -591,6 +602,16 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
       if (r) ratings[id] = r;
       else delete ratings[id];
       hist.commit({ ...doc, ratings });
+    },
+    [doc, hist],
+  );
+
+  const setConnector = useCallback(
+    (id: string, choice: ConnectorChoice | null) => {
+      const connectors = { ...(doc.connectors ?? {}) };
+      if (choice) connectors[id] = choice;
+      else delete connectors[id];
+      hist.commit({ ...doc, connectors });
     },
     [doc, hist],
   );
@@ -1084,6 +1105,7 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
     rename,
     autoNameAll,
     rateJoint,
+    setConnector,
     busy,
     loading: busy && ["Generating", "Growing", "Regenerating", "Building the tile"].includes(busy) ? `${busy}…` : settling ? "Reading the building…" : null,
     notes,

@@ -320,3 +320,5 @@ Every tile passes wall thickness, plates joined to the body and contact with the
 - **Doorways are irregular on purpose** (3.5 to 15 ft wide), so the pair search lines openings up by their floors and bottoms rather than by centre; two tiles can meet at a floor with a small visible mismatch of the opening outlines.
 
 **Not verified:** running the recipes in Rhino itself (the headless engine is the same code, not Rhino), the `.3dm` export, MP4 / GIF films of the V5 assemblies. The Arrange and Analysis panels were exercised in a browser for V4 (docs/TILE_SET_V4.md); V5 uses the same code and was exercised headless.
+
+**Note (after the V6 round).** Arrange went back to the cubic-optimised pair search (the extra opening and floor alignment described above, tried by `pairCandidates` for V5, was dropped; the cache-key fix and the main-floor preference stay). Re-run on that Arrange, `npm run check:v5` reads 202 of 225 ordered pairs (116 of 120 unordered) walkable where the numbers above say 210 (119); the committed pictures in `engine/tiles/v5/assemblies/` are from the later run. V6 (`docs/TILE_SET_V6.md`) is the cubic set this Arrange is tuned for.

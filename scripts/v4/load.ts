@@ -9,7 +9,7 @@ import type { ParsedTile } from "../../lib/types";
 
 /** Which tile set the scripts read: v4 (default) or v5 (TILESET=v5). */
 export const SET = (process.env.TILESET ?? "v4").toLowerCase();
-export const EXPORTS = process.env.V4_EXPORTS ?? `C:/tmp/tiles${SET === "v5" ? 5 : 4}`;
+export const EXPORTS = process.env.V4_EXPORTS ?? `C:/tmp/tiles${SET.replace(/\D/g, "")}`;
 export const FIXTURES = join(__dirname, "..", "..", "lib", "tiles", `fixtures-${SET}`);
 /** The set this one is compared with in the variant comparison: the first set for V4, V4 for V5. */
 export const FIXTURES_V4 = join(__dirname, "..", "..", "lib", "tiles", "fixtures-v4");
@@ -38,11 +38,11 @@ export function loadExport(name: string, root = EXPORTS): ParsedTile | null {
 export function loadFixture(name: string, root = FIXTURES): ParsedTile | null {
   const dir = join(root, name);
   if (!existsSync(join(dir, "meta.json"))) return null;
-  const m = JSON.parse(readFileSync(join(dir, "meta.json"), "utf8")) as { grid: [number, number, number]; cell_ft: number; meta?: { category?: string; typology?: string; slot?: number; variant?: string } };
-  return build(name, m.grid, m.cell_ft, m.meta, { void: rawOrGz(dir, "void.u8"), plates: rawOrGz(dir, "plates.u8"), struts: rawOrGz(dir, "struts.u8"), mask: rawOrGz(dir, "mask.u8") });
+  const m = JSON.parse(readFileSync(join(dir, "meta.json"), "utf8")) as { grid: [number, number, number]; cell_ft: number; meta?: { category?: string; typology?: string; slot?: number; variant?: string }; config?: Record<string, unknown> };
+  return build(name, m.grid, m.cell_ft, m.meta, { void: rawOrGz(dir, "void.u8"), plates: rawOrGz(dir, "plates.u8"), struts: rawOrGz(dir, "struts.u8"), mask: rawOrGz(dir, "mask.u8") }, m.config);
 }
 
-function build(name: string, grid: [number, number, number], cell: number, meta: { category?: string; typology?: string; slot?: number; variant?: string } | undefined, v: { void?: Uint8Array; plates?: Uint8Array; struts?: Uint8Array; mask?: Uint8Array }): ParsedTile {
+function build(name: string, grid: [number, number, number], cell: number, meta: { category?: string; typology?: string; slot?: number; variant?: string } | undefined, v: { void?: Uint8Array; plates?: Uint8Array; struts?: Uint8Array; mask?: Uint8Array }, config?: Record<string, unknown>): ParsedTile {
   const m = /^(gathering|office|lobby)_(\d+)_(.+?)(?:_v(\d+))?$/i.exec(name);
   const category = (meta?.category ?? m?.[1] ?? "gathering").toLowerCase();
   const typology = meta?.typology ?? m?.[3]?.replace(/_/g, " ");
@@ -54,7 +54,7 @@ function build(name: string, grid: [number, number, number], cell: number, meta:
     tileFt: [grid[0] * cell, grid[1] * cell, grid[2] * cell],
     cellFt: cell,
     grid,
-    config: {},
+    config: config ?? {},
     metrics: {},
     glbUrl: "",
     voxels: { void: v.void, plates: v.plates, struts: v.struts, mask: v.mask },

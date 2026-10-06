@@ -23,6 +23,8 @@ export interface Piece {
   locked: boolean;
   /** Pieces sharing a group id move and select together. */
   group?: string;
+  /** DERIVED, never saved: the connectors (ramps and stairs) built into this piece's floor by the layout, as a short signature for the caches. */
+  conn?: string;
 }
 
 export type Rating = "good" | "bad";
@@ -36,6 +38,14 @@ export interface ArrangementDoc {
   names: Record<string, string>;
   /** Joint ratings by joint id (the two piece ids). */
   ratings: Record<string, Rating>;
+  /** Connectors you asked for or took out, by joint id. The geometry is not saved: it is worked out again from the pieces (lib/arrange/connectors.ts). */
+  connectors?: Record<string, ConnectorChoice>;
+}
+
+/** A stair or ramp joining floors that are more than a step apart across a joint. `off` takes one out when automatic connectors are on. */
+export interface ConnectorChoice {
+  kind: "ramp" | "stair" | "auto";
+  off?: boolean;
 }
 
 export const emptyDoc = (): ArrangementDoc => ({ pieces: [], entranceId: null, names: {}, ratings: {} });
@@ -85,6 +95,8 @@ export interface ProgramRules {
   levelTolerance: LevelTolerance;
   /** The most two floors may differ and still be reported as needing a ramp or stair connector, ft (only with levelTolerance "ramp"). */
   rampRiseFt: number;
+  /** Build a stair or ramp (a wedge of floor in the lower room) wherever two floors are a connector apart and one fits: the joint then carries a route. Off by default. */
+  autoConnectors?: boolean;
   /** The order a route should move through the categories, entrance first. */
   sequenceOrder: Exclude<Category, "other">[];
 }
@@ -110,7 +122,11 @@ export const defaultRules = (): ProgramRules => ({
 
 export const LEVEL_TOLERANCE_FT: Record<LevelTolerance, number> = { exact: 0, riser: 1.5, ramp: 4 };
 /** How far apart two floors may be and still be reported as needing a connector (never how big a jump is walkable). */
-export const connectorReachFt = (rules: ProgramRules) => (rules.levelTolerance === "ramp" ? Math.max(rules.rampRiseFt, 1.5) : LEVEL_TOLERANCE_FT[rules.levelTolerance]);
+export const connectorReachFt = (rules: ProgramRules) => {
+  const base = rules.levelTolerance === "ramp" ? Math.max(rules.rampRiseFt, 1.5) : LEVEL_TOLERANCE_FT[rules.levelTolerance];
+  // automatic connectors need floors that far apart to be found: at least a riser's worth, and the set rise when it is larger
+  return rules.autoConnectors ? Math.max(base, Math.max(rules.rampRiseFt, 1.5)) : base;
+};
 
 // ---- generating --------------------------------------------------------------------------------------------------
 
@@ -233,7 +249,7 @@ export interface JointConnect {
   /** the pairs of floors (a zone of each piece; see occupancy.ts) that walkable routes join */
   crossings: { aId: string; zoneA: number; bId: string; zoneB: number }[];
   /** the floors on the two sides are open and clear but further apart than one step: a stair or ramp would join them. Not a route. */
-  connector: { riseFt: number; count: number } | null;
+  connector: { riseFt: number; count: number; /** where they are (cells), for the planner */ items?: import("./walk").Connector[] } | null;
   /** walkable: a person can cross; connector: open and clear but needs a stair or ramp that is not there; void: open space continues but nobody can walk it (a view); contact: the pieces only touch */
   kind: "walkable" | "connector" | "void" | "contact";
   /** why an opening that lines up is not walkable, in words (empty when it is) */

@@ -16,7 +16,6 @@ import {
 } from "@/lib/arrange/types";
 import { toFt } from "@/lib/arrange/geometry";
 import { WALK } from "@/lib/walking";
-import { WalkRulesEditor } from "@/components/shared/WalkRulesEditor";
 import { Cap, Chip, Num } from "@/components/arrange/ui";
 import { useArrange } from "@/components/arrange/useArrange";
 
@@ -345,9 +344,13 @@ export function ProgramPanel() {
             <p className="text-[10px] text-muted-foreground">
               This only changes what is <em>reported</em>. A joint is walkable only across a step of {WALK.stepFt} ft or less, or over real stair or ramp
               geometry; no setting here turns a bigger jump into a route. Floors further apart than a step, with a clear doorway between them, are listed as
-              needing a stair or ramp connector, and Auto Generate never counts them toward reaching a piece.
+              needing a stair or ramp connector. They are not walkable until one is built: switch on Build connectors automatically below, or add one at its joint.
             </p>
-            <WalkRulesEditor />
+            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <span title="Wherever two floors a doorway apart need a stair or ramp, build one into the lower room when it fits; the joint then carries a route. Each can also be built or taken out at its joint.">Build connectors automatically</span>
+              <Switch checked={!!rules.autoConnectors} onCheckedChange={(v) => set({ autoConnectors: v, ...(v && rules.levelTolerance === "exact" ? { levelTolerance: "riser" as const } : {}) })} aria-label="Build connectors automatically" />
+            </div>
+            {rules.autoConnectors && <p className="text-[10px] text-muted-foreground">A stair rises a step every 1 ft of run and a ramp every 2 ft, 3 ft wide, in the lower room; they are found for floors up to the set rise apart. Proto-architectural slopes, not accessibility compliance.</p>}
             {rules.levelTolerance === "ramp" && (
               <Num
                 label="Report up to"

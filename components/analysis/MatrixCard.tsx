@@ -4,6 +4,8 @@ import { Crosshair, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MatrixResult } from "@/lib/scoring/matrixEval";
 import { STATUS_HELP, STATUS_LABEL } from "@/lib/scoring/matrix";
+import { barOf } from "@/lib/scoring/bars";
+import { MatrixBar } from "@/components/analysis/MatrixBar";
 
 const STATUS_TONE: Record<string, string> = {
   measured: "border-pink/50 text-pink",
@@ -36,6 +38,7 @@ export function MatrixCard({
   onInterpretation,
   mark = null,
   extra,
+  typology,
 }: {
   result: MatrixResult;
   carried?: boolean;
@@ -47,13 +50,15 @@ export function MatrixCard({
   mark?: "high" | "low" | null;
   /** anything else that belongs under this descriptor (its settings) */
   extra?: React.ReactNode;
+  /** the tile's typology key, for the fit line of the bar */
+  typology?: string;
 }) {
   const { criterion: c, measure: m, evidence: ev } = result;
   const hasEvidence = !!(ev.rooms?.length || ev.levels?.length || ev.route || ev.routePoints?.length || ev.regions?.length);
   const scale = result.interpretation.scale;
   const idx = result.interpretation.index;
   return (
-    <div className={cn("glass-panel rounded-lg p-4", mark === "high" && "ring-1 ring-pink/60", mark === "low" && "ring-1 ring-orange/70", evidenceOn && "ring-1 ring-orange/80")}>
+    <div id={`matrix-card-${c.key}`} className={cn("glass-panel rounded-lg p-4 scroll-mt-24", mark === "high" && "ring-1 ring-pink/60", mark === "low" && "ring-1 ring-orange/70", evidenceOn && "ring-1 ring-orange/80")}>
       <div className="mb-1 font-mono text-[9px] uppercase tracking-label text-muted-foreground">{c.group}</div>
       <div className="mb-2 flex items-start justify-between gap-2">
         <h3 className="text-sm font-medium">{c.name}</h3>
@@ -62,6 +67,8 @@ export function MatrixCard({
           {carried && <span className="rounded-full border border-magenta/50 px-2 py-0.5 font-mono text-[9px] uppercase tracking-label text-magenta">carried</span>}
         </div>
       </div>
+
+      <MatrixBar bar={barOf(result, typology)} className="mb-3" />
 
       <div className="space-y-3 text-xs">
         <div>

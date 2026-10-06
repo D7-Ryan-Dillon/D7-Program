@@ -1,6 +1,7 @@
 # The 15 typology tiles as engine 7 recipes
 
 > **The third set, V5, is in `v5/`** (`<category>_<n>_<typology>_v5`: the same family contract as V4 but eroded all the way through: a worn, bayed mask container, flat floors with lobed edges as the only hard things, frameless doorways; see `v5/README.md` and `docs/TILE_SET_V5.md`).
+> **The fourth set, V6, is in `v6/`** (`<category>_<n>_<typology>_v6`, with a `v6c` cubic backup of every notched tile: cubic blocks eroded inside, wide openings at the shared datums, 8 ft clear in main spaces, stepped tops that a shifted cube nests into; see `v6/README.md` and `docs/TILE_SET_V6.md`).
 >
 > **The second set, V4, is in `v4/`** (`<category>_<n>_<typology>_v4`: coordinated 20 ft lattice, floors at 1 / 11 / 21 / 31 ft, standard 6 x 8 ft doorways, real stairs and ramps, L-plan / single-storey / 40 ft tiles; see `v4/` and `docs/TILE_SET_V4.md`). This folder is the first set (V3 labels dropped), unchanged: ground slab top at z = 2 ft, mid datum at z = 12 ft. The two sets keep distinct names and tile ids and can sit in one project; typology keys are shared, so the Analysis tab compares them as variants of one typology.
 

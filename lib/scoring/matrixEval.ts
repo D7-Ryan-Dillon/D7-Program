@@ -17,8 +17,9 @@ import { assumptionsKey, DEFAULT_ASSUMPTIONS, mergeAssumptions, type Assumptions
 import { MATRIX, type MatrixCriterion, type MatrixKey, type MatrixStatus } from "@/lib/scoring/matrix";
 import { spatialDensityFor } from "@/lib/scoring/spatialDensity";
 import { usableSpace, type UsableSpace } from "@/lib/scoring/usable";
-import { classAt, distinctRoutes, findRoute, OUT, SOLID, skylights, surfaceStats, VOID, voxelFacts, type RouteOverride0, type VoxelFacts } from "@/lib/scoring/voxelFacts";
-import { cap, count, ft, ft2, ft3, list, num, pct, roomShort } from "@/lib/scoring/words";
+import { classAt, findRoute, groundEntries, OUT, SOLID, skylights, surfaceStats, VOID, voxelFacts, type RouteOverride0, type VoxelFacts } from "@/lib/scoring/voxelFacts";
+import { levelFacts, plateFacts, plateHeights, routeFacts, SPECK_FT3, treadFacts, voidComponents, walkFacts } from "@/lib/scoring/spaceFacts";
+import { cap, count, ft, ft2, ft3, num, pct } from "@/lib/scoring/words";
 import { WALK, walkKey } from "@/lib/walking";
 
 /** The walking rules every route in this evaluation was read with (the project's one set, shared with Arrange). */
@@ -100,41 +101,44 @@ const cell2 = (f: VoxelFacts) => f.cell * f.cell;
 // ---- Carved --------------------------------------------------------------------------------------------------------------------------------
 
 function carved(c: Ctx): Part {
-  const method = "On the faces of the void: faces against eroded foam, as a share of all faces against material (eroded foam, floor plates, support branches). Openings to the air are not surface. Plates and branches are the designed, inserted elements, so a face against one is where a different element meets the carved surface.";
+  const method = "Counts the separate carved spaces in the tile and reads how hollow it is. A space is a body of void (cells joined face to face); a pocket under 20 ft³ is a speck of erosion and is not a space. The tile's own room analysis (chambers joined by narrower passages) is counted too, and the larger of the two counts is used. Hollowness is the void as a share of the container's cells. The share of the void's surface that is eroded foam rather than inserted plates or branches is given beside it, no longer the headline.";
   const cannot = "How the building would be made. The files have no panel or joint model, so a surface that reads as one carved face is not shown to be seamless construction. Mesh triangles and voxel steps are not treated as panels or seams.";
   const f = c.f;
   if (!f || !f.voidCells) return unavailable("not assessable", method, cannot, "The tile has no voxel void to read a surface from.");
+  const vc = voidComponents(f);
+  const rooms = (c.m?.rooms ?? []).filter((r) => r.volume_ft3 >= SPECK_FT3).length;
+  const spaces = Math.max(vc.sizes.length, rooms, 1);
+  const voidShare = (100 * f.voidCells) / f.inside;
+  const largest = vc.cells ? (100 * vc.sizes[0]) / vc.cells : 100;
   const s = surfaceStats(f);
   const foam = s.wallFoam + s.floorFoam + s.ceilFoam;
-  const plate = s.wallPlate + s.floorPlate + s.ceilPlate;
-  const strut = s.wallStrut + s.floorStrut + s.ceilStrut;
-  const total = foam + plate + strut;
-  if (!total) return unavailable("not assessable", method, cannot, "The void has no surface against material (it is all open to the air).");
-  const share = (100 * foam) / total;
-  const voidShare = (100 * f.voidCells) / f.inside;
-  const idx = share < 40 ? 0 : share < 70 ? 1 : share < 90 ? 2 : 3;
+  const total = foam + s.wallPlate + s.floorPlate + s.ceilPlate + s.wallStrut + s.floorStrut + s.ceilStrut;
+  const eroded = total ? (100 * foam) / total : null;
+  let idx = voidShare < 30 ? 0 : voidShare < 45 ? 1 : voidShare < 60 ? 2 : 3;
+  if (spaces >= 4 && idx < 3) idx++;
   return {
     measure: {
-      headline: `${num(share, 0)}% of the void's surface is one eroded surface`,
-      value: share,
-      unit: "% of void surface against eroded foam (geometric continuity)",
-      status: "proxy",
+      headline: `${count(spaces, "carved space")}; the void is ${num(voidShare, 0)}% of the block`,
+      value: voidShare,
+      unit: `% of the container that is carved void (${count(spaces, "separate space")} counted)`,
+      status: "measured",
       method,
       cannot,
       supporting: [
-        { label: "Against eroded foam", value: ft2(foam * cell2(f)), how: "faces of void against foam" },
-        { label: "Against floor plates", value: ft2(plate * cell2(f)), how: "faces of void against a plate (floors and ceilings that were inserted)" },
-        { label: "Against branches", value: ft2(strut * cell2(f)), how: "faces of void against a support branch" },
-        { label: "Void in the block", value: pct(voidShare / 100), how: voidShare > 0 && f.shaped ? "of the container's cells (its notch is not counted)" : "of the container's cells" },
+        { label: "Separate spaces", value: `${vc.sizes.length} joined body${vc.sizes.length === 1 ? "" : "ies"} of void, ${count(rooms, "chamber")} by the room analysis`, how: "bodies of void of at least 20 ft³, and chambers the room analysis found" },
+        { label: "Void in the block", value: `${num(voidShare, 1)}% (${ft3(f.voidCells * f.cell ** 3)})`, how: f.shaped ? "of the container's cells (its notch is not counted)" : "of the container's cells" },
+        { label: "Largest space", value: `${num(largest, 0)}% of the void`, how: "the biggest body of void over all void in spaces" },
+        { label: "Specks", value: `${vc.specks} under 20 ft³`, how: "pockets of void too small to be a space" },
+        { label: "Against eroded foam", value: eroded === null ? "n/a" : `${num(eroded, 0)}% of the void's surface`, how: "faces of void against eroded foam rather than a plate or branch" },
       ],
-      used: [],
+      used: [`a space is at least ${ft3(SPECK_FT3)}`],
     },
     interpretation: {
-      text: `${num(share, 0)}% of the void's bounding surface is eroded foam and the rest meets plates or branches, so ${share >= 70 ? "the void reads mainly as one cut surface" : "the cut surface is interrupted by inserted elements"}; ${num(voidShare, 0)}% of the container is void. This describes geometry, not whether it could be built without seams.`,
-      scale: ["assembled", "mixed", "mostly carved", "carved"],
+      text: `${cap(count(spaces, "carved space"))}, and ${num(voidShare, 0)}% of the container is void, so the tile reads as ${voidShare < 30 ? "mostly solid with carved pockets" : voidShare < 45 ? "a solid mass hollowed in places" : voidShare < 60 ? "a hollowed mass" : "a cavernous mass"}${spaces > 1 ? `; the largest space holds ${num(largest, 0)}% of the void` : ""}. This describes geometry, not whether it could be built without seams.`,
+      scale: ["solid", "pocketed", "hollowed", "cavernous"],
       index: idx,
     },
-    evidence: { rooms: c.m?.rooms.slice(0, 1).map((r) => r.id) },
+    evidence: { rooms: c.m?.rooms.slice(0, 3).map((r) => r.id) },
   };
 }
 
@@ -194,7 +198,7 @@ function setbacks(f: VoxelFacts, present: (x: number, y: number, z: number) => b
 }
 
 function stepped(c: Ctx): Part {
-  const method = "On the void's section: for each layer of the tile, how far the void reaches along each horizontal axis; layers whose reach differs by less than 1 ft are one stage (voxel stair-stepping is not a setback), a stage must hold the height set below, and a step must move the edge at least the run set below. The count is of steps in the direction that repeats most, on the better axis; it is divided by the height of the container in units of 10 ft.";
+  const method = "The count of steps is the most of four readings. On the void's section: for each layer of the tile, how far the void reaches along each horizontal axis; layers whose reach differs by less than 1 ft are one stage (voxel stair-stepping is not a setback), a stage must hold the height set below, and a step must move the edge at least the run set below. The count is of steps in the direction that repeats most, on the better axis; it is divided by the height of the container in units of 10 ft.";
   const cannot = "Whether the steps read as terraces to someone standing in the space; and nothing about the outside of the building, which this tile alone does not have (the container's own setbacks are reported separately).";
   const f = c.f;
   if (!f || !f.voidCells) return unavailable("not assessable", method, cannot, "The tile has no voxel void to take a section from.");
@@ -237,7 +241,13 @@ function stepped(c: Ctx): Part {
   };
   const terraces = Math.max(terraceSteps("x"), terraceSteps("y"));
   const nVoid = best(pick);
-  const n = Math.max(nVoid, terraces);
+  // the floor itself: the treads and risers of a stair, terrace or cascade (read on the floor surface, walkable or not), and floors that step up level by level
+  const tf = treadFacts(f);
+  const lvl = levelFacts(f, c.a.groundToleranceFt);
+  const levelSteps = Math.max(0, lvl.levels.length - 1);
+  // floor plates standing at different heights (a cascade of retained floors): each height above the ground slab is a step up
+  const plateSteps = Math.max(0, plateHeights(plateFacts(f)) - 1);
+  const n = Math.max(nVoid, terraces, tf.risers, levelSteps, plateSteps);
   // the container's own outline (an L or a stepped section): the same count on the occupied cells
   const inside = (x: number, y: number, z: number) => f.cls[(x * f.ny + y) * f.nz + z] !== OUT;
   const ex = setbacks(f, inside, "x", run, rise);
@@ -251,17 +261,20 @@ function stepped(c: Ctx): Part {
   }
   const heightFt = Math.max(f.cell, (zhi - zlo + 1) * f.cell);
   const per10 = (n / heightFt) * 10;
-  const idx = n === 0 ? 0 : n === 1 ? 1 : n <= 3 ? 2 : 3;
+  const idx = n === 0 ? 0 : n <= 2 ? 1 : n <= 4 ? 2 : 3;
   return {
     measure: {
-      headline: `${count(n, "setback increment")} in ${ft(heightFt)} of height`,
+      headline: `${count(n, "step")} up the section in ${ft(heightFt)} of height${tf.treads ? ` (${count(tf.treads, "tread")}, ${count(tf.risers, "riser")})` : ""}`,
       value: per10,
-      unit: `setback increments per 10 ft of height (${n} in all)`,
+      unit: `steps per 10 ft of height (${n} in all: the most of the void's setbacks, terraces of floors, risers of the floor and stepped levels)`,
       status: "measured",
       method: `${method} Run ≥ ${ft(run, 1)}, held ≥ ${ft(rise, 1)}.`,
       cannot,
       supporting: [
         { label: "Steps of the void's section", value: `${pick.axis.toUpperCase()}: ${pick.inward} inward, ${pick.outward} outward`, how: "steps of the void's reach going up, on the better axis" },
+        { label: "Treads and risers", value: `${tf.treads} treads, ${tf.risers} risers${tf.spanFt ? ` over ${ft(tf.spanFt, 1)}` : ""}`, how: "flat stretches of floor of at least 4 ft² that a step of 1 to 8 ft in the floor joins, read on the floor surface (walkable or not: a seat is a tread)" },
+        { label: "Plates at different heights", value: String(plateSteps), how: "heights the floor plates' top surfaces stand at above the ground slab (within 1 ft is one)" },
+        { label: "Walkable levels", value: String(lvl.levels.length), how: "heights of walkable floor, within 3 ft of each other counted as one; each step up between them is a step" },
         { label: "Terraces", value: String(terraces), how: "successive floors at least the set rise apart whose floor edge also steps by the set run" },
         { label: "Stages held", value: String(pick.segments), how: "stretches of height with the same reach" },
         { label: "Container setbacks", value: String(env), how: "the same count on the container's own outline (0 for a plain box)" },
@@ -270,8 +283,8 @@ function stepped(c: Ctx): Part {
       used: [`smallest setback ${ft(run, 1)}`, `must hold ${ft(rise, 1)}`],
     },
     interpretation: {
-      text: n === 0 ? `The void's section does not step: its reach along either axis stays within 1 ft over the height of the tile, apart from changes smaller than ${ft(run, 1)} or shorter than ${ft(rise, 1)}, and no floor sits a full ${ft(rise, 1)} above another with its edge moved.` : `${cap(count(n, "setback increment"))} over ${ft(heightFt)}, ${num(per10, 1)} per 10 ft of height (${nVoid ? `the void's section steps ${dir}` : ""}${nVoid && terraces ? "; " : ""}${terraces ? `${count(terraces, "terrace")} of floors` : ""}).`,
-      scale: ["no setbacks", "one setback", "a few setbacks", "terraced"],
+      text: n === 0 ? `Neither the void's section nor the floor steps: its reach along either axis stays within 1 ft over the height of the tile, there is no riser of 1 ft or more in the floor, and no floor sits a full ${ft(rise, 1)} above another.` : `${cap(count(n, "step"))} over ${ft(heightFt)}, ${num(per10, 1)} per 10 ft of height (${[nVoid ? `the void's section steps ${dir}` : "", tf.risers ? `${count(tf.treads, "tread")} joined by ${count(tf.risers, "riser")}` : "", levelSteps ? `${count(lvl.levels.length, "walkable level")}` : "", terraces ? `${count(terraces, "terrace")} of floors` : ""].filter(Boolean).join("; ")}).`,
+      scale: ["no steps", "a step or two", "stepped", "terraced"],
       index: idx,
     },
     evidence: { levels: c.m?.levels.map((l) => l.id) },
@@ -402,89 +415,101 @@ function materialChanges(f: VoxelFacts, points: [number, number, number][]): { c
 }
 
 function continuous(c: Ctx): Part {
-  const method = "Proxy. The matrix counts visible seams per 10 m of surface; the files hold no panel, joint or construction model, so seams cannot be counted. Instead a floor-supported route is walked from a ground-level opening and the surface met on the way is read at three places (the floor underfoot and the wall on each side at standing height): a change from eroded foam to a floor plate or a support branch, or back, is counted as a material change. The count is per 10 m of each surface traversed.";
-  const cannot = "That any surface is or is not seamless in construction. Mesh triangles and voxel edges are not seams and are not counted. A route that meets only eroded foam says the surface is geometrically continuous along it, not that no joints would be needed.";
+  const method = "Reads how continuous the space of the tile is. First, the share of the void that is one connected body (cells joined face to face; specks under 20 ft³ are left out). Second, the share of the walkable floor that is one surface (a person can step from any part of it to any other under the shared walking rules). The measure is the mean of the two. The tile's room analysis (chambers, the passages between them, loops) is given beside it. The older count of material changes along a route (a proxy for seams) is kept below as a supporting line.";
+  const cannot = "That the space is seamless in construction, or that it feels continuous to a person: it reads the connectivity of the geometry only.";
   const f = c.f;
-  if (!f) return unavailable("not assessable", method, cannot, "The tile has no voxel data.");
+  if (!f || !f.voidCells) return unavailable("not assessable", method, cannot, "The tile has no voxel void to read.");
+  const vc = voidComponents(f);
+  const w = walkFacts(f);
+  const mainVoid = vc.cells ? (100 * vc.sizes[0]) / vc.cells : 0;
+  const hasWalk = w.zones.length > 0;
+  const mainWalk = 100 * w.mainShare;
+  const value = hasWalk ? (mainVoid + mainWalk) / 2 : mainVoid;
+  const idx = value >= 90 ? 3 : value >= 70 ? 2 : value >= 45 ? 1 : 0;
+  const g = c.m?.spaces.graph;
   const rr = findRoute(f, { from: c.over?.from, to: c.over?.to, destination: "farthest" });
-  if (!rr.route) return unavailable("not assessable", method, cannot, `${rr.reason} Without a floor-supported route there is no surface to walk along, and a line through the void is not substituted.`);
-  const mc = materialChanges(f, rr.route.points);
-  const idx = mc.per10m < 0.5 ? 3 : mc.per10m < 2 ? 2 : mc.per10m < 5 ? 1 : 0;
+  const mc = rr.route ? materialChanges(f, rr.route.points) : null;
   return {
     measure: {
-      headline: `${num(mc.per10m, 1)} material changes per 10 m of surface (proxy for seams)`,
-      value: mc.per10m,
-      unit: "material changes per 10 m of surface traversed",
-      status: "proxy",
+      headline: `${num(mainVoid, 0)}% of the void is one connected space${hasWalk ? `; ${num(mainWalk, 0)}% of the walkable floor is one surface` : "; no walkable floor"}`,
+      value,
+      unit: "% continuity of space (mean of connected void and connected walkable floor)",
+      status: "measured",
       method,
       cannot,
       supporting: [
-        { label: "Route", value: `${ft(rr.route.lengthFt)} (${num(mc.lengthM, 1)} m)`, how: "floor-supported, from a ground-level opening to " + rr.route.how },
-        { label: "Material changes", value: String(mc.changes), how: "foam ↔ plate or branch, summed over floor and both walls" },
+        { label: "Connected void", value: `${num(mainVoid, 0)}% in the largest of ${count(vc.sizes.length, "space")}`, how: "the biggest body of void over all void in spaces" },
+        { label: "Walkable floor", value: hasWalk ? `${num(mainWalk, 0)}% in one of ${count(w.zones.length, "surface")}` : "none", how: "the biggest stand-able floor over all of it, under the walking rules" },
+        ...(g ? [{ label: "Rooms", value: `${g.rooms} rooms, ${g.connections} connections, ${g.loops} loops${g.neck_ft.min !== null ? `, narrowest passage ${ft(g.neck_ft.min, 1)}` : ""}`, how: "the tile's room analysis" }] : []),
+        ...(mc ? [{ label: "Seam proxy", value: `${num(mc.per10m, 1)} material changes per 10 m`, how: "foam to plate or branch along a floor-supported route (the earlier measure, kept as a supporting line)" }] : []),
       ],
       used: [walkUsed()],
     },
     interpretation: {
-      text: `Along a ${ft(rr.route.lengthFt)} floor-supported route the surface changes material ${mc.changes} time${mc.changes === 1 ? "" : "s"} (${num(mc.per10m, 1)} per 10 m of surface). That reads as ${mc.per10m < 2 ? "geometrically continuous" : "broken up by plates and branches"}; it is a stand-in for the seams count, which the files cannot give.`,
+      text: `${num(mainVoid, 0)}% of the void is one connected body${vc.sizes.length > 1 ? ` (of ${count(vc.sizes.length, "separate space")})` : ""}${hasWalk ? ` and ${num(mainWalk, 0)}% of the walkable floor is one surface (${count(w.zones.length, "walkable floor")})` : ", with no walkable floor to join"}, so the space reads as ${idx >= 3 ? "continuous" : idx === 2 ? "mostly continuous" : idx === 1 ? "interrupted" : "broken up"}.`,
       scale: ["broken up", "interrupted", "mostly continuous", "continuous"],
       index: idx,
     },
-    evidence: { routePoints: rr.route.points },
+    evidence: rr.route ? { routePoints: rr.route.points } : {},
   };
 }
 
 // ---- Retained / Resistant -------------------------------------------------------------------------------------------------------------------
 
 function resistant(c: Ctx): Part {
-  const method = "The retained element is the protected solid the recipe set: the floor plates and the support branches grown to hold them (they resist erosion; all other foam is eroded and is not called retained). Area is the plan area covered by those cells against the plan area of the container; volume is their cells against the container's cells. Cells outside a shaped container are in neither.";
+  const method = "The retained element is the protected solid the recipe set: the floor plates (the engine's plates) and the support branches grown to hold them. They resist the erosion; all other foam is eroded and is not called retained. The ground slab is the foundation the tile stands on and is reported separately, not counted as a retained floor. Read: how many floor plates remain, their plan area against the container's footprint (a measure of floors' worth), how much of their designed thickness survived, and how they were set to resist (the recipe's resistance).";
   const cannot = "Whether the retained element reads as resisting the erosion: that depends on how it meets the void and how it is seen.";
   const f = c.f;
   if (!f) return unavailable("not assessable", method, cannot, "The tile has no voxel data.");
-  let plateCells = 0;
+  const pf = plateFacts(f);
+  const info = new Map((c.tile.structure?.plates ?? []).map((p) => [p.id, p]));
   let strutCells = 0;
-  const cols = new Uint8Array(f.nx * f.ny);
-  for (let x = 0; x < f.nx; x++)
-    for (let y = 0; y < f.ny; y++)
-      for (let z = 0; z < f.nz; z++) {
-        const i = (x * f.ny + y) * f.nz + z;
-        if (f.cls[i] !== SOLID) continue;
-        const p = f.plates && f.plates[i];
-        const st = f.struts && f.struts[i];
-        if (p) plateCells++;
-        if (st) strutCells++;
-        if (p || st) cols[x * f.ny + y] = 1;
-      }
-  const retained = plateCells + strutCells;
-  if (!retained) {
+  let plateCells = 0;
+  for (let i = 0; i < f.cls.length; i++) {
+    if (f.cls[i] !== SOLID) continue;
+    if (f.plates && f.plates[i]) plateCells++;
+    if (f.struts && f.struts[i]) strutCells++;
+  }
+  if (!pf.length && !plateCells && !strutCells) {
     return {
       measure: { headline: "no retained element identified", value: null, unit: "", status: "unavailable", method, cannot, supporting: [{ label: "Foam", value: ft3((f.inside - f.voidCells) * f.cell ** 3), how: "all material, not called retained" }], used: [] },
       interpretation: { text: "This tile has no protected floor plates or support branches, so no element is identified as the one that resists the erosion. The remaining foam is what erosion left, not something retained; nothing is scored." },
       evidence: {},
     };
   }
-  let colCount = 0;
-  for (let i = 0; i < cols.length; i++) colCount += cols[i];
-  const areaShare = (100 * colCount * cell2(f)) / f.footprintFt2;
-  const volShare = (100 * retained) / f.inside;
-  const idx = volShare < 3 ? 0 : volShare < 8 ? 1 : volShare < 15 ? 2 : 3;
+  // the ground slab is the plate that reaches the bottom of the tile; the others are the retained floors
+  const ground = pf.filter((p) => p.ground);
+  const floors = pf.filter((p) => !p.ground);
+  const nameOf = (p: (typeof pf)[number]) => info.get(p.id)?.name ?? `plate ${p.id}`;
+  const floorArea = floors.reduce((a, p) => a + p.areaFt2, 0);
+  const worth = f.footprintFt2 ? (100 * floorArea) / f.footprintFt2 : 0;
+  const designed = (id: number) => (info.get(id) as { designed_thickness_ft?: number } | undefined)?.designed_thickness_ft ?? 0;
+  const thick = floors.filter((p) => designed(p.id) > 0 && info.get(p.id));
+  const survival = thick.length ? (100 * thick.reduce((a, p) => a + Math.min(1, info.get(p.id)!.thickness_ft / designed(p.id)), 0)) / thick.length : null;
+  const volShare = (100 * (plateCells + strutCells)) / f.inside;
+  const idx = worth < 15 ? 0 : worth < 40 ? 1 : worth < 80 ? 2 : 3;
+  const res = c.m?.plateResistance ?? null;
   return {
     measure: {
-      headline: `${num(areaShare, 0)}% of the floor area and ${num(volShare, 1)}% of the volume is retained solid`,
-      value: areaShare,
-      unit: "% of container plan area covered by retained solid (volume share given beside it)",
+      headline: floors.length ? `${count(floors.length, "retained floor plate")}, ${ft2(floorArea)} (${num(worth, 0)}% of the plan), besides the ground slab` : "no retained floor plate besides the ground slab",
+      value: worth,
+      unit: "% of the container's footprint covered by retained floor plates (the ground slab excluded)",
       status: "measured",
       method,
       cannot,
       supporting: [
-        { label: "Volume", value: `${num(volShare, 1)}% (${ft3(retained * f.cell ** 3)})`, how: "plate and branch cells over the container's cells" },
-        { label: "Floor plates", value: `${count((c.tile.structure?.plates ?? []).length, "plate")}, ${ft2((c.tile.structure?.plates ?? []).reduce((a, p) => a + p.area_ft2, 0))}`, how: "protected plates from the recipe" },
-        { label: "Branches", value: ft3(strutCells * f.cell ** 3), how: "support branches grown to hold them" },
+        { label: "Floor plates", value: floors.length ? floors.map((p) => `${nameOf(p)} ${ft2(p.areaFt2)} at ${ft(p.topFt, 1)}`).join("; ") : "none", how: "the engine's protected plates other than the ground slab" },
+        { label: "Ground slab", value: ground.length ? ground.map((p) => `${ft2(p.areaFt2)}, ${ft(p.zMaxFt - p.zMinFt, 1)} thick`).join("; ") : "none identified", how: "the foundation, not counted as a retained floor" },
+        { label: "Survived", value: survival === null ? "n/a" : `${num(survival, 0)}% of designed thickness`, how: "built thickness of the floor plates over what the recipe designed" },
+        { label: "Resistance set", value: res === null ? "n/a" : `${num(res, 2)} (1 = like the foam)`, how: "the recipe's plate resistance to the solvent" },
+        { label: "Volume", value: `${num(volShare, 1)}% (${ft3((plateCells + strutCells) * f.cell ** 3)})`, how: "plate and branch cells over the container's cells, ground slab included" },
+        { label: "Branches", value: ft3(strutCells * f.cell ** 3), how: "support branches grown to hold the plates" },
         { label: "Container", value: `${ft3(f.containerFt3)} over ${ft2(f.footprintFt2)}`, how: f.shaped ? "an L or stepped container: its notch is not counted" : "the whole block" },
       ],
       used: [],
     },
     interpretation: {
-      text: `The retained solid (floor plates and their branches) covers ${num(areaShare, 0)}% of the container's plan and fills ${num(volShare, 1)}% of its volume; the rest of the foam is what erosion left.`,
+      text: floors.length ? `${cap(count(floors.length, "retained floor plate"))} stand${floors.length === 1 ? "s" : ""} in the eroded mass, ${ft2(floorArea)} in all, about ${num(worth / 100, 1)} floors' worth of the plan${survival !== null && survival < 85 ? `; the plates survived at ${num(survival, 0)}% of their designed thickness` : ""}. Everything else is eroded foam.` : "No floor plate is retained besides the ground slab: the floors, where there are any, are shaped by the erosion itself.",
       scale: ["slight", "present", "clear", "dominant"],
       index: idx,
     },
@@ -495,50 +520,66 @@ function resistant(c: Ctx): Part {
 // ---- Threaded ---------------------------------------------------------------------------------------------------------------------------------
 
 function threaded(c: Ctx): Part {
-  const method = "Counts rooms (spaces) whose floor lies above the ground floor and whose program is public. Program comes from the tile's own category (or, for an assembly, from the tile each room came from); a category is treated as public only if it is on the list set below, and any room can be set public or private by hand. A connected void is not a program instance, and a room with no category is not assumed public.";
-  const cannot = "What actually happens in a room: the matrix counts public program, and the tile's category is only a label for it.";
+  const method = "Counts the spaces a person can walk to above the ground floor. A space is a stretch of walkable floor (the shared walking rules) that sits on a level more than the ground tolerance above the lowest walkable floor and is a floor of its own (a flat stretch of at least the smallest space, joined or not to the ground floor). Levels are the heights of walkable floor, within 3 ft of each other counted as one. Each space is a program instance of the tile's own category, public if that category is on the list set below (a stand-in: the files carry no program for individual rooms). The earlier count, rooms from the room analysis whose lowest floor is above ground, is the fallback where there is no walkable floor.";
+  const cannot = "What actually happens in a space: the matrix counts public program, and the tile's category is only a label for it.";
+  const f = c.f;
   const m = c.m;
-  if (!m) return unavailable("not assessable", method, cannot, "The tile has no spaces to count.");
+  if (!f && !m) return unavailable("not assessable", method, cannot, "The tile has no spaces to count.");
   const cat = c.tile.meta?.category ?? c.tile.guessed.category;
   const perRoom = (c.tile.meta as { roomCategory?: Record<string, string> } | undefined)?.roomCategory;
-  if (!cat && !perRoom) return unavailable("not assessable", method, cannot, "The tile carries no program category (gathering, office, lobby), and an unlabelled room does not establish public program. Set the rooms' class below to assess this.");
-  const levels = m.levels;
-  if (!levels.length) return unavailable("not assessable", method, cannot, "The tile has no floor level, so nothing is above or below ground.");
-  const ground = Math.min(...levels.map((l) => l.z_ft));
-  const isPublic = (r: (typeof m.rooms)[number]): boolean => {
-    const key = `${c.tile.id}:${r.id}`;
-    const o = c.a.roomClass[key];
+  const lv = f ? levelFacts(f, c.a.groundToleranceFt) : null;
+  // the program of a space: the category of the room it is in (an assembly keeps each room's own tile category), else the tile's; public by the list below or by hand
+  const isPublic = (cell: number): boolean => {
+    const room = f?.rooms ? f.rooms[cell] : 0;
+    const o = room ? c.a.roomClass[`${c.tile.id}:${room}`] : undefined;
     if (o) return o === "public";
-    const k = perRoom?.[String(r.id)] ?? cat;
+    const k = (room ? perRoom?.[String(room)] : undefined) ?? cat;
     return !!k && c.a.publicCategories.includes(k);
   };
-  const above = m.rooms.filter((r) => r.floor_z_ft.min !== null && r.floor_z_ft.min > ground + c.a.groundToleranceFt && r.floor_area_ft2 >= 4);
-  const pub = above.filter(isPublic);
-  const overridden = Object.keys(c.a.roomClass).some((k) => k.startsWith(`${c.tile.id}:`));
-  const total = m.rooms.filter((r) => r.floor_area_ft2 >= 4).length;
-  const status: MatrixStatus = "assumed";
+  const walk = !!lv && lv.levels.length > 0;
+  let aboveN = 0;
+  let levelsN = 0;
+  let groundFt = 0;
+  const totalRooms = (m?.rooms ?? []).filter((r) => r.floor_area_ft2 >= 4).length;
+  let roomsAbove: number[] = [];
+  if (walk && lv) {
+    aboveN = lv.above.length;
+    levelsN = lv.levels.length;
+    groundFt = lv.groundFt;
+  } else if (m) {
+    const levels = m.levels;
+    if (!levels.length) return unavailable("not assessable", method, cannot, "The tile has no walkable floor and no floor level, so nothing is above or below ground.");
+    groundFt = Math.min(...levels.map((l) => l.z_ft));
+    const above = m.rooms.filter((r) => r.floor_z_ft.min !== null && r.floor_z_ft.min > groundFt + c.a.groundToleranceFt && r.floor_area_ft2 >= 4);
+    aboveN = above.length;
+    roomsAbove = above.map((r) => r.id);
+    levelsN = levels.length;
+  }
+  const publicN = walk && lv ? lv.above.filter((s) => isPublic(s.cell)).length : aboveN && cat && c.a.publicCategories.includes(cat) ? aboveN : 0;
+  const idx = aboveN === 0 ? 0 : aboveN === 1 ? 1 : aboveN <= 3 ? 2 : 3;
+  const levelIds = (m?.levels ?? []).filter((l) => l.z_ft > groundFt + c.a.groundToleranceFt).map((l) => l.id);
   return {
     measure: {
-      headline: `${count(pub.length, "public program instance")} above the ground floor (of ${count(total, "room")})`,
-      value: pub.length,
-      unit: "public program instances above the ground floor",
-      status,
+      headline: `${count(aboveN, "walkable space")} above the ground floor, on ${count(levelsN, "level")} (${count(totalRooms, "room")} in all)`,
+      value: aboveN,
+      unit: "walkable spaces above the ground floor",
+      status: "inferred",
       method,
       cannot,
       supporting: [
-        { label: "Ground floor", value: `${ft(ground, 1)} (floors within ${ft(c.a.groundToleranceFt, 1)} of it count as ground)`, how: "the lowest floor of the tile" },
-        { label: "Rooms above ground", value: String(above.length), how: "rooms whose lowest floor is above the ground floor" },
-        { label: "Program", value: perRoom ? "from each room's own tile" : `${cat} (tile category)`, how: "label read from the tile's metadata" },
+        { label: "Ground floor", value: `${ft(groundFt, 1)} (floors within ${ft(c.a.groundToleranceFt, 1)} of it count as ground)`, how: "the lowest walkable floor of the tile" },
+        { label: "Levels", value: walk && lv ? lv.levels.map((l) => `${ft(l.zFt, 1)} (${ft2(l.areaFt2)})`).join(", ") : "from the room analysis", how: "heights of walkable floor, within 3 ft of each other counted as one" },
+        { label: "Public program", value: `${publicN} of ${aboveN} spaces above ground${perRoom ? " (each room's own tile category)" : cat ? ` (${cat} category)` : " (no category: not assumed public)"}`, how: "a space is public if its category is on the list below, or you set it by hand" },
         { label: "Public categories", value: c.a.publicCategories.join(", ") || "none", how: "the assumption: these programs are public" },
       ],
-      used: [`public = ${c.a.publicCategories.join(", ") || "none"}`, `ground tolerance ${ft(c.a.groundToleranceFt, 1)}`, ...(overridden ? ["some rooms set by hand"] : [])],
+      used: [`public = ${c.a.publicCategories.join(", ") || "none"}`, `ground tolerance ${ft(c.a.groundToleranceFt, 1)}`],
     },
     interpretation: {
-      text: pub.length ? `${cap(count(pub.length, "room"))} of public program ${pub.length === 1 ? "sits" : "sit"} above the ground floor${list(pub.slice(0, 3).map(roomShort)) ? ` (${list(pub.slice(0, 3).map(roomShort))})` : ""}, so public program is met above the entry as well as at it. This rests on the assumption that ${c.a.publicCategories.join(" and ")} spaces are public.` : above.length ? `There are ${count(above.length, "room")} above the ground floor but none is public under the current assumption (${c.a.publicCategories.join(", ") || "none"} are public), so public program is met at the entry level only.` : "Every room is on the ground floor, so there is no public program above it.",
+      text: aboveN ? `${cap(count(aboveN, "walkable space"))} ${aboveN === 1 ? "sits" : "sit"} above the ground floor, on ${count(levelsN, "level")} in all; ${publicN} of them read as public program${cat || perRoom ? " by the category label" : " (the tile has no program category)"}. Program is that label, not something drawn into each space.` : "Every walkable floor is at the ground level, so program is met at the entry level only.",
       scale: ["at entry only", "one above", "several above", "threaded"],
-      index: pub.length === 0 ? 0 : pub.length === 1 ? 1 : pub.length <= 3 ? 2 : 3,
+      index: idx,
     },
-    evidence: { rooms: pub.map((r) => r.id) },
+    evidence: roomsAbove.length ? { rooms: roomsAbove } : { levels: levelIds },
   };
 }
 
@@ -574,146 +615,161 @@ function enclosureAt(f: VoxelFacts, p: [number, number, number], a: Assumptions)
 }
 
 function graduated(c: Ctx): Part {
-  const method = "Enclosure is classed at each point of a floor-supported route from a ground-level opening: open to the sky (half or more of nine upward rays leave through open air), partly open (some sky, or a quarter or more of twelve horizontal rays reach the outside), or enclosed. Runs shorter than 3 ft are absorbed by their neighbours. The route starts outdoors, so the first change is from the outside into the building. The count is the number of changes in class.";
-  const cannot = "Which zones are private and which public: that needs program information, and enclosure here is geometric. It also reads one route; another route through the tile may graduate differently.";
+  const method = "Enclosure is classed at standing places spread over the whole walkable floor (one about every 3 ft): open to the sky (half or more of nine upward rays leave through open air), partly open (some sky, or a quarter or more of twelve horizontal rays reach the outside), or enclosed. The places are ordered by their distance from the ground-level entries (2 ft bands, each given its commonest class) and the changes of class along that order are counted: how many steps of enclosure a person passes through going from the way in to the farthest part, over the whole floor and not one route. A band that differs from both its neighbours, which agree with each other, takes their class.";
+  const cannot = "Which zones are private and which public: that needs program information, and enclosure here is geometric. It orders places by straight-line distance from the entries, which is not the length of the way a person walks.";
   const f = c.f;
   if (!f) return unavailable("not assessable", method, cannot, "The tile has no voxel data.");
-  const rr = findRoute(f, { from: c.over?.from, to: c.over?.to, destination: "farthest" });
-  if (!rr.route) return unavailable("not assessable", method, cannot, `${rr.reason} Enclosure is read along a route a person could take, so none is measured.`);
-  const raw = rr.route.points.map((p) => enclosureAt(f, p, c.a));
-  const seq = [0, ...raw];
-  // absorb short runs
-  const minRun = Math.max(1, Math.round(3 / f.cell));
+  const w = walkFacts(f);
+  if (!w.zones.length) return unavailable("not assessable", method, cannot, "No floor that a person can stand on was found, so enclosure has no standing places to be read at.");
+  const entries = groundEntries(f, w.stand, false);
+  if (!entries.length) return unavailable("not assessable", method, cannot, "No opening at ground level has a floor to stand on, so there is no entry to read enclosure outward from.");
+  const stride = Math.max(1, Math.round(3 / f.cell));
+  const entryAt = entries.map((e) => {
+    const z = e % f.nz;
+    const y = ((e - z) / f.nz) % f.ny;
+    return [((e - z) / f.nz - y) / f.ny, y, z] as const;
+  });
+  const samples: { d: number; cls: number }[] = [];
+  for (let i = 0; i < w.stand.length; i++) {
+    if (!w.stand[i]) continue;
+    const z = i % f.nz;
+    const y = ((i - z) / f.nz) % f.ny;
+    const x = ((i - z) / f.nz - y) / f.ny;
+    if (x % stride !== 0 || y % stride !== 0) continue;
+    let near = Infinity;
+    for (const [ex, ey, ez] of entryAt) near = Math.min(near, (x - ex) ** 2 + (y - ey) ** 2 + (z - ez) ** 2);
+    samples.push({ d: Math.sqrt(near) * f.cell, cls: enclosureAt(f, [x * f.cell, y * f.cell, z * f.cell], c.a) });
+  }
+  if (!samples.length) return unavailable("not assessable", method, cannot, "No standing place could be read.");
+  const band = 2;
+  const bins = new Map<number, number[]>();
+  for (const s of samples) {
+    const b = Math.floor(s.d / band);
+    (bins.get(b) ?? bins.set(b, [0, 0, 0]).get(b)!)[s.cls]++;
+  }
+  const order = [...bins.keys()].sort((a, b) => a - b);
+  // each band takes its commonest class; a band that differs from both neighbours (which agree) is noise and takes theirs
+  const seq = order.map((q) => {
+    const h = bins.get(q)!;
+    return h[2] >= h[0] && h[2] >= h[1] ? 2 : h[1] >= h[0] ? 1 : 0;
+  });
+  const smooth = seq.map((v, i) => (i > 0 && i < seq.length - 1 && seq[i - 1] === seq[i + 1] && seq[i - 1] !== v ? seq[i - 1] : v));
   const runs: { v: number; n: number }[] = [];
-  for (const v of seq) {
+  for (const v of smooth) {
     const last = runs[runs.length - 1];
     if (last && last.v === v) last.n++;
     else runs.push({ v, n: 1 });
   }
-  let changed = true;
-  while (changed && runs.length > 1) {
-    changed = false;
-    for (let i = 1; i < runs.length; i++) {
-      if (runs[i].n < minRun) {
-        const prev = runs[i - 1];
-        const next = runs[i + 1];
-        const into = next && next.n > prev.n ? next : prev;
-        into.n += runs[i].n;
-        runs.splice(i, 1);
-        if (into === next && i < runs.length) {
-          // keep order: the absorbed run joined the next one
-        }
-        changed = true;
-        break;
-      }
-    }
-    // merge equal neighbours
-    for (let i = 1; i < runs.length; i++) if (runs[i].v === runs[i - 1].v) {
-      runs[i - 1].n += runs[i].n;
-      runs.splice(i, 1);
-      changed = true;
-      break;
-    }
-  }
   const steps = Math.max(0, runs.length - 1);
+  const share = [0, 0, 0];
+  for (const s of samples) share[s.cls]++;
   const NAMES = ["open to the sky", "partly open", "enclosed"];
-  const idx = steps === 0 ? 0 : steps === 1 ? 1 : steps === 2 ? 2 : 3;
+  const present = share.filter((v) => v > 0).length;
+  const far = order.length ? order[order.length - 1] * band : 0;
+  const idx = steps === 0 ? 0 : steps === 1 ? 1 : steps <= 3 ? 2 : 3;
+  const rr = findRoute(f, { from: c.over?.from, to: c.over?.to, destination: "farthest" });
   return {
     measure: {
-      headline: `${count(steps, "enclosure step")} from the outside to ${rr.route.how.includes("farthest") ? "the far end" : "the destination"}`,
+      headline: `${count(steps, "enclosure step")} from the way in to ${far ? `${ft(far)} out` : "the far end"}, ${present} kind${present === 1 ? "" : "s"} of enclosure`,
       value: steps,
-      unit: "discrete enclosure steps along the route",
+      unit: "discrete enclosure steps from the entries outward, over the whole walkable floor",
       status: "proxy",
       method,
       cannot,
       supporting: [
-        { label: "Sequence", value: runs.map((r) => NAMES[r.v]).join(" → ") || "outdoors", how: "enclosure classes met along the route, from the outside in" },
-        { label: "Route", value: ft(rr.route.lengthFt), how: `floor-supported, from a ground-level opening to ${rr.route.how}` },
+        { label: "Sequence", value: runs.map((r) => NAMES[r.v]).join(" → ") || NAMES[2], how: "enclosure classes by distance from the entries" },
+        { label: "Mix of places", value: share.map((v, i) => `${num((100 * v) / samples.length, 0)}% ${NAMES[i]}`).join(", "), how: `${samples.length} standing places, about one every ${ft(3)}` },
+        { label: "Reach", value: `${ft(far)} from the entries`, how: "the farthest distance from an entry that a standing place was read at" },
       ],
       used: [`open sky ≥ ${pct(c.a.openSky)} of rays`, `partly open ≥ ${pct(c.a.semiSky)}`],
     },
     interpretation: {
-      text: `Along a ${ft(rr.route.lengthFt)} route from the outside the enclosure changes ${steps} time${steps === 1 ? "" : "s"}: ${runs.map((r) => NAMES[r.v]).join(", then ")}. This is geometric enclosure; which of these zones is private or public is not assigned.`,
-      scale: ["abrupt", "one step", "graded", "finely graded"],
+      text: `Going outward from the entries over the whole walkable floor, the enclosure changes ${steps} time${steps === 1 ? "" : "s"}: ${runs.map((r) => NAMES[r.v]).join(", then ")}. ${present === 1 ? "Everywhere read is the same kind of enclosure, so there is no gradation." : ""} This is geometric enclosure; which of these zones is private or public is not assigned.`,
+      scale: ["uniform", "one step", "graded", "finely graded"],
       index: idx,
     },
-    evidence: { routePoints: rr.route.points },
+    evidence: rr.route ? { routePoints: rr.route.points } : {},
   };
 }
 
 // ---- Non-hierarchical circulation --------------------------------------------------------------------------------------------------------------
 
 function nonHierarchical(c: Ctx): Part {
-  const method = "From a ground-level opening (the entry) to one destination (the middle of the largest other room reached on foot), the cheapest floor-supported route is found; its corridor is then closed off (the width set below, except near the two ends) and the search is repeated, up to the limit set below. A route has to find a different way, so a small variation through neighbouring cells is not counted as another route. A route needs a floor, headroom and steps within the limits set below.";
-  const cannot = "Whether the routes feel equally valid: they may differ greatly in length or quality. It counts the routes that exist from one entry to one destination, not every pair.";
+  const method = "The walkable floor is cut into stretches of the width set below (5 ft by default; a stretch counts when a fifth of it is floor and two stretches are joined when at least a clear width of floor runs between them). From all the ground-level entries, the number of independent routes (no stretch of floor shared) is counted to the farthest part of the floor and to the parts about half and three quarters of the way out; the figure is the middle of the three, capped at the limit set below. Loops are the independent circuits in the network of stretches, the ways round something rather than through it.";
+  const cannot = "Whether the routes feel equally valid: they may differ greatly in length or quality. It counts independent ways to a few far parts of the floor, not every pair of places.";
   const f = c.f;
   if (!f) return unavailable("not assessable", method, cannot, "The tile has no voxel data.");
-  const opt = { from: c.over?.from, to: c.over?.to, blockFt: c.a.routeBlockFt };
-  const { routes, first } = distinctRoutes(f, opt, c.a.maxRoutes);
-  if (!routes.length) return unavailable("not assessable", method, cannot, `${first.reason} With no route, no routes are counted (and nothing is substituted).`);
-  const lens = routes.map((r) => r.lengthFt);
-  const shortest = Math.min(...lens);
-  const longest = Math.max(...lens);
-  const capped = routes.length >= c.a.maxRoutes;
-  const idx = routes.length <= 1 ? 0 : routes.length === 2 ? 1 : routes.length <= 4 ? 2 : 3;
-  const e = routes[0].entry;
-  const d = routes[0].dest;
+  const limit = Math.max(2, c.a.maxRoutes);
+  const rt = routeFacts(f, limit, c.a.routeBlockFt);
+  if (!rt.blocks) return unavailable("not assessable", method, cannot, "No floor that a person can stand on was found in the tile, so no routes are counted (and nothing is substituted).");
+  if (!rt.entries) return unavailable("not assessable", method, cannot, "No opening at ground level has a floor to stand on, so there is no entry to count routes from.");
+  const capped = rt.routes >= limit;
+  const idx = rt.routes <= 1 ? 0 : rt.routes === 2 ? 1 : rt.routes <= 4 ? 2 : 3;
+  const rr = findRoute(f, { from: c.over?.from, to: c.over?.to, destination: "farthest" });
   return {
     measure: {
-      headline: `${count(routes.length, "distinct route")}${capped ? " or more" : ""} from the entry to the destination`,
-      value: routes.length,
-      unit: capped ? `distinct routes (search stopped at ${c.a.maxRoutes})` : "distinct routes",
+      headline: `${count(rt.routes, "independent route")}${capped ? " or more" : ""} through the floor, from ${count(rt.entries, "entry stretch", "entry stretches")}${rt.loops ? `; ${count(rt.loops, "loop")}` : ""}`,
+      value: rt.routes,
+      unit: capped ? `independent routes (counting stopped at ${limit})` : "independent routes",
       status: "measured",
       method,
       cannot,
       supporting: [
-        { label: "Entry", value: `(${num(e[0])}, ${num(e[1])}, ${num(e[2])}) ft`, how: "a ground-level opening with a floor" },
-        { label: "Destination", value: `(${num(d[0])}, ${num(d[1])}, ${num(d[2])}) ft`, how: routes[0].how },
-        { label: "Route lengths", value: routes.length > 1 ? `${ft(shortest)} to ${ft(longest)}` : ft(shortest), how: "the shortest and longest of the routes found" },
-        { label: "Search limits", value: `${c.a.maxRoutes} routes, ${ft(c.a.routeBlockFt, 1)} corridor closed after each`, how: "the settings" },
+        { label: "To the farthest part", value: String(rt.farthest), how: "independent routes from the entries to the farthest stretch of floor" },
+        { label: "Entries", value: String(rt.entries), how: "stretches of floor next to an opening at the lowest floor level reached" },
+        { label: "Loops", value: String(rt.loops), how: "independent circuits in the network of walkable stretches" },
+        { label: "Network", value: `${rt.blocks} stretches of ${ft(c.a.routeBlockFt)}`, how: "the walkable floor in blocks of the width set below" },
       ],
-      used: [`corridor ${ft(c.a.routeBlockFt, 1)}`, `up to ${c.a.maxRoutes} routes`, walkUsed()],
+      used: [`up to ${limit} routes`, `stretches of ${ft(c.a.routeBlockFt, 1)}`, walkUsed()],
     },
     interpretation: {
-      text: routes.length === 1 ? `Only one floor-supported way leads from the entry to the destination: circulation here is a single path.` : `${cap(count(routes.length, "separate way"))}${capped ? " (the search stopped there)" : ""} lead from the entry to the destination, between ${ft(shortest)} and ${ft(longest)} long, so there is a choice of path.`,
+      text: rt.routes <= 1 ? `Circulation here is a single path: only one independent way leads through the floor to its far parts${rt.loops ? `, though there ${rt.loops === 1 ? "is a loop" : `are ${rt.loops} loops`}` : ""}.` : `${cap(count(rt.routes, "independent way"))}${capped ? " (the count stopped there)" : ""} lead through the floor, so there is a choice of path${rt.loops ? ` and ${count(rt.loops, "way")} round` : ""}.`,
       scale: ["single path", "a choice of two", "several paths", "a network"],
       index: idx,
     },
-    evidence: { routePoints: routes[0].points },
+    evidence: rr.route ? { routePoints: rr.route.points } : {},
   };
 }
 
 // ---- Force-driven -----------------------------------------------------------------------------------------------------------------------------------
 
 function forceDriven(c: Ctx): Part {
-  const method = "Reads the inputs the erosion recipe recorded as the forces that generated the geometry: the solvent dose of each source (ft³ of foam it could dissolve), gravity, drain, and how each source treats the floor plates. Their relation to the result is shown as the volume of void made per ft³ of dose. The matrix's examples (required sun-hours, pedestrian counts) are not inputs this system has.";
-  const cannot = "Whether the generating force can be read in the finished form. A high gravity setting or a large dose does not prove a legible force-driven form; the result needs to be looked at.";
+  const method = "Reads the inputs the erosion recipe recorded as the forces that generated the geometry: the solvent dose of each source (ft³ of foam it could dissolve), and how it is applied. The measure is how the dose is shared: the largest source's share of all the dose, the effective number of sources (1 over the sum of squared shares: 1 for one dominant source, as many as the sources when they are equal) and how many sources carry at least 5% of it. Gravity, drain and how each source treats the floor plates are given beside it. The matrix's examples (required sun-hours, pedestrian counts) are not inputs this system has.";
+  const cannot = "Whether the generating force can be read in the finished form. A dominant source does not prove a legible force-driven form; the result needs to be looked at.";
   const m = c.m;
   if (!m || !m.hasRecipe) return unavailable("not assessable", method, cannot, "This tile carries no erosion recipe (it was lofted, imported or built from other tiles), so the forces that generated it are not recorded and nothing is inferred about them.");
-  const total = m.sources.reduce((a, s) => a + s.dose, 0);
+  const doses = m.sources.map((s) => s.dose).filter((d) => d > 0).sort((a, b) => b - a);
+  const total = doses.reduce((a, b) => a + b, 0);
+  if (!total) return unavailable("not assessable", method, cannot, "The recipe's sources carry no recorded dose.");
+  const shares = doses.map((d) => d / total);
+  const top = shares[0] * 100;
+  const effective = 1 / shares.reduce((a, s) => a + s * s, 0);
+  const major = shares.filter((s) => s >= 0.05).length;
   const p = m.prim;
   const modes = [...new Set(m.sources.map((s) => `${s.mode}${s.plateMode !== "pool" ? ` (${s.plateMode}${s.cut ? ", cut" : ""})` : ""}`))];
-  const perDose = total > 0 ? m.voidFt3 / total : null;
-  const idx = total <= 0 ? 0 : p.gravity < 0.2 ? 1 : p.gravity < 0.5 ? 2 : 3;
+  const perDose = m.voidFt3 / total;
+  const idx = top < 15 ? 0 : top < 30 ? 1 : top < 50 ? 2 : 3;
   return {
     measure: {
-      headline: `${num(total)} ft³ of solvent dose from ${count(m.sources.length, "source")}, gravity ${num(p.gravity, 2)}${p.drain ? ", draining" : ""}`,
-      value: total,
-      unit: "ft³ of solvent dose (the measurable generating input)",
+      headline: `the largest of ${count(m.sources.length, "source")} holds ${num(top, 0)}% of the dose (${num(effective, 1)} effective sources)`,
+      value: top,
+      unit: "% of the total solvent dose held by the largest source",
       status: "measured",
       method,
       cannot,
       supporting: [
+        { label: "Dominance", value: `${num(top, 0)}% in the largest, ${major} source${major === 1 ? "" : "s"} at 5% or more`, how: "the share of the total dose in the biggest source, and how many carry a real share" },
+        { label: "Effective sources", value: num(effective, 1), how: "1 over the sum of squared shares of the dose" },
+        { label: "Total dose", value: `${num(total)} ft³`, how: "the solvent dose of all sources" },
         { label: "Gravity", value: `${num(p.gravity, 2)}${p.drain ? ", with a drain" : ""}`, how: "0 spreads the solvent evenly, higher pulls it down so it pools and floors flatten" },
         { label: "Sources", value: modes.join("; ") || "none", how: "how the solvent is applied" },
-        { label: "Void made per dose", value: perDose === null ? "n/a" : `${num(perDose, 2)} ft³ per ft³`, how: "void volume of the result over the total dose" },
-        { label: "Plate behaviour", value: [...new Set(m.sources.map((s) => s.plateMode))].join(", ") || "none", how: "how the sources treat the floor plates" },
+        { label: "Void made per dose", value: `${num(perDose, 2)} ft³ per ft³`, how: "void volume of the result over the total dose" },
       ],
       used: [],
     },
     interpretation: {
-      text: `The recipe's forces are recorded exactly: ${num(total)} ft³ of dose in ${count(m.sources.length, "source")}, gravity ${num(p.gravity, 2)}${perDose === null ? "" : `, and the result has ${num(perDose, 2)} ft³ of void for each ft³ of dose`}. These are the inputs; whether the form shows them is a matter for reading the form.`,
-      scale: ["weakly directed", "directed", "strongly directed", "forced"],
+      text: top >= 50 ? `One source drives the form: it holds ${num(top, 0)}% of the dose, and the other ${count(m.sources.length - 1, "source")} add${m.sources.length === 2 ? "s" : ""} detail.` : top >= 30 ? `A leading source holds ${num(top, 0)}% of the dose among ${count(m.sources.length, "source")}, about ${num(effective, 1)} effective sources: one force leads and others share the work.` : top >= 15 ? `A few sources share the work: the largest holds ${num(top, 0)}% of the dose among ${count(m.sources.length, "source")}, about ${num(effective, 1)} effective sources.` : `The dose is spread over many sources: the largest holds ${num(top, 0)}% and there are about ${num(effective, 1)} effective sources, so no single force drives the form. Whether the form shows these inputs is a matter for reading the form.`,
+      scale: ["many small forces", "a few forces", "a leading force", "one dominant force"],
       index: idx,
     },
     evidence: {},

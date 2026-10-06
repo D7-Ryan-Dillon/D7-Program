@@ -4,6 +4,7 @@
 // the pieces occupy, so shaped tiles may share part of their boxes when they fit (lib/arrange/collision.ts).
 
 import type { ParsedTile } from "@/lib/types";
+import { applyConnectors, type ConnectorFail, type ConnectorMade } from "./connectors";
 import { boundsOfBoxes, findContacts, nearPairs, placeBox, toFt, type Contact, type PlacedBox } from "./geometry";
 import { collide, findCollisions, findNested, violates, type Collision } from "./collision";
 import { groupByPair, jointFromContacts } from "./joints";
@@ -63,6 +64,9 @@ export interface Layout {
   exposed: Exposed[];
   /** pieces' bounding box, cells */
   bounds: { min: [number, number, number]; max: [number, number, number] } | null;
+  /** the connectors (stairs and ramps) built into the pieces' floors, and why others could not be (lib/arrange/connectors.ts) */
+  connectors: ConnectorMade[];
+  connectorFails: ConnectorFail[];
 }
 
 export function boxesFor(pieces: Piece[], tileById: Map<string, ParsedTile>): PlacedBox[] {
@@ -237,14 +241,28 @@ function entryZones(b: PlacedBox, exposed: Exposed[]): number[] {
 }
 
 export function analyzeLayout(doc: ArrangementDoc, tileById: Map<string, ParsedTile>, rules: ProgramRules): Layout {
-  const boxes = boxesFor(doc.pieces, tileById);
-  const byId = new Map(boxes.map((b) => [b.piece.id, b]));
+  let boxes = boxesFor(doc.pieces, tileById);
   const tol = connectorReachFt(rules);
+  let contacts = findContacts(boxes);
+  let joints = groupByPair(contacts).map((g) => jointFromContacts(g, boxes, tol, doc.ratings));
+  // connectors: where two floors a doorway apart need a stair or ramp, and the rule or you ask for one, it is built into the lower room's floor (lib/arrange/connectors.ts)
+  let connectors: ConnectorMade[] = [];
+  let connectorFails: ConnectorFail[] = [];
+  const choices = doc.connectors ?? {};
+  if (rules.autoConnectors || Object.values(choices).some((c) => !c.off)) {
+    const res = applyConnectors(boxes, joints, rules, choices, doc.ratings);
+    connectors = res.made;
+    connectorFails = res.failed;
+    if (res.made.length) {
+      boxes = res.boxes;
+      contacts = findContacts(boxes);
+      joints = groupByPair(contacts).map((g) => jointFromContacts(g, boxes, tol, doc.ratings));
+    }
+  }
+  const byId = new Map(boxes.map((b) => [b.piece.id, b]));
   const collisions = findCollisions(boxes).filter((c) => violates(c));
   const overlaps: [string, string][] = collisions.map((c) => [c.aId, c.bId]);
   const nested = findNested(boxes);
-  const contacts = findContacts(boxes);
-  const joints = groupByPair(contacts).map((g) => jointFromContacts(g, boxes, tol, doc.ratings));
 
   // physical attachment: any contact (even a sealed one) holds two pieces together
   const touch = new Map<string, string[]>();
@@ -331,7 +349,7 @@ export function analyzeLayout(doc: ArrangementDoc, tileById: Map<string, ParsedT
     walk.get(j.bId)!.push({ id: j.aId, joint: j });
   }
 
-  return { boxes, byId, contacts, joints, overlaps, collisions, nested, entranceId, attached, islands, reachable, unreachable, reachedZones, reach, walk, exposed, bounds: boundsOfBoxes(boxes) };
+  return { boxes, byId, contacts, joints, overlaps, collisions, nested, entranceId, attached, islands, reachable, unreachable, reachedZones, reach, walk, exposed, bounds: boundsOfBoxes(boxes), connectors, connectorFails };
 }
 
 /** The pieces that would be cut off from the main set if `removed` were taken away (not counting the removed ones). */

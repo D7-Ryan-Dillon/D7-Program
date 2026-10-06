@@ -196,4 +196,4 @@ export const classAt = (b: PlacedBox, x: number, y: number, z: number): number =
 };
 
 /** A cheap signature of a piece's placement, for caches. */
-export const pieceSig = (p: Piece) => `${p.tileId}:${p.rotZ}:${p.mirrorX ? 1 : 0}:${p.scale.toFixed(3)}:${p.pos.join(",")}`;
+export const pieceSig = (p: Piece) => `${p.tileId}:${p.rotZ}:${p.mirrorX ? 1 : 0}:${p.scale.toFixed(3)}:${p.pos.join(",")}${p.conn ? `+${p.conn}` : ""}`;
