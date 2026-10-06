@@ -24,6 +24,7 @@ const FEELS: { label: string; hint: string; keys: (keyof Priorities)[] }[] = [
   { label: "Tall", hint: "more floors, pieces stacked above each other", keys: ["vertical"] },
   { label: "Bright", hint: "more spaces open to the outside, more daylight", keys: ["daylight", "openness"] },
   { label: "Varied", hint: "use many different tiles instead of repeating a few", keys: ["variety"] },
+  { label: "Interlocking", hint: "pieces that nest into each other's notches and steps, so shaped tiles fit together", keys: ["nesting"] },
 ];
 
 export function GeneratePanel() {
@@ -54,7 +55,7 @@ export function GeneratePanel() {
           <div key={f.label} title={f.hint}>
             <NumberSlider
               label={f.label}
-              value={priorities[f.keys[0]]}
+              value={priorities[f.keys[0]] ?? 50}
               min={0}
               max={100}
               step={5}

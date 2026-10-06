@@ -4,7 +4,9 @@
 import type { ParsedTile } from "@/lib/types";
 import { toleranceFt, CATEGORY_LABEL, pairKey, type Adjacency, type ArrangeWarning, type ArrangementDoc, type Joint, type ProgramRules, type RuleLevel, type Site } from "./types";
 import { categoryOf } from "./orient";
-import { toFt } from "./geometry";
+import { classAt, toFt } from "./geometry";
+import { describeCollision } from "./collision";
+import { OUT, SOLID } from "./occupancy";
 import type { Layout } from "./layout";
 
 export function ruleBetween(rules: ProgramRules, a: ParsedTile, b: ParsedTile, stacked: boolean): RuleLevel {
@@ -18,20 +20,38 @@ export function ruleBetween(rules: ProgramRules, a: ParsedTile, b: ParsedTile, s
 /** +1 preferred, 0 allowed, -1 avoid, -Infinity never. */
 export const ruleValue = (l: RuleLevel) => (l === "preferred" ? 1 : l === "allowed" ? 0 : l === "avoid" ? -1 : -Infinity);
 
-/** The share of a piece's footprint with something directly under it (0..1) and the ground it counts as: the lowest piece. */
+/**
+ * The share of a piece's footprint with material directly under it (0..1); the ground is the lowest level of the arrangement.
+ * Read from the cells: for each column the piece really occupies, is the cell under its lowest cell material of another piece?
+ * (A shaped piece's footprint is not its box, and a notch is not unsupported.)
+ */
 export function supportFraction(layout: Pick<Layout, "boxes" | "bounds">, id: string): number {
   const b = layout.boxes.find((x) => x.piece.id === id);
   if (!b || !layout.bounds) return 1;
   if (b.min[2] <= layout.bounds.min[2]) return 1;
-  const area = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]);
+  const [nx, ny, nz] = b.occ.dims;
+  const others = layout.boxes.filter((o) => o !== b && o.min[2] < b.min[2] + 1 && o.max[0] > b.min[0] - 1 && o.min[0] < b.max[0] + 1 && o.max[1] > b.min[1] - 1 && o.min[1] < b.max[1] + 1);
+  let columns = 0;
   let held = 0;
-  for (const o of layout.boxes) {
-    if (o === b || o.max[2] !== b.min[2]) continue;
-    const w = Math.min(b.max[0], o.max[0]) - Math.max(b.min[0], o.min[0]);
-    const d = Math.min(b.max[1], o.max[1]) - Math.max(b.min[1], o.min[1]);
-    if (w > 0 && d > 0) held += w * d;
-  }
-  return Math.min(1, held / area);
+  for (let x = 0; x < nx; x++)
+    for (let y = 0; y < ny; y++) {
+      let z0 = -1;
+      for (let z = 0; z < nz; z++) if (b.occ.cls[(x * ny + y) * nz + z] !== OUT) {
+        z0 = z;
+        break;
+      }
+      if (z0 < 0) continue;
+      columns++;
+      const wx = b.min[0] + x;
+      const wy = b.min[1] + y;
+      const wz = b.min[2] + z0 - 1;
+      if (wz < layout.bounds.min[2]) {
+        held++;
+        continue;
+      }
+      if (others.some((o) => classAt(o, wx, wy, wz) === SOLID)) held++;
+    }
+  return columns ? Math.min(1, held / columns) : 1;
 }
 
 const count = (arr: string[]) => {
@@ -46,9 +66,16 @@ export function evaluateProgram(layout: Layout, doc: ArrangementDoc, rules: Prog
   let n = 0;
   const add = (w: Omit<ArrangeWarning, "id">) => out.push({ ...w, id: `w${n++}` });
 
-  for (const [a, b] of layout.overlaps) add({ kind: "overlap", severity: "error", message: `${name(a)} and ${name(b)} overlap.`, pieceIds: [a, b] });
+  for (const c of layout.collisions) {
+    if (!layout.overlaps.some(([a, b]) => a === c.aId && b === c.bId)) continue;
+    add({ kind: "overlap", severity: "error", message: `${name(c.aId)} and ${name(c.bId)} claim the same space: ${describeCollision(c, 0.125)}.`, pieceIds: [c.aId, c.bId] });
+  }
+  for (const [a, b] of layout.nested) add({ kind: "overlap", severity: "info", message: `${name(a)} and ${name(b)} nest: their bounding boxes overlap but their cells fit.`, pieceIds: [a, b] });
   for (const isle of layout.islands) add({ kind: "disconnected", severity: "error", message: `${isle.length === 1 ? name(isle[0]) : `${isle.length} pieces (${name(isle[0])}...)`} not attached to the main set.`, pieceIds: isle });
-  if (layout.unreachable.length) add({ kind: "unreachable", severity: "warn", message: `${layout.unreachable.length} attached piece${layout.unreachable.length > 1 ? "s have" : " has"} no walkable link from the entrance.`, pieceIds: layout.unreachable });
+  if (layout.unreachable.length) add({ kind: "unreachable", severity: "warn", message: `${layout.unreachable.length} attached piece${layout.unreachable.length > 1 ? "s have" : " has"} no walkable route from the entrance to ${layout.unreachable.length > 1 ? "their" : "its"} main floor (a floor to stand on, 2.5 ft clear width and 6.5 ft headroom, steps within the level tolerance).`, pieceIds: layout.unreachable });
+  for (const [id, r] of layout.reach) {
+    if (r.main && r.totalFt2 > 0 && r.reachedFt2 < r.totalFt2 * 0.98) add({ kind: "partial", severity: "info", message: `${name(id)}: ${(r.totalFt2 - r.reachedFt2).toFixed(0)} ft2 of its ${r.totalFt2.toFixed(0)} ft2 of floor cannot be reached on foot (another level or pocket with no stair or ramp to it).`, pieceIds: [id] });
+  }
 
   const tol = toleranceFt(rules);
   for (const j of layout.joints) {
@@ -59,6 +86,7 @@ export function evaluateProgram(layout: Layout, doc: ArrangementDoc, rules: Prog
     if (level === "never") add({ kind: "never", severity: "error", message: `${pair}: ${CATEGORY_LABEL[categoryOf(a.tile)]} may never touch ${CATEGORY_LABEL[categoryOf(b.tile)]} ${j.axis === 2 ? "stacked" : "side by side"}.`, pieceIds: [j.aId, j.bId], jointId: j.id });
     if (j.floorStepFt !== null && j.floorStepFt > tol + 1e-6) add({ kind: "level", severity: "warn", message: `${pair}: floors differ by up to ${j.floorStepFt.toFixed(1)} ft across the joint.`, pieceIds: [j.aId, j.bId], jointId: j.id });
     if (j.legacy !== null && j.legacy < 50) add({ kind: "dead-end", severity: "info", message: `${pair}: openings dead-end into foam (${j.legacy.toFixed(0)}% matched).`, pieceIds: [j.aId, j.bId], jointId: j.id });
+    if (j.connect.kind === "void" && j.connect.why) add({ kind: "sealed", severity: "info", message: `${pair}: open space continues across the joint but nobody can walk it: ${j.connect.why}.`, pieceIds: [j.aId, j.bId], jointId: j.id });
   }
 
   for (const b of layout.boxes) {
@@ -115,5 +143,7 @@ export const jointNote = (j: Joint): string => {
   if (p.floors !== null) bits.push(`floors ${p.floors.toFixed(0)}`);
   if (p.circulation !== null) bits.push(`routes ${p.circulation.toFixed(0)}`);
   if (p.foam !== null) bits.push(`foam ${p.foam.toFixed(0)}`);
-  return bits.join(" · ") || "sealed";
+  const c = j.connect;
+  bits.push(c.walkable ? `walkable${c.stepFt ? ` (step ${c.stepFt.toFixed(1)} ft)` : ""}` : c.kind === "void" ? "open, not walkable" : "touching");
+  return bits.join(" · ");
 };

@@ -22,29 +22,38 @@ const note = (c: Candidate): string => {
   const bits: string[] = [`joint ${c.primary.score?.toFixed(0) ?? "-"}`];
   if (p.floors !== null) bits.push(`floors ${p.floors.toFixed(0)}`);
   if (c.joints.length > 1) bits.push(`${c.joints.length} joints`);
+  if (c.neighbors.some((b) => b.min[0] < c.box.max[0] && b.max[0] > c.box.min[0] && b.min[1] < c.box.max[1] && b.max[1] > c.box.min[1] && b.min[2] < c.box.max[2] && b.max[2] > c.box.min[2])) bits.push("nests");
+  const st = c.primary.connect.stepFt;
+  if (st) bits.push(`step ${st.toFixed(1)} ft`);
   return bits.join(" · ");
 };
 
 /** The best tile + orientation + position for each given open face, scored; the top `limit` distinct ones. */
-export function suggestFor(ctx: GenContext, doc: ArrangementDoc, slots: Exposed[], limit = 5): Suggestion[] {
-  const st = stateOf(doc.pieces, ctx);
+export function suggestFor(ctx: GenContext, doc: ArrangementDoc, slots: Exposed[], limit = 5, budgetMs = 2500): Suggestion[] {
+  const t0 = Date.now();
+  const st = stateOf(doc.pieces, ctx, true, doc.entranceId);
   const found: Suggestion[] = [];
   const seen = new Set<string>();
+  // how an opening is laid on the slot's opening: centre, and the edges (these find the fits where a notch or a step takes the new piece)
+  const aligns = ctx.bank.length <= 6 ? [0, 1, 2, 3, 6] : ctx.bank.length <= 10 ? [0, 1, 2, 3] : [0, 1, 2];
   for (const slot of slots) {
     for (const tile of ctx.bank) {
+      // bounded: the search stops when the time is up and keeps what it has found (so the page stays responsive)
+      if (Date.now() - t0 > budgetMs && found.length) break;
       if (!isPlaceable(tile) || !allowedByCounts(tile, st, ctx, doc.pieces.length)) continue;
       for (let rot = 0; rot < 4; rot++)
         for (const mirror of [false, true])
           for (let patch = 0; patch < 2; patch++)
-            for (const level of [null, 0, 1, 2, 10, 18, 26]) {
-              const c = placeAgainst(ctx, st, slot, tile, rot, mirror, patch, level, 0);
-              if (!c) continue;
-              const k = `${tile.id}|${c.piece.pos.join(",")}|${rot}|${mirror}`;
-              if (seen.has(k)) continue;
-              seen.add(k);
-              c.score = scoreCandidate(ctx, st, c);
-              found.push({ candidate: c, tile, note: note(c) });
-            }
+            for (const align of aligns)
+              for (const level of [null, 0, 1, 2, 10, 18, 26]) {
+                const c = placeAgainst(ctx, st, slot, tile, rot, mirror, patch, level, 0, align);
+                if (!c) continue;
+                const k = `${tile.id}|${c.piece.pos.join(",")}|${rot}|${mirror}`;
+                if (seen.has(k)) continue;
+                seen.add(k);
+                c.score = scoreCandidate(ctx, st, c);
+                found.push({ candidate: c, tile, note: note(c) });
+              }
     }
   }
   found.sort((a, b) => b.candidate.score - a.candidate.score);

@@ -4,7 +4,8 @@
 
 import type { ParsedTile } from "@/lib/types";
 import { boxesFor, analyzeLayout } from "./layout";
-import { boxesOverlap, snapFt, toCell, toFt } from "./geometry";
+import { placeBox, snapFt, toCell, toFt, type PlacedBox } from "./geometry";
+import { placementFree } from "./collision";
 import { orientedDims } from "./orient";
 import type { ArrangementDoc, Piece, ProgramRules, Vec3 } from "./types";
 
@@ -144,9 +145,9 @@ export function duplicatePiece(doc: ArrangementDoc, id: string, tileById: Map<st
   const dims = orientedDims(tile, src.rotZ, src.scale);
   const tries: [number, number, number][] = [[me.max[0], me.min[1], me.min[2]], [me.min[0] - dims[0], me.min[1], me.min[2]], [me.min[0], me.max[1], me.min[2]], [me.min[0], me.min[1] - dims[1], me.min[2]], [me.min[0], me.min[1], me.max[2]], [me.min[0], me.min[1], me.min[2] - dims[2]]];
   for (const t of tries) {
-    const box = { min: t, max: [t[0] + dims[0], t[1] + dims[1], t[2] + dims[2]] };
-    if (boxes.some((b) => boxesOverlap(box, b))) continue;
     const copy = makePiece(doc, src.tileId, [toFt(t[0]), toFt(t[1]), toFt(t[2])], { rotZ: src.rotZ, mirrorX: src.mirrorX, scale: src.scale });
+    // the cells decide whether the copy fits: a copy may sit inside the original's notch when the shapes nest
+    if (!placementFree(placeBox(copy, tile), boxes)) continue;
     return { doc: withPiece(doc, copy), id: copy.id };
   }
   return null;
@@ -167,7 +168,15 @@ export function checkEdit(doc: ArrangementDoc, tileById: Map<string, ParsedTile>
   return { ok: l.overlaps.length === 0 && l.islands.length === 0, overlaps: l.overlaps, islands: l.islands };
 }
 
-/** Moves each island group the shortest way that makes it touch the main set without overlapping anything; null if some island cannot be re-attached. */
+/** A box moved by a whole-cell translation (same cells, new place). */
+const shifted = (b: PlacedBox, t: [number, number, number]): PlacedBox => ({
+  ...b,
+  piece: { ...b.piece, pos: [b.piece.pos[0] + toFt(t[0]), b.piece.pos[1] + toFt(t[1]), b.piece.pos[2] + toFt(t[2])] },
+  min: [b.min[0] + t[0], b.min[1] + t[1], b.min[2] + t[2]],
+  max: [b.max[0] + t[0], b.max[1] + t[1], b.max[2] + t[2]],
+});
+
+/** Moves each island group the shortest way that makes it touch the main set without any piece claiming another's cells; null if some island cannot be re-attached. */
 export function reattachIslands(doc: ArrangementDoc, islands: string[][], tileById: Map<string, ParsedTile>, rules: ProgramRules): ArrangementDoc | null {
   let out = doc;
   for (const isle of islands) {
@@ -176,8 +185,7 @@ export function reattachIslands(doc: ArrangementDoc, islands: string[][], tileBy
     const mine = all.filter((b) => ids.has(b.piece.id));
     const rest = all.filter((b) => !ids.has(b.piece.id));
     if (!rest.length || !mine.length) return null;
-    let best: [number, number, number] | null = null;
-    let bestLen = Infinity;
+    const options: { t: [number, number, number]; len: number }[] = [];
     for (const m of mine)
       for (const q of rest)
         for (const axis of [0, 1, 2] as const) {
@@ -194,18 +202,31 @@ export function reattachIslands(doc: ArrangementDoc, islands: string[][], tileBy
                 t[axis] = plus ? q.max[axis] - m.min[axis] : q.min[axis] - m.max[axis];
                 t[o1] = d1;
                 t[o2] = d2;
-                const moved = mine.map((b) => ({ min: [b.min[0] + t[0], b.min[1] + t[1], b.min[2] + t[2]], max: [b.max[0] + t[0], b.max[1] + t[1], b.max[2] + t[2]] }));
-                if (moved.some((mv) => rest.some((r) => boxesOverlap(mv, r)))) continue;
-                const len = Math.hypot(...t);
-                if (len < bestLen) {
-                  bestLen = len;
-                  best = t;
-                }
+                const moved = mine.map((b) => shifted(b, t));
+                if (moved.some((mv) => !placementFree(mv, rest))) continue;
+                options.push({ t, len: Math.hypot(...t) });
               }
           }
         }
-    if (!best) return null;
-    out = movePieces(out, ids, [toFt(best[0]), toFt(best[1]), toFt(best[2])]);
+    // nearest first; the first that leaves the group attached (really touching, by cells) wins
+    options.sort((a, b) => a.len - b.len);
+    let placed: ArrangementDoc | null = null;
+    const seen = new Set<string>();
+    let tested = 0;
+    for (const o of options) {
+      const k = o.t.join(",");
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const next = movePieces(out, ids, [toFt(o.t[0]), toFt(o.t[1]), toFt(o.t[2])]);
+      const l = analyzeLayout(next, tileById, rules);
+      if (!l.islands.some((g) => g.some((id) => ids.has(id)))) {
+        placed = next;
+        break;
+      }
+      if (++tested >= 12) break;
+    }
+    if (!placed) return null;
+    out = placed;
   }
   return checkEdit(out, tileById, rules).ok ? out : null;
 }

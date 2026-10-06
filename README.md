@@ -181,7 +181,7 @@ lib/
   tiles/                  How a tile is read from its voxels (levels, rooms, routes, light, structure, plates): the ONE shared pipeline
   drawing/                Plan and section drawings (canvas + SVG), used by the Viewer, Boards, Analysis and the exports
   scoring/                The 12-descriptor scoring (measures, drivers, sentences, results exports)
-  arrange/                Placement, snapping, joints, layout (the connected rule), generator, composite model, smoothing, views (Arrange tab)
+  arrange/                Placement and collisions by occupied cells (shaped tiles nest), snapping, joints, walkable routes, layout (the connected rule), generator, composite model, smoothing, views (Arrange tab)
   sections/               Photo -> trace -> lofted volume -> ParsedTile (Sections tab)
   boards/                 Grid layout, frame shape, text fitting, canvas export, GIF/MP4 turntable export (Boards tab)
   exporters/              CSG fuse, OBJ export, recipe manifest

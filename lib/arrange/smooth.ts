@@ -38,6 +38,9 @@ function clone(c: Composite): Composite {
   return { ...c, void: c.void.slice(), plates: c.plates.slice(), struts: c.struts.slice() };
 }
 
+/** Every flat piece of every joint (a joint may meet in several patches, each a few rectangles): where two pieces really touch. */
+const jointFaces = (joints: Joint[]) => joints.flatMap((j) => j.patches.flatMap((p) => p.rects.map((r) => ({ axis: p.axis, min: r.min, max: r.max }))));
+
 export function smoothComposite(source: Composite, joints: Joint[], settings: SmoothSettings): SmoothResult {
   const comp = clone(source);
   const [nx, ny, nz] = comp.grid;
@@ -49,7 +52,7 @@ export function smoothComposite(source: Composite, joints: Joint[], settings: Sm
   const report: SmoothReport = { bridged: 0, floorsRaised: 0, floaters: [], removed: 0, filled: 0 };
   const org = [Math.round(comp.origin[0] / cell), Math.round(comp.origin[1] / cell), Math.round(comp.origin[2] / cell)];
 
-  for (const j of joints) {
+  for (const j of jointFaces(joints)) {
     const axis = j.axis;
     const [o1, o2] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1];
     const plane = Math.round(j.min[axis] / cell) - org[axis];

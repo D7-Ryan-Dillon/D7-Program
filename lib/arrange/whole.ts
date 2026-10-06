@@ -28,12 +28,8 @@ export interface Sequence {
   quality: number;
 }
 
-const voidCells = (layout: Layout, id: string) => {
-  const o = layout.byId.get(id)!.o;
-  let n = 0;
-  for (let i = 0; i < o.void.length; i++) n += o.void[i];
-  return n;
-};
+/** Carved space the piece really has (cells inside its container; the empty side of an L does not count). */
+const voidCells = (layout: Layout, id: string) => layout.byId.get(id)!.occ.voidCells;
 
 export function buildSequence(layout: Layout, rules: ProgramRules): Sequence {
   const empty: Sequence = { steps: [], branches: [], depth: new Map(), quality: 0 };

@@ -4,11 +4,14 @@
 //   openings   ...and slid sideways / up so the best-matching opening on each side lines up
 //   floors     ...or slid up / down so a floor of this piece meets a floor of the neighbour (any level to any level)
 //   grid       otherwise the nearest half-foot (or, in Lattice mode, the nearest 10 ft)
-// Positions that would overlap another piece are never offered.
+// Positions where the pieces would claim the same cells are never offered; boxes may overlap where the shapes nest
+// (lib/arrange/collision.ts). "Flush" also means against a notch wall or a step, not only a face of the box.
 
 import type { ParsedTile } from "@/lib/types";
-import { boxesOverlap, snapVec, toCell, toFt, type PlacedBox } from "./geometry";
-import { getFacts, orientedDims, type FaceKey } from "./orient";
+import { placeBox, snapVec, toCell, toFt, type PlacedBox } from "./geometry";
+import { placementFree } from "./collision";
+import { getOcc } from "./occupancy";
+import { getFacts, getOriented, orientedDims, type FaceKey } from "./orient";
 import { ARRANGE_CELL, type Piece, type Site, type Vec3 } from "./types";
 
 export type SnapRule = "flush" | "openings" | "floors" | "grid" | "lattice";
@@ -39,9 +42,13 @@ export function flushCandidates(piece: Piece, tile: ParsedTile, q: PlacedBox, wa
   const mine = getFacts(tile, piece.rotZ, piece.mirrorX, piece.scale);
   const theirs = getFacts(q.tile, q.piece.rotZ, q.piece.mirrorX, q.piece.scale);
   const out: { min: [number, number, number]; rule: SnapRule }[] = [];
+  const myOcc = getOcc(getOriented(tile, piece.rotZ, piece.mirrorX, piece.scale));
   for (const axis of [0, 1, 2] as const) {
     for (const plus of [true, false]) {
-      const flush = plus ? q.max[axis] : q.min[axis] - dims[axis];
+      // the planes the two pieces can meet on along this axis: the box faces, and every opening plane of a notch or step of either piece
+      const flushes = new Set<number>([plus ? q.max[axis] : q.min[axis] - dims[axis]]);
+      for (const qf of q.occ.features[faceOn(axis, plus)].slice(0, 3)) for (const mf of myOcc.features[faceOn(axis, !plus)].slice(0, 3)) flushes.add(q.min[axis] + qf.plane - mf.plane);
+      for (const flush of flushes) {
       if (Math.abs(want[axis] - flush) > radiusCells) continue;
       const [o1, o2] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1];
       const myFace = faceOn(axis, !plus);
@@ -79,6 +86,7 @@ export function flushCandidates(piece: Piece, tile: ParsedTile, q: PlacedBox, wa
           const rule: SnapRule = a.rule === "openings" || b.rule === "openings" ? "openings" : a.rule === "floors" || b.rule === "floors" ? "floors" : "flush";
           out.push({ min, rule });
         }
+      }
     }
   }
   return out;
@@ -98,10 +106,7 @@ export function snapPosition(piece: Piece, tile: ParsedTile, others: PlacedBox[]
     if (!s?.enabled) return true;
     return min[0] >= toCell(s.min[0]) && min[1] >= toCell(s.min[1]) && min[0] + dims[0] <= toCell(s.min[0] + s.size[0]) && min[1] + dims[1] <= toCell(s.min[1] + s.size[1]);
   };
-  const free = (min: [number, number, number]) => {
-    const box = { min, max: [min[0] + dims[0], min[1] + dims[1], min[2] + dims[2]] };
-    return !others.some((o) => boxesOverlap(box, o));
-  };
+  const free = (min: [number, number, number]) => placementFree(placeBox({ ...piece, pos: [toFt(min[0]), toFt(min[1]), toFt(min[2])] }, tile), others);
 
   let best: SnapResult | null = null;
   let bestCost = Infinity;

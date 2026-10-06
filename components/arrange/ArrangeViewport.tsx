@@ -194,21 +194,27 @@ function JointPlates({ joints, selectedId, onPick }: { joints: Joint[]; selected
   return (
     <>
       {joints.map((j) => {
-        const size: Vec3 = [Math.max(j.max[0] - j.min[0], 0.35), Math.max(j.max[1] - j.min[1], 0.35), Math.max(j.max[2] - j.min[2], 0.35)];
-        const c: Vec3 = [(j.min[0] + j.max[0]) / 2, (j.min[1] + j.max[1]) / 2, (j.min[2] + j.max[2]) / 2];
         const sel = selectedId === j.id;
-        return (
-          <mesh
-            key={j.id}
-            position={c}
-            onClick={(e) => {
-              e.stopPropagation();
-              onPick?.(j.id);
-            }}
-          >
-            <boxGeometry args={size} />
-            <meshBasicMaterial color={jointColor(j)} transparent opacity={sel ? 0.95 : 0.5} depthWrite={false} />
-          </mesh>
+        // the plate is drawn exactly where the pieces touch: every patch of the joint, on notch and step walls as well as on box faces; a joint that
+        // carries no walkable route is dimmer than one that does
+        return j.patches.flatMap((p, pi) =>
+          p.rects.map((r, ri) => {
+            const size: Vec3 = [Math.max(r.max[0] - r.min[0], 0.35), Math.max(r.max[1] - r.min[1], 0.35), Math.max(r.max[2] - r.min[2], 0.35)];
+            const c: Vec3 = [(r.min[0] + r.max[0]) / 2, (r.min[1] + r.max[1]) / 2, (r.min[2] + r.max[2]) / 2];
+            return (
+              <mesh
+                key={`${j.id}-${pi}-${ri}`}
+                position={c}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPick?.(j.id);
+                }}
+              >
+                <boxGeometry args={size} />
+                <meshBasicMaterial color={jointColor(j)} transparent opacity={sel ? 0.95 : p.walkable ? 0.5 : 0.28} depthWrite={false} />
+              </mesh>
+            );
+          }),
         );
       })}
     </>

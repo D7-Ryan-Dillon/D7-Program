@@ -118,9 +118,11 @@ export interface Priorities {
   vertical: number;
   openness: number;
   structure: number;
+  /** pieces that nest into each other's notches and steps (shared surface, a tight fit) */
+  nesting: number;
 }
 
-export const defaultPriorities = (): Priorities => ({ floors: 60, program: 50, daylight: 40, compactness: 40, variety: 50, vertical: 30, openness: 30, structure: 50 });
+export const defaultPriorities = (): Priorities => ({ floors: 60, program: 50, daylight: 40, compactness: 40, variety: 50, vertical: 30, openness: 30, structure: 50, nesting: 50 });
 
 export const PRIORITY_LABELS: { key: keyof Priorities; label: string; hint: string }[] = [
   { key: "floors", label: "Continuous floors", hint: "floors that meet at the same height across joints" },
@@ -131,6 +133,7 @@ export const PRIORITY_LABELS: { key: keyof Priorities; label: string; hint: stri
   { key: "vertical", label: "Vertical mix", hint: "more levels, pieces stacked above each other" },
   { key: "openness", label: "Openness to outside", hint: "more opening area on the outer faces" },
   { key: "structure", label: "Structural soundness", hint: "no hanging or poorly supported pieces" },
+  { key: "nesting", label: "Interlocking fit", hint: "pieces that nest into each other's notches and steps" },
 ];
 
 export type ShapeKind = "compact" | "spineV" | "spineH" | "courtyard" | "stepped" | "cascade" | "slab" | "village" | "bridge" | "free";
@@ -200,6 +203,35 @@ export interface JointParts {
   circulation: number | null;
 }
 
+/** One patch where two pieces meet. A pair can meet in several (a notch and a step, say). */
+export interface JointPatch {
+  axis: 0 | 1 | 2;
+  /** the plane, ft */
+  plane: number;
+  /** the patch as a few boxes (zero thickness along axis), ft: exactly where the two pieces touch */
+  rects: { min: Vec3; max: Vec3 }[];
+  areaFt2: number;
+  /** open space meets open space over this much of it, ft2 */
+  voidFt2: number;
+  walkable: boolean;
+}
+
+/** What a joint carries, kept apart: that the pieces touch, that open space continues, that a person can walk on. */
+export interface JointConnect {
+  contactFt2: number;
+  voidFt2: number;
+  voidConnected: boolean;
+  walkable: boolean;
+  /** the smallest step between floors on a walkable route, ft */
+  stepFt: number | null;
+  /** the pairs of floors (a zone of each piece; see occupancy.ts) that walkable routes join */
+  crossings: { aId: string; zoneA: number; bId: string; zoneB: number }[];
+  /** void meets void only across a horizontal plane or without a floor under it: a view, not a route */
+  kind: "walkable" | "void" | "contact";
+  /** why an opening that lines up is not walkable, in words (empty when it is) */
+  why: string;
+}
+
 export interface Joint {
   id: string;
   aId: string;
@@ -219,9 +251,12 @@ export interface Joint {
   /** the largest floor height difference across the joint, ft (null: no floors meet) */
   floorStepFt: number | null;
   rating: Rating | null;
+  /** every patch where the two pieces meet (axis, min and max above are those of the biggest) */
+  patches: JointPatch[];
+  connect: JointConnect;
 }
 
-export type WarningKind = "disconnected" | "unreachable" | "never" | "overlap" | "level" | "dead-end" | "hanging" | "site" | "counts" | "limit" | "tile";
+export type WarningKind = "disconnected" | "unreachable" | "partial" | "never" | "overlap" | "level" | "dead-end" | "sealed" | "hanging" | "site" | "counts" | "limit" | "tile";
 
 export interface ArrangeWarning {
   id: string;

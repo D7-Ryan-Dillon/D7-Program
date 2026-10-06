@@ -385,14 +385,19 @@ function dropSpurs(g: Grid, r: number, pts: Vec3[]): { path: Vec3[]; glances: Gl
   return { path, glances };
 }
 
-/** How many sharp reversals (more than 120 degrees back on itself) a path still has. */
-export function reversalsIn(path: Vec3[]): number {
-  let n = 0;
+/** Where (sample indices) a path turns sharply back on itself (more than 120 degrees). */
+export function reversalPoints(path: Vec3[]): number[] {
+  const out: number[] = [];
   for (let i = TURN_W; i < path.length - TURN_W; i++) if (sharpTurn(path, i)) {
-    n++;
+    out.push(i);
     i += TURN_W * 2;
   }
-  return n;
+  return out;
+}
+
+/** How many sharp reversals (more than 120 degrees back on itself) a path still has. */
+export function reversalsIn(path: Vec3[]): number {
+  return reversalPoints(path).length;
 }
 
 /** True when no point of the path, nor a ring 0.35 ft round it, is in foam, plate or strut (checked on the fine voxels). */

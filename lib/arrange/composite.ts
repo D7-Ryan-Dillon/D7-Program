@@ -21,7 +21,7 @@ export interface Composite {
   /** floor plate id per cell (0 = none) */
   plates: Uint8Array;
   struts: Uint8Array;
-  /** 1 = inside some piece */
+  /** 1 = inside some piece's container (cells claimed by no piece, including the notches of shaped pieces, stay 0) */
   mask: Uint8Array;
   /** which piece (index into pieceIds) owns each cell, -1 = none */
   owner: Int16Array;
@@ -56,11 +56,20 @@ export function buildComposite(boxes: PlacedBox[]): Composite | null {
         const li = (x * ny + y) * nz;
         const gi = ((ox + x) * grid[1] + oy + y) * grid[2] + oz;
         for (let z = 0; z < nz; z++) {
+          // outside this piece's container: its cell is not its own, so it never overwrites what another piece put there
           if (b.o.mask && !b.o.mask[li + z]) continue;
-          comp.mask[gi + z] = 1;
-          comp.owner[gi + z] = k;
-          if (b.o.void[li + z]) comp.void[gi + z] = 1;
-          else {
+          const mine = b.o.void[li + z] ? 1 : 0;
+          if (comp.mask[gi + z]) {
+            // two pieces claim the cell (only possible when the collision policy allowed it): material wins over space, space over space stays space
+            if (!comp.void[gi + z] || mine) continue;
+            comp.void[gi + z] = 0;
+            comp.owner[gi + z] = k;
+          } else {
+            comp.mask[gi + z] = 1;
+            comp.owner[gi + z] = k;
+            if (mine) comp.void[gi + z] = 1;
+          }
+          if (!mine) {
             if (b.o.plates?.[li + z]) {
               const local = b.o.plates[li + z];
               let id = ids.get(local);

@@ -4,16 +4,24 @@
 // connected route, a readable sequence) plus the user's priorities and the chosen shape, and picked with a seeded random
 // nudge so the same seed and settings give the same result.
 //
+// Interlocking: a piece is placed against an OPENING on the container surface of a piece already there. That surface need not
+// be a face of the bounding box: the wall of a notch, a recess or a step carries openings too, and a candidate is built by laying
+// one of the new piece's own openings (any orientation, mirror, lateral anchor and floor level) on the slot's plane, so
+// the new piece's box may overlap the old one's when their cells fit (lib/arrange/collision.ts). A candidate is kept only when
+// no material collides or fills a carved space, the rules and limits hold, and a person could walk from a floor that is already
+// reachable from the entrance into the new piece's main floor (lib/arrange/walk.ts).
+//
 // The same candidate machinery serves "suggest next", "fill the gap" and "auto replace" (lib/arrange/suggest.ts).
 
 import type { ParsedTile } from "@/lib/types";
-import { boundsOfBoxes, boxesOverlap, contactBetween, findContacts, placeBox, toCell, toFt, type PlacedBox } from "./geometry";
-import { jointFromContact } from "./joints";
-import { boxesFor, exposedPatches, type Exposed } from "./layout";
-import { categoryOf, FACE_AXIS, FACE_SIGN, getFacts, isPlaceable, OPPOSITE, orientedDims } from "./orient";
+import { boundsOfBoxes, boxesOverlap, contactsBetween, placeBox, toCell, toFt, type PlacedBox } from "./geometry";
+import { placementFree } from "./collision";
+import { groupByPair, jointFromContacts } from "./joints";
+import { analyzeLayout, boxesFor, exposedPatches, type Exposed, type Layout } from "./layout";
+import { categoryOf, FACE_AXIS, getFacts, getOriented, isPlaceable, OPPOSITE } from "./orient";
+import { getOcc, getWalk } from "./occupancy";
 import { ruleBetween, ruleValue, supportFraction } from "./program";
 import { mulberry32 } from "./rng";
-import { analyzeLayout } from "./layout";
 import { buildSequence } from "./whole";
 import { makePiece, newPieceId } from "./ops";
 import { toleranceFt, type ArrangementDoc, type GenSettings, type Joint, type Piece, type Priorities, type ProgramRules, type ShapeKind, type Site, type Vec3 } from "./types";
@@ -26,6 +34,8 @@ export interface GenContext {
   priorities: Priorities;
   site: Site;
   settings: GenSettings;
+  /** wall-clock budget for one Generate (ms): the search stops and keeps the best so far. Default 6000. */
+  budgetMs?: number;
 }
 
 export interface Candidate {
@@ -38,12 +48,28 @@ export interface Candidate {
   slot: Exposed;
   score: number;
   parts: Record<string, number>;
+  /** the pieces it touches */
+  neighbors: PlacedBox[];
 }
 
 const RELAX = [1, 0.75, 0.5, 0];
 const STOREY_CELLS = 20; // 10 ft
 const TOP_K = 3;
 const ATTEMPTS = 700;
+
+/** Why candidates were turned down (all steps of a run), to say what is stopping the search. */
+export interface Rejections {
+  tried: number;
+  noOpening: number;
+  collided: number;
+  site: number;
+  limits: number;
+  rule: number;
+  noRoute: number;
+  weak: number;
+  accepted: number;
+}
+export const newRejections = (): Rejections => ({ tried: 0, noOpening: 0, collided: 0, site: 0, limits: 0, rule: 0, noRoute: 0, weak: 0, accepted: 0 });
 
 // ---- shapes --------------------------------------------------------------------------------------------------------
 
@@ -134,18 +160,29 @@ export interface State {
   exposed: Exposed[];
   copies: Map<string, number>;
   cats: Map<string, number>;
+  /** floors (piece#zone) a person can reach from the entrance in the arrangement as it stands; null = not known (no check) */
+  reached: Set<string> | null;
+  /** the arrangement as it stands, read (null when the reach was not asked for) */
+  layout: Layout | null;
 }
 
-export function stateOf(pieces: Piece[], ctx: GenContext): State {
+export function stateOf(pieces: Piece[], ctx: GenContext, withReach = true, entranceId: string | null = null): State {
   const boxes = boxesFor(pieces, ctx.tileById);
-  const exposed = exposedPatches(boxes, findContacts(boxes));
   const copies = new Map<string, number>();
   const cats = new Map<string, number>();
   for (const b of boxes) {
     copies.set(b.piece.tileId, (copies.get(b.piece.tileId) ?? 0) + 1);
     cats.set(categoryOf(b.tile), (cats.get(categoryOf(b.tile)) ?? 0) + 1);
   }
-  return { pieces, boxes, exposed, copies, cats };
+  let reached: Set<string> | null = null;
+  let exposed: Exposed[];
+  let layout: Layout | null = null;
+  if (withReach && boxes.length) {
+    layout = analyzeLayout({ pieces, entranceId, names: {}, ratings: {} }, ctx.tileById, ctx.rules);
+    reached = layout.reachedZones;
+    exposed = layout.exposed;
+  } else exposed = exposedPatches(boxes);
+  return { pieces, boxes, exposed, copies, cats, reached, layout };
 }
 
 /** May another copy of this tile be added (copies, per-tile and per-category maxima, total)? */
@@ -160,7 +197,10 @@ export function allowedByCounts(tile: ParsedTile, st: State, ctx: GenContext, to
   return true;
 }
 
-/** Builds one candidate placement of `tile` (orientation rot / mirror) against `slot`, or null when it does not work. */
+/** How a new piece's opening is laid on the slot's opening: centre to centre, low edge to low edge, or high edge to high edge. */
+const anchor = (code: number, slotLo: number, slotHi: number, slotC: number, myLo: number, myHi: number, myC: number): number => (code === 1 ? slotLo - myLo : code === 2 ? slotHi - myHi : slotC - myC);
+
+/** Builds one candidate placement of `tile` (orientation rot / mirror) against `slot`, or null when it does not work. `align` (0-8) picks the lateral anchors, `levelPick` the vertical choice. */
 export function placeAgainst(
   ctx: GenContext,
   st: State,
@@ -171,23 +211,33 @@ export function placeAgainst(
   patchPick: number,
   levelPick: number | null,
   minScore: number,
+  align = 0,
+  why?: Rejections,
 ): Candidate | null {
+  if (why) why.tried++;
   const parent = st.boxes.find((b) => b.piece.id === slot.pieceId);
   if (!parent) return null;
-  const facts = getFacts(tile, rot, mirror, 1);
+  const o = getOriented(tile, rot, mirror, 1);
+  const occ = getOcc(o);
   const myFace = OPPOSITE[slot.face];
-  const myPatches = facts.patches[myFace];
-  if (!myPatches.length) return null;
-  const q = myPatches[Math.min(patchPick, myPatches.length - 1)];
-  const dims = orientedDims(tile, rot, 1);
+  const myOpenings = occ.features[myFace];
+  if (!myOpenings.length) {
+    if (why) why.noOpening++;
+    return null;
+  }
+  const q = myOpenings[Math.min(patchPick, myOpenings.length - 1)];
+  const dims = o.dims;
   const axis = FACE_AXIS[slot.face];
   const [o1, o2] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1];
   const min: [number, number, number] = [0, 0, 0];
-  min[axis] = FACE_SIGN[slot.face] > 0 ? parent.max[axis] : parent.min[axis] - dims[axis];
-  min[o1] = Math.round(parent.min[o1] + slot.patch.cu - q.cu);
-  min[o2] = Math.round(parent.min[o2] + slot.patch.cv - q.cv);
+  // along the axis: the new piece's opening plane lies on the slot's plane (a box face of either piece, or the wall of a notch)
+  min[axis] = slot.plane - q.plane;
+  const sp = slot.patch;
+  min[o1] = Math.round(parent.min[o1] + anchor(align % 3, sp.u0, sp.u1, sp.cu, q.u0, q.u1, q.cu));
+  min[o2] = Math.round(parent.min[o2] + anchor(Math.floor(align / 3) % 3, sp.v0, sp.v1, sp.cv, q.v0, q.v1, q.cv));
   if (levelPick !== null && axis !== 2) {
-    // vertical choices beyond "opening centre to opening centre": a storey up or down (floor 1 meets floor 2), or any floor of this piece to any floor of the neighbour
+    // vertical choices beyond "opening to opening": a storey up or down (floor 1 meets floor 2), or any floor of this piece to any floor of the neighbour
+    const facts = getFacts(tile, rot, mirror, 1);
     const code = levelPick & 7;
     if (code < 2) min[2] += code === 0 ? STOREY_CELLS : -STOREY_CELLS;
     else {
@@ -199,29 +249,70 @@ export function placeAgainst(
     }
   }
   const max: [number, number, number] = [min[0] + dims[0], min[1] + dims[1], min[2] + dims[2]];
-  if (st.boxes.some((b) => boxesOverlap({ min, max }, b))) return null;
-  if (!inSite(ctx.site, min, max)) return null;
+  if (!inSite(ctx.site, min, max)) {
+    if (why) why.site++;
+    return null;
+  }
   const piece: Piece = { id: "candidate", tileId: tile.id, pos: [toFt(min[0]), toFt(min[1]), toFt(min[2])], rotZ: rot, mirrorX: mirror, scale: 1, locked: false };
   const box = placeBox(piece, tile);
+  // the cells decide, not the boxes: boxes may overlap where the shapes nest
+  if (!placementFree(box, st.boxes)) {
+    if (why) why.collided++;
+    return null;
+  }
   const all = boundsOfBoxes([...st.boxes, box])!;
   const l = ctx.rules.limits;
-  if (l.maxHeightFt > 0 && toFt(all.max[2] - all.min[2]) > l.maxHeightFt + 1e-6) return null;
-  if (l.maxFootprintFt > 0 && Math.max(toFt(all.max[0] - all.min[0]), toFt(all.max[1] - all.min[1])) > l.maxFootprintFt + 1e-6) return null;
+  if ((l.maxHeightFt > 0 && toFt(all.max[2] - all.min[2]) > l.maxHeightFt + 1e-6) || (l.maxFootprintFt > 0 && Math.max(toFt(all.max[0] - all.min[0]), toFt(all.max[1] - all.min[1])) > l.maxFootprintFt + 1e-6)) {
+    if (why) why.limits++;
+    return null;
+  }
 
   const tol = toleranceFt(ctx.rules);
-  const joints: Joint[] = [];
-  let primary: Joint | null = null;
-  for (const b of st.boxes) {
-    const c = contactBetween(box, b);
-    if (!c) continue;
-    const j = jointFromContact(c, tol);
-    const level = ruleBetween(ctx.rules, tile, b.tile, j.axis === 2);
-    if (level === "never") return null;
-    joints.push(j);
-    if (b === parent) primary = j;
+  const withMe = [...st.boxes, box];
+  // the joint with the piece it attaches to comes first: most candidates fail there, and the rest of the neighbours are only read for those that do not
+  const parentContacts = contactsBetween(box, parent);
+  if (!parentContacts.length) return null;
+  const primary = jointFromContacts(parentContacts, withMe, tol);
+  if (ruleBetween(ctx.rules, tile, parent.tile, primary.axis === 2) === "never") {
+    if (why) why.rule++;
+    return null;
   }
-  if (!primary || !primary.walkable || (primary.score ?? 0) < minScore) return null;
-  return { piece, box, primary, joints, slot, score: 0, parts: {} };
+  // a walkable route from a floor that can already be reached into the new piece's own main floor (not into a pocket of it)
+  const wk = getWalk(box.occ);
+  const route = primary.connect.crossings.some((x) => {
+    const mine = x.aId === "candidate" ? x.zoneA : x.bId === "candidate" ? x.zoneB : -1;
+    const theirs = x.aId === "candidate" ? `${x.bId}#${x.zoneB}` : `${x.aId}#${x.zoneA}`;
+    return mine === wk.main && (!st.reached || st.reached.has(theirs));
+  });
+  if (!route) {
+    if (why) why.noRoute++;
+    return null;
+  }
+  if ((primary.score ?? 0) < minScore) {
+    if (why) why.weak++;
+    return null;
+  }
+  const neighbors: PlacedBox[] = [parent];
+  const joints: Joint[] = [primary];
+  const contacts = [];
+  for (const b of st.boxes) {
+    if (b === parent || box.max[0] < b.min[0] || b.max[0] < box.min[0] || box.max[1] < b.min[1] || b.max[1] < box.min[1] || box.max[2] < b.min[2] || b.max[2] < box.min[2]) continue;
+    const cs = contactsBetween(box, b);
+    if (!cs.length) continue;
+    neighbors.push(b);
+    contacts.push(...cs);
+  }
+  for (const g of groupByPair(contacts)) {
+    const j = jointFromContacts(g, withMe, tol);
+    const other = st.boxes.find((b) => b.piece.id === (j.aId === "candidate" ? j.bId : j.aId))!;
+    if (ruleBetween(ctx.rules, tile, other.tile, j.axis === 2) === "never") {
+      if (why) why.rule++;
+      return null;
+    }
+    joints.push(j);
+  }
+  if (why) why.accepted++;
+  return { piece, box, primary, joints, slot, score: 0, parts: {}, neighbors };
 }
 
 /** The objective for one candidate (higher is better): always-on goals plus the user's priorities and the shape. */
@@ -234,14 +325,14 @@ export function scoreCandidate(ctx: GenContext, st: State, c: Candidate): number
   parts.floors = mean(c.joints.map((j) => (j.parts.floors ?? 100))) / 100;
   parts.program = mean(c.joints.map((j) => (ruleValue(ruleBetween(ctx.rules, c.box.tile, st.boxes.find((b) => b.piece.id === (j.aId === "candidate" ? j.bId : j.aId))!.tile, j.axis === 2)) + 1) / 2));
   // openings of the new piece that face outside (not covered by a neighbour)
-  const touching = st.boxes.map((b) => contactBetween(c.box, b)).filter((x): x is NonNullable<typeof x> => !!x);
-  const mine = exposedPatches([c.box], touching);
+  const mine = exposedPatches([...c.neighbors, c.box]).filter((e) => e.pieceId === "candidate");
   const sideFaces = new Set(mine.filter((e) => FACE_AXIS[e.face] !== 2).map((e) => e.face));
   parts.daylight = clamp01(mine.filter((e) => FACE_AXIS[e.face] !== 2).length / 3) * 0.6 + clamp01(sideFaces.size / 3) * 0.2 + (mine.some((e) => e.face === "z+") ? 0.2 : 0);
   const all = boundsOfBoxes([...st.boxes, c.box])!;
   const volBox = (all.max[0] - all.min[0]) * (all.max[1] - all.min[1]) * (all.max[2] - all.min[2]);
+  // the cells really occupied (nested pieces share boxes: counting boxes would count the empty notches twice)
   let vol = 0;
-  for (const b of [...st.boxes, c.box]) vol += (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]);
+  for (const b of [...st.boxes, c.box]) vol += b.occ.inside;
   parts.compactness = vol / Math.max(1, volBox);
   parts.variety = 1 / (1 + (st.copies.get(c.box.tile.id) ?? 0));
   const zs = new Set(st.boxes.map((b) => b.min[2]));
@@ -255,12 +346,26 @@ export function scoreCandidate(ctx: GenContext, st: State, c: Candidate): number
   }
   const root = centerOf(st.boxes[0]);
   // knit: a piece that touches several neighbours is part of the mass; a piece on one joint is a stub
-  parts.knit = clamp01((touching.length - 1) / 2);
+  parts.knit = clamp01((c.neighbors.length - 1) / 2);
   // tuck: how much the bounding box has to grow to take the piece (a piece out on its own makes a long thin reach)
   const before = boundsOfBoxes(st.boxes)!;
   const volBefore = (before.max[0] - before.min[0]) * (before.max[1] - before.min[1]) * (before.max[2] - before.min[2]);
-  const pieceVol = (c.box.max[0] - c.box.min[0]) * (c.box.max[1] - c.box.min[1]) * (c.box.max[2] - c.box.min[2]);
+  const pieceVol = c.box.occ.inside;
   parts.tuck = 1 / (1 + Math.max(0, volBox - volBefore) / Math.max(1, pieceVol) / 1.5);
+  // fit: how much of the new piece's own surface lies against something useful (matched openings and meeting structure), and how far it sits
+  // inside its neighbours' bounding boxes (a nested fit); the overlap of boxes alone earns nothing, only the interface cells do
+  const surfaceFt2 = Math.max(1, c.box.occ.faces * 0.25);
+  const touching = c.joints.reduce((a, j) => a + j.connect.contactFt2, 0);
+  const matched = c.joints.reduce((a, j) => a + j.connect.voidFt2, 0);
+  let inside = 0;
+  for (const b of c.neighbors) {
+    const ox = Math.min(b.max[0], c.box.max[0]) - Math.max(b.min[0], c.box.min[0]);
+    const oy = Math.min(b.max[1], c.box.max[1]) - Math.max(b.min[1], c.box.min[1]);
+    const oz = Math.min(b.max[2], c.box.max[2]) - Math.max(b.min[2], c.box.min[2]);
+    if (ox > 0 && oy > 0 && oz > 0) inside += ox * oy * oz;
+  }
+  const nestShare = clamp01(inside / Math.max(1, c.box.occ.dims[0] * c.box.occ.dims[1] * c.box.occ.dims[2]));
+  parts.nesting = clamp01(0.55 * clamp01(touching / (surfaceFt2 * 0.5)) + 0.25 * clamp01(matched / 40) + 0.45 * nestShare);
   parts.shape = shapeScore(ctx.settings.shape, ctx.settings.direction, centerOf(c.box), { boxes: st.boxes, root, centroid, count: st.pieces.length, amount: ctx.settings.amount, contacts: c.joints.filter((j) => j.axis !== 2).length });
   const order = ctx.rules.sequenceOrder;
   const pa = order.indexOf(categoryOf(st.boxes.find((b) => b.piece.id === (c.primary.aId === "candidate" ? c.primary.bId : c.primary.aId))!.tile) as never);
@@ -280,7 +385,8 @@ export function scoreCandidate(ctx: GenContext, st: State, c: Candidate): number
     w(p.variety) * parts.variety +
     w(p.vertical) * parts.vertical +
     w(p.openness) * parts.openness +
-    w(p.structure) * parts.structure
+    w(p.structure) * parts.structure +
+    w(p.nesting ?? 50) * 1.4 * parts.nesting
   );
 }
 
@@ -322,30 +428,37 @@ function pickLevel(rng: () => number): number | null {
   return 2 + 8 * Math.floor(rng() * 40);
 }
 
-/** One step: the best candidate among a random sample (picked among the top few by score), or null when nothing fits. */
-function step(ctx: GenContext, st: State, rng: () => number, minScore: number, total: number): Candidate | null {
+const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+/** One step: the candidates found in a random sample, the one picked (among the top few by score) first and the rest best first; empty when nothing fits. */
+function step(ctx: GenContext, st: State, rng: () => number, minScore: number, total: number, why: Rejections, deadline: number): Candidate[] {
   const found: Candidate[] = [];
   for (let k = 0; k < ATTEMPTS && found.length < 60; k++) {
+    if ((k & 31) === 31 && now() > deadline && found.length) break;
     const slot = pickSlot(st, rng);
     const tile = slot && pickTile(ctx, st, rng, total);
     if (!slot || !tile) break;
-    const c = placeAgainst(ctx, st, slot, tile, Math.floor(rng() * 4), rng() < 0.5, Math.floor(rng() * 3), pickLevel(rng), minScore);
+    const c = placeAgainst(ctx, st, slot, tile, Math.floor(rng() * 4), rng() < 0.5, Math.floor(rng() * 3), pickLevel(rng), minScore, Math.floor(rng() * 9), why);
     if (c) {
       c.score = scoreCandidate(ctx, st, c) + rng() * 0.15;
       found.push(c);
     }
   }
-  if (!found.length) return null;
+  if (!found.length) return [];
   found.sort((a, b) => b.score - a.score);
   // a seeded nudge among the best few, strongly favouring the best
   const pool = found.slice(0, TOP_K);
   const weights = pool.map((c) => Math.exp((c.score - pool[0].score) * 2.5));
   let r = rng() * weights.reduce((a, b) => a + b, 0);
+  let pick = pool[0];
   for (let i = 0; i < pool.length; i++) {
     r -= weights[i];
-    if (r <= 0) return pool[i];
+    if (r <= 0) {
+      pick = pool[i];
+      break;
+    }
   }
-  return pool[0];
+  return [pick, ...found.filter((c) => c !== pick)];
 }
 
 // ---- the whole run ---------------------------------------------------------------------------------------------------
@@ -356,6 +469,8 @@ export interface GenResult {
   score: number;
   /** one line on why this result */
   why: string;
+  /** what the search turned down, over the whole run */
+  rejections?: Rejections;
 }
 
 function rootPiece(ctx: GenContext, rng: () => number, doc: ArrangementDoc): Piece | null {
@@ -368,27 +483,61 @@ function rootPiece(ctx: GenContext, rng: () => number, doc: ArrangementDoc): Pie
   return makePiece(doc, tile.id, [toFt(min[0]), toFt(min[1]), toFt(min[2])], { rotZ: Math.floor(rng() * 4), mirrorX: rng() < 0.5 });
 }
 
-function growOnce(ctx: GenContext, base: ArrangementDoc, target: number, seed: number): { doc: ArrangementDoc; stopped: string | null } {
+/** A sentence on what stopped the search: the most common reason candidates were turned down. */
+export function explainRejections(r: Rejections, bank: ParsedTile[]): string {
+  if (!r.tried) return "no opening was free to build on";
+  const pct = (n: number) => `${Math.round((100 * n) / r.tried)}%`;
+  const reasons: [string, number][] = [
+    ["would collide with, or fill a room of, a piece already there", r.collided],
+    ["had no opening of the right kind to meet", r.noOpening],
+    ["met no walkable floor (no floor to stand on, too narrow or low, or a pocket)", r.noRoute],
+    ["broke a program rule", r.rule],
+    ["fell outside the site", r.site],
+    ["went over a height or footprint limit", r.limits],
+    ["joined too weakly", r.weak],
+  ];
+  reasons.sort((a, b) => b[1] - a[1]);
+  const top = reasons.filter((x) => x[1] > 0).slice(0, 2).map(([t, n]) => `${pct(n)} ${t}`);
+  return `${r.tried} placements tried across ${bank.length} tiles: ${top.join("; ") || "none fitted"}`;
+}
+
+function growOnce(ctx: GenContext, base: ArrangementDoc, target: number, seed: number, why: Rejections, deadline: number): { doc: ArrangementDoc; stopped: string | null } {
   const rng = mulberry32(seed);
   let doc = base;
   if (!doc.pieces.length) {
     const r = rootPiece(ctx, rng, doc);
     if (!r) return { doc, stopped: "no tile in the bank can be placed" };
-    doc = { ...doc, pieces: [r] };
+    doc = { ...doc, pieces: [r], entranceId: r.id };
   }
   let stopped: string | null = null;
   while (doc.pieces.length < target) {
-    const st = stateOf(doc.pieces, ctx);
+    if (now() > deadline) {
+      stopped = `stopped at ${doc.pieces.length} of ${target}: the time allowed for one search ran out`;
+      break;
+    }
+    const st = stateOf(doc.pieces, ctx, true, doc.entranceId);
     let chosen: Candidate | null = null;
+    let next: ArrangementDoc | null = null;
     for (const f of RELAX) {
-      chosen = step(ctx, st, rng, ctx.settings.minScore * f, doc.pieces.length);
+      const options = step(ctx, st, rng, ctx.settings.minScore * f, doc.pieces.length, why, deadline);
+      // a new piece may take the clearance away from a route that was already there: keep the first option that leaves the arrangement valid
+      for (const o of options.slice(0, 6)) {
+        const trial: ArrangementDoc = { ...doc, pieces: [...doc.pieces, { ...o.piece, id: newPieceId(doc) }] };
+        const l = analyzeLayout(trial, ctx.tileById, ctx.rules);
+        if (l.overlaps.length === 0 && l.islands.length === 0 && l.unreachable.length <= (st.layout?.unreachable.length ?? 0)) {
+          chosen = o;
+          next = trial;
+          break;
+        }
+        why.noRoute++;
+      }
       if (chosen) break;
     }
-    if (!chosen) {
+    if (!chosen || !next) {
       stopped = `stopped at ${doc.pieces.length} of ${target}: nothing else fits within the rules`;
       break;
     }
-    doc = { ...doc, pieces: [...doc.pieces, { ...chosen.piece, id: newPieceId(doc) }] };
+    doc = next;
   }
   return { doc, stopped };
 }
@@ -400,7 +549,6 @@ export function assemblyScore(doc: ArrangementDoc, ctx: GenContext): number {
   const meanJ = js.length ? js.reduce((a, j) => a + (j.score ?? 0), 0) / js.length / 100 : 0;
   const seq = buildSequence(layout, ctx.rules).quality / 100;
   const boxes = layout.boxes;
-  const st: State = { pieces: doc.pieces, boxes, exposed: layout.exposed, copies: new Map(), cats: new Map() };
   const root = centerOf(boxes[0]);
   const centroid: Vec3 = [0, 0, 0];
   for (const b of boxes) {
@@ -412,26 +560,31 @@ export function assemblyScore(doc: ArrangementDoc, ctx: GenContext): number {
     shape += shapeScore(ctx.settings.shape, ctx.settings.direction, centerOf(b), { boxes: boxes.slice(0, i), root, centroid, count: i, amount: boxes.length, contacts: 0 });
   });
   shape /= boxes.length;
-  void st;
   const degree = new Map<string, number>(boxes.map((b) => [b.piece.id, 0]));
-  for (const c of layout.contacts) {
-    degree.set(c.a.piece.id, (degree.get(c.a.piece.id) ?? 0) + 1);
-    degree.set(c.b.piece.id, (degree.get(c.b.piece.id) ?? 0) + 1);
+  for (const j of layout.joints) {
+    degree.set(j.aId, (degree.get(j.aId) ?? 0) + 1);
+    degree.set(j.bId, (degree.get(j.bId) ?? 0) + 1);
   }
   const leaves = [...degree.values()].filter((d) => d <= 1).length / Math.max(1, boxes.length);
   const meanDeg = [...degree.values()].reduce((a, d) => a + d, 0) / Math.max(1, boxes.length);
   const knit = 1.4 * Math.min(1, meanDeg / 3) - 2.4 * Math.max(0, leaves - 0.25);
-  return 3 * meanJ + 2 * seq + 1.5 * shape + knit + (layout.islands.length === 0 ? 1 : -2) + (layout.unreachable.length === 0 ? 1 : -1);
+  return 3 * meanJ + 2 * seq + 1.5 * shape + knit + (layout.islands.length === 0 ? 1 : -2) + (layout.unreachable.length === 0 ? 1 : -1) - 2 * layout.overlaps.length;
 }
 
 export function generateArrangement(ctx: GenContext, base: ArrangementDoc, opts: { target?: number; tries?: number } = {}): GenResult {
   const target = opts.target ?? ctx.settings.amount;
   const tries = opts.tries ?? 4;
+  const why = newRejections();
+  const budget = ctx.budgetMs ?? 6000;
+  const t0 = now();
   let best: { doc: ArrangementDoc; stopped: string | null; score: number } | null = null;
   for (let t = 0; t < tries; t++) {
-    const r = growOnce(ctx, base, target, ctx.settings.seed * 7919 + t * 104729 + 1);
+    // each try gets its share of what is left; the first try always gets to finish what it can
+    const deadline = t0 + (budget * (t + 1)) / tries;
+    const r = growOnce(ctx, base, target, ctx.settings.seed * 7919 + t * 104729 + 1, why, deadline);
     const score = assemblyScore(r.doc, ctx);
     if (!best || score > best.score) best = { ...r, score };
+    if (now() > t0 + budget) break;
   }
   if (!best) return { doc: base, notes: ["nothing to generate"], score: 0, why: "" };
   const layout = analyzeLayout(best.doc, ctx.tileById, ctx.rules);
@@ -439,9 +592,13 @@ export function generateArrangement(ctx: GenContext, base: ArrangementDoc, opts:
   const mean = layout.joints.filter((j) => j.score !== null);
   const avg = mean.length ? mean.reduce((a, j) => a + (j.score ?? 0), 0) / mean.length : 0;
   const notes: string[] = [];
-  if (best.stopped) notes.push(best.stopped);
-  const why = `${best.doc.pieces.length} pieces, ${ctx.settings.shape} shape, a route of ${seq.steps.length} spaces from the entrance, joints average ${avg.toFixed(0)}.`;
-  return { doc: { ...best.doc, entranceId: best.doc.entranceId ?? layout.entranceId }, notes, score: best.score, why };
+  if (best.stopped) {
+    notes.push(best.stopped);
+    notes.push(`The tile bank could not satisfy the constraints for the rest: ${explainRejections(why, ctx.bank)}.`);
+  }
+  const nestedCount = layout.nested.length;
+  const whyLine = `${best.doc.pieces.length} pieces, ${ctx.settings.shape} shape, a route of ${seq.steps.length} spaces from the entrance, joints average ${avg.toFixed(0)}${nestedCount ? `, ${nestedCount} nested fit${nestedCount === 1 ? "" : "s"}` : ""}.`;
+  return { doc: { ...best.doc, entranceId: best.doc.entranceId ?? layout.entranceId }, notes, score: best.score, why: whyLine, rejections: why };
 }
 
 /** Removes the branch that grew past each bad joint (and everything only reachable through it, except locked pieces), then regrows. */
@@ -450,9 +607,9 @@ export function regenerateMarked(ctx: GenContext, doc: ArrangementDoc, badJointI
   const root = layout.entranceId ?? doc.pieces[0]?.id;
   const adj = new Map<string, string[]>();
   for (const b of layout.boxes) adj.set(b.piece.id, []);
-  for (const c of layout.contacts) {
-    adj.get(c.a.piece.id)!.push(c.b.piece.id);
-    adj.get(c.b.piece.id)!.push(c.a.piece.id);
+  for (const j of layout.joints) {
+    adj.get(j.aId)!.push(j.bId);
+    adj.get(j.bId)!.push(j.aId);
   }
   const depth = new Map<string, number>([[root, 0]]);
   const children = new Map<string, string[]>();
@@ -486,3 +643,5 @@ export function regenerateMarked(ctx: GenContext, doc: ArrangementDoc, badJointI
   const kept: ArrangementDoc = { ...doc, pieces: doc.pieces.filter((p) => !remove.has(p.id)), ratings: Object.fromEntries(Object.entries(doc.ratings).filter(([k]) => !badJointIds.has(k))) };
   return generateArrangement(ctx, kept, { target: Math.max(target, kept.pieces.length + 1), tries: 3 });
 }
+
+export { boxesOverlap };
