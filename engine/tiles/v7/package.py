@@ -1,6 +1,6 @@
 """Package the V7 set from the engine exports in C:/tmp/tiles7 (written by build.py): one import-ready zip per tile, the reference outputs, the whole set, the recipes and the pictures.
 
-  python package.py                 writes engine/tiles/v4/package/   (git-ignored: about 100 MB)
+  python package.py                 writes engine/tiles/v7/package/   (git-ignored: about 100 MB)
 
 package/
   analysis/<name>_analysis.zip      ONE tile, import-ready: drop it on the Viewer (Choose .zip), or pick the folders below

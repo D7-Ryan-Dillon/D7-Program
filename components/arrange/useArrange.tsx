@@ -18,7 +18,7 @@ import { analyzeLayout, entrancePoint as layoutEntrancePoint, type Layout } from
 import { evaluateProgram } from "@/lib/arrange/program";
 import { snapPosition } from "@/lib/arrange/snap";
 import { alignPieces, checkEdit, duplicatePiece, groupPieces, makePiece, mirrorGroup, movePieces, patchPieces, reattachIslands, removePieces, rotateGroup, ungroupPieces, withGroups, type AlignMode } from "@/lib/arrange/ops";
-import { generateArrangement, regenerateMarked, type GenContext, type GenResult } from "@/lib/arrange/generate";
+import { generateAsync, regenerateAsync, type GenContext, type GenProgress, type GenReport, type GenResult } from "@/lib/arrange/generate";
 import { applySuggestion, betterTiles, suggestFor, suggestNext, type Replacement, type Suggestion } from "@/lib/arrange/suggest";
 import { buildComposite, compositeMeshes, compositeToTile, readComposite, type Composite, type CompositeMeshes } from "@/lib/arrange/composite";
 import { smoothComposite, type SmoothReport } from "@/lib/arrange/smooth";
@@ -32,6 +32,7 @@ import {
   defaultSite,
   defaultSmooth,
   emptyDoc,
+  normalizePriorities,
   type ArrangeWarning,
   type ArrangementDoc,
   type GenSettings,
@@ -197,6 +198,12 @@ export interface ArrangeController {
   setConnector(jointId: string, choice: ConnectorChoice | null): void;
   // generating
   busy: string | null;
+  /** how far the search has got (while one runs) */
+  progress: GenProgress | null;
+  /** what the last generated building was asked to be and came out as */
+  report: GenReport | null;
+  /** stops the search that is running; nothing is changed */
+  stopGen(): void;
   /** what the viewport is waiting for, or null: a generation (until the whole result is built and read) or a tile being built */
   loading: string | null;
   notes: string[];
@@ -262,6 +269,12 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
   const { tiles, addTile: addProjectTile, setActiveTile } = useProject();
   const [ui, setUi] = useProjectUi<ArrangeUi>("arrange", defaultArrangeUi);
   const patchUi = useCallback((patch: Partial<ArrangeUi>) => setUi((p) => ({ ...p, ...patch })), [setUi]);
+  // sliders saved by an older version had other names: read them into the current five once
+  useEffect(() => {
+    const keys = Object.keys(ui.priorities ?? {});
+    if (keys.length === 5 && keys.includes("tall")) return;
+    setUi((p) => ({ ...p, priorities: normalizePriorities(p.priorities) }));
+  }, [ui.priorities, setUi]);
   // a project saved with the old default look (ghosted foam, magenta void) takes the new one once
   useEffect(() => {
     if ((ui.look ?? 0) >= 2) return;
@@ -286,6 +299,9 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
   const [settling, setSettling] = useState(false);
   const [notes, setNotes] = useState<string[]>([]);
   const [why, setWhy] = useState("");
+  const [progress, setProgress] = useState<GenProgress | null>(null);
+  const [report, setReport] = useState<GenReport | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [pending, setPending] = useState<PendingEdit | null>(null);
   const [drag, setDrag] = useState<{ ids: Set<string>; base: ArrangementDoc; leadId: string; leadStart: Vec3 } | null>(null);
   const [dragDoc, setDragDoc] = useState<ArrangementDoc | null>(null);
@@ -340,7 +356,7 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
   }, [selRaw, doc]);
 
   const genContext = useCallback(
-    (bankOverride?: ParsedTile[]): GenContext => ({ tileById, bank: bankOverride ?? bank, rules, priorities: ui.priorities, site: ui.site, settings: ui.gen }),
+    (bankOverride?: ParsedTile[]): GenContext => ({ tileById, bank: bankOverride ?? bank, rules, priorities: normalizePriorities(ui.priorities), site: ui.site, settings: ui.gen }),
     [tileById, bank, rules, ui.priorities, ui.site, ui.gen],
   );
 
@@ -631,6 +647,7 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
     (r: GenResult, fresh: boolean) => {
       setNotes(r.notes);
       setWhy(r.why);
+      setReport(r.report ?? null);
       setSettling(true);
       if (fresh) {
         saveBeforeNew();
@@ -650,26 +667,39 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
     [saveBeforeNew, doc, ui.saved.length, patchUi, hist, setUi, refit],
   );
 
+  /** Runs a search without freezing the page. It has no time limit: it runs until the building is made or every plan is tried, and Stop ends it with nothing changed. */
   const runGen = useCallback(
-    (what: string, f: () => GenResult | null, fresh: boolean) => {
+    async (what: string, f: (signal: AbortSignal, onProgress: (p: GenProgress) => void) => Promise<GenResult | null>, fresh: boolean) => {
       if (!bank.length) {
         toast.error("Check at least one tile in the Bank first.");
         return;
       }
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
       setBusy(what);
-      setTimeout(() => {
-        try {
-          const r = f();
-          if (r) finish(r, fresh);
-        } catch (err) {
-          toast.error(err instanceof Error ? err.message : "Couldn't generate.");
-        } finally {
-          setBusy(null);
-        }
-      }, 30);
+      setProgress(null);
+      await new Promise((res) => setTimeout(res, 30));
+      try {
+        const r = await f(ac.signal, setProgress);
+        if (!r) toast.message("Stopped. Nothing was changed.");
+        else if (!r.doc.pieces.length) {
+          // nothing could be built: say why, and keep what is there
+          setNotes(r.notes);
+          setWhy("");
+          toast.error("Nothing could be built within the rules. The arrangement is unchanged.");
+        } else finish(r, fresh);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Couldn't generate.");
+      } finally {
+        if (abortRef.current === ac) abortRef.current = null;
+        setBusy(null);
+        setProgress(null);
+      }
     },
     [bank.length, finish],
   );
+  const stopGen = useCallback(() => abortRef.current?.abort(), []);
 
   const generate = useCallback(() => {
     // unless a seed is being kept, every press picks a new one (and turns the building a new way)
@@ -680,22 +710,18 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
       direction = seed % 4;
       patchUi({ gen: { ...ui.gen, seed, direction } });
     }
-    runGen(
-      "Generating",
-      () => {
-        const c = genContext();
-        return generateArrangement({ ...c, settings: { ...c.settings, seed, direction } }, { ...emptyDoc(), entranceId: null });
-      },
-      true,
-    );
+    void runGen("Generating", (signal, onProgress) => {
+      const c = genContext();
+      return generateAsync({ ...c, settings: { ...c.settings, seed, direction } }, { ...emptyDoc(), entranceId: null }, {}, onProgress, signal);
+    }, true);
   }, [runGen, genContext, ui.gen, patchUi]);
   const growMore = useCallback(
     () =>
-      runGen(
+      void runGen(
         "Growing",
-        () => {
+        (signal, onProgress) => {
           const keep = doc.pieces.length ? doc : emptyDoc();
-          return generateArrangement(genContext(), keep, { target: keep.pieces.length + ui.gen.amount });
+          return generateAsync(genContext(), keep, { target: keep.pieces.length + ui.gen.amount }, onProgress, signal);
         },
         false,
       ),
@@ -707,7 +733,7 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
       toast.message("Mark some joints bad (thumbs down) first.");
       return;
     }
-    runGen("Regenerating", () => regenerateMarked(genContext(), doc, bad, doc.pieces.length), false);
+    void runGen("Regenerating", (signal, onProgress) => regenerateAsync(genContext(), doc, bad, doc.pieces.length, onProgress, signal), false);
   }, [runGen, doc, genContext]);
 
   // ---- helpers: suggestions ----
@@ -905,7 +931,7 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
       const entry = ui.saved.find((s) => s.id === id);
       if (!entry) return;
       saveBeforeNew();
-      setUi((prev) => ({ ...prev, current: entry.doc, currentId: entry.id, currentName: entry.name, gen: entry.gen ?? prev.gen, priorities: entry.priorities ?? prev.priorities, rules: entry.rules ?? prev.rules, site: entry.site ?? prev.site, smooth: entry.smooth ?? prev.smooth }));
+      setUi((prev) => ({ ...prev, current: entry.doc, currentId: entry.id, currentName: entry.name, gen: entry.gen ?? prev.gen, priorities: normalizePriorities(entry.priorities ?? prev.priorities), rules: entry.rules ?? prev.rules, site: entry.site ?? prev.site, smooth: entry.smooth ?? prev.smooth }));
       hist.reset(entry.doc);
       setSelState(new Set());
       setBaselineDoc(null);
@@ -1107,6 +1133,9 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
     rateJoint,
     setConnector,
     busy,
+    progress,
+    report,
+    stopGen,
     loading: busy && ["Generating", "Growing", "Regenerating", "Building the tile"].includes(busy) ? `${busy}…` : settling ? "Reading the building…" : null,
     notes,
     why,

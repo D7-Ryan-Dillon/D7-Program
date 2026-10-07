@@ -1,31 +1,31 @@
-// The generator. It grows ONE arrangement from an entrance outwards: every new piece attaches to an opening of a piece
-// already placed and must make a walkable joint there, so the result is always a single connected building (the
-// connected rule is built in, not checked afterwards). Choices are scored on the always-on goals (joint quality, a
-// connected route, a readable sequence) plus the user's priorities and the chosen shape, and picked with a seeded random
-// nudge so the same seed and settings give the same result.
+// The generator. It does not wander: it PLANS the shape first (lib/arrange/patterns.ts: a list of cells on the lattice the tiles live on), then searches for tiles
+// to fill the plan, backing up when a choice leaves something that cannot be put right. A building it returns obeys these rules, all of them, every time:
 //
-// Interlocking: a piece is placed against an OPENING on the container surface of a piece already there. That surface need not
-// be a face of the bounding box: the wall of a notch, a recess or a step carries openings too, and a candidate is built by laying
-// one of the new piece's own openings (any orientation, mirror, lateral anchor and floor level) on the slot's plane, so
-// the new piece's box may overlap the old one's when their cells fit (lib/arrange/collision.ts). A candidate is kept only when
-// no material collides or fills a carved space, the rules and limits hold, and a person could walk from a floor that is already
-// reachable from the entrance into the new piece's main floor (lib/arrange/walk.ts).
+//   floors meet floors   every joint on the way in is a walkable crossing between two floors at the same height (within the program's step), with a score
+//                        above the Min joint setting; the score is where openings and voids have to match
+//   no dead-end stair    a tile whose main floor climbs (a stair or ramp lives in it) must have a neighbour meeting the TOP of that climb
+//   no stranded floor    every floor that counts as a space, in every tile, can be walked to from the entrance (the upper floors that belong to a neighbour
+//                        included): there is no dead space
+//   one way in           the first cell is the entrance, on the ground, and nothing is below it
+//   the program          counts, limits, the site, and the adjacency rules ("never" is never)
 //
-// The same candidate machinery serves "suggest next", "fill the gap" and "auto replace" (lib/arrange/suggest.ts).
+// What it costs is time, not quality, so there is no clock: the search runs until the plan is filled. The answer to "can tile A stand beside tile B this way" is
+// worked out once (lib/arrange/pairs.ts) and remembered, so later runs are quick. `generateSteps` is a generator (it yields progress and can be stopped at any
+// point); `generateArrangement` runs it to the end, `generateAsync` runs it without freezing the page.
 
 import type { ParsedTile } from "@/lib/types";
-import { connectJoint } from "./connectors";
-import { boundsOfBoxes, boxesOverlap, contactsBetween, placeBox, toCell, toFt, type PlacedBox } from "./geometry";
+import { analyzeLayout, type Layout } from "./layout";
+import { placeBox, toCell, toFt } from "./geometry";
 import { placementFree } from "./collision";
-import { groupByPair, jointFromContacts } from "./joints";
-import { analyzeLayout, boxesFor, exposedPatches, type Exposed, type Layout } from "./layout";
-import { categoryOf, FACE_AXIS, getFacts, getOriented, isPlaceable, OPPOSITE } from "./orient";
-import { getOcc, getWalk } from "./occupancy";
-import { ruleBetween, ruleValue, supportFraction } from "./program";
+import { entryZones, factsOf, pairInfo, partnersOf, stateFor, statesOf, type LState, type PairInfo } from "./pairs";
+import { beside, branchCells, planInput, planMetrics, planShape, touches, type Cell } from "./patterns";
+import { categoryOf, getOriented, isPlaceable } from "./orient";
+import { getOcc } from "./occupancy";
+import { ruleBetween, ruleValue } from "./program";
 import { mulberry32 } from "./rng";
-import { buildSequence } from "./whole";
 import { makePiece, newPieceId } from "./ops";
-import { connectorReachFt, type ArrangementDoc, type GenSettings, type Joint, type Piece, type Priorities, type ProgramRules, type ShapeKind, type Site, type Vec3 } from "./types";
+import { allowedByCounts, placeAgainst, scoreCandidate, stateOf } from "./candidates";
+import { ARRANGE_CELL, connectorReachFt, type ArrangementDoc, type GenSettings, type Piece, type Priorities, type ProgramRules, type Site } from "./types";
 
 export interface GenContext {
   tileById: Map<string, ParsedTile>;
@@ -35,469 +35,24 @@ export interface GenContext {
   priorities: Priorities;
   site: Site;
   settings: GenSettings;
-  /** wall-clock budget for one Generate (ms): the search stops and keeps the best so far. Default 6000. */
-  budgetMs?: number;
 }
 
-export interface Candidate {
-  piece: Piece;
-  box: PlacedBox;
-  /** the joint with the piece it attaches to */
-  primary: Joint;
-  joints: Joint[];
-  /** the opening it attaches to */
-  slot: Exposed;
-  score: number;
-  parts: Record<string, number>;
-  /** the pieces it touches */
-  neighbors: PlacedBox[];
+export interface GenProgress {
+  phase: "planning" | "searching" | "checking";
+  attempt: number;
+  /** cells filled / cells in the plan, in the deepest search so far in this attempt */
+  placed: number;
+  total: number;
+  nodes: number;
+  message: string;
 }
 
-const RELAX = [1, 0.75, 0.5, 0];
-const STOREY_CELLS = 20; // 10 ft
-const TOP_K = 3;
-const ATTEMPTS = 700;
-
-/** Why candidates were turned down (all steps of a run), to say what is stopping the search. */
-export interface Rejections {
-  tried: number;
-  noOpening: number;
-  collided: number;
-  site: number;
-  limits: number;
-  rule: number;
-  noRoute: number;
-  weak: number;
-  accepted: number;
+/** What was asked, and what the building came out as. */
+export interface GenReport {
+  asked: { pieces: number; shape: string; tall: number; compact: number; bright: number; varied: number; branching: boolean };
+  got: { pieces: number; levels: number; heightFt: number; widthFt: number; depthFt: number; stackedPairs: number; distinctTiles: number; climbingTiles: number; routeSteps: number };
+  attempts: number;
 }
-export const newRejections = (): Rejections => ({ tried: 0, noOpening: 0, collided: 0, site: 0, limits: 0, rule: 0, noRoute: 0, weak: 0, accepted: 0 });
-
-// ---- shapes --------------------------------------------------------------------------------------------------------
-
-const DIRS: [number, number][] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
-const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-const near = (d: number, scale: number) => 1 / (1 + Math.abs(d) / scale);
-
-interface ShapeState {
-  boxes: PlacedBox[];
-  root: Vec3;
-  centroid: Vec3;
-  count: number;
-  amount: number;
-  contacts: number;
-}
-
-const centerOf = (b: { min: number[]; max: number[] }): Vec3 => [toFt((b.min[0] + b.max[0]) / 2), toFt((b.min[1] + b.max[1]) / 2), toFt((b.min[2] + b.max[2]) / 2)];
-
-/** 0..1: how well a new piece at `c` fits the overall shape. */
-export function shapeScore(shape: ShapeKind, dir: number, c: Vec3, s: ShapeState): number {
-  const [dx, dy] = DIRS[((dir % 4) + 4) % 4];
-  const rx = c[0] - s.root[0];
-  const ry = c[1] - s.root[1];
-  const rz = c[2] - s.root[2];
-  const along = rx * dx + ry * dy;
-  const lateral = -rx * dy + ry * dx;
-  const horiz = Math.hypot(rx, ry);
-  switch (shape) {
-    case "compact":
-      return near(Math.hypot(c[0] - s.centroid[0], c[1] - s.centroid[1], (c[2] - s.centroid[2]) * 1.5), 25);
-    case "spineV":
-      return 0.55 * near(horiz, 15) + 0.45 * clamp01(0.25 + rz / Math.max(20, s.amount * 6));
-    case "spineH":
-      return 0.65 * near(Math.abs(lateral) + Math.abs(rz), 14) + 0.35;
-    case "courtyard": {
-      const R = Math.min(60, Math.max(30, 14 + 3.2 * s.amount));
-      const cx = s.root[0] + dx * R;
-      const cy = s.root[1] + dy * R;
-      return near(Math.hypot(c[0] - cx, c[1] - cy) - R, 12) * near(rz, 14);
-    }
-    case "stepped":
-      return near(rz - Math.floor(along / 20) * 10, 8) * (along >= -10 ? 1 : 0.5);
-    case "cascade":
-      return near(rz + 0.25 * along, 6) * (along >= -10 ? 1 : 0.5);
-    case "slab": {
-      const layers = s.amount <= 6 ? 2 : 3;
-      const cap = Math.max(1, Math.ceil(s.amount / layers));
-      const target = Math.floor(s.count / cap) * 10;
-      return 0.7 * near(rz - target, 6) + 0.3 * near(horiz, 40);
-    }
-    case "village": {
-      const baseN = Math.ceil(s.amount * 0.4);
-      if (s.count < baseN) return 0.7 * near(rz, 6) + 0.3 * near(horiz, 30);
-      // towers: stack above existing pieces
-      const over = s.boxes.some((b) => toFt(b.max[2]) <= c[2] + 0.1 && Math.abs(centerOf(b)[0] - c[0]) < 11 && Math.abs(centerOf(b)[1] - c[1]) < 11);
-      return (over ? 0.75 : 0.2) + 0.25 * clamp01(rz / 30);
-    }
-    case "bridge": {
-      if (s.count < Math.ceil(s.amount * 0.55)) {
-        const R = Math.min(50, Math.max(28, 12 + 2.6 * s.amount));
-        const cx = s.root[0] + dx * R;
-        const cy = s.root[1] + dy * R;
-        return near(Math.hypot(c[0] - cx, c[1] - cy) - R, 12) * near(rz, 8);
-      }
-      return s.contacts >= 2 ? 1 : 0.15 + 0.3 * clamp01(rz / 20);
-    }
-    default:
-      return 0.5;
-  }
-}
-
-// ---- candidates ----------------------------------------------------------------------------------------------------
-
-const inSite = (site: Site, min: [number, number, number], max: [number, number, number]) => {
-  if (!site.enabled) return true;
-  return (
-    toFt(min[0]) >= site.min[0] - 1e-6 &&
-    toFt(min[1]) >= site.min[1] - 1e-6 &&
-    toFt(max[0]) <= site.min[0] + site.size[0] + 1e-6 &&
-    toFt(max[1]) <= site.min[1] + site.size[1] + 1e-6 &&
-    (site.maxHeight <= 0 || toFt(max[2]) <= site.maxHeight + 1e-6)
-  );
-};
-
-export interface State {
-  pieces: Piece[];
-  boxes: PlacedBox[];
-  exposed: Exposed[];
-  copies: Map<string, number>;
-  cats: Map<string, number>;
-  /** floors (piece#zone) a person can reach from the entrance in the arrangement as it stands; null = not known (no check) */
-  reached: Set<string> | null;
-  /** the arrangement as it stands, read (null when the reach was not asked for) */
-  layout: Layout | null;
-}
-
-export function stateOf(pieces: Piece[], ctx: GenContext, withReach = true, entranceId: string | null = null): State {
-  const boxes = boxesFor(pieces, ctx.tileById);
-  const copies = new Map<string, number>();
-  const cats = new Map<string, number>();
-  for (const b of boxes) {
-    copies.set(b.piece.tileId, (copies.get(b.piece.tileId) ?? 0) + 1);
-    cats.set(categoryOf(b.tile), (cats.get(categoryOf(b.tile)) ?? 0) + 1);
-  }
-  let reached: Set<string> | null = null;
-  let exposed: Exposed[];
-  let layout: Layout | null = null;
-  if (withReach && boxes.length) {
-    layout = analyzeLayout({ pieces, entranceId, names: {}, ratings: {} }, ctx.tileById, ctx.rules);
-    reached = layout.reachedZones;
-    exposed = layout.exposed;
-  } else exposed = exposedPatches(boxes);
-  return { pieces, boxes, exposed, copies, cats, reached, layout };
-}
-
-/** May another copy of this tile be added (copies, per-tile and per-category maxima, total)? */
-export function allowedByCounts(tile: ParsedTile, st: State, ctx: GenContext, total: number): boolean {
-  const c = ctx.rules.counts;
-  if (c.maxCopies > 0 && (st.copies.get(tile.id) ?? 0) >= c.maxCopies) return false;
-  const pt = c.perTile[tile.id];
-  if (pt && pt.max > 0 && (st.copies.get(tile.id) ?? 0) >= pt.max) return false;
-  const pc = c.perCategory[categoryOf(tile)];
-  if (pc && pc.max > 0 && (st.cats.get(categoryOf(tile)) ?? 0) >= pc.max) return false;
-  if (c.total.max > 0 && total >= c.total.max) return false;
-  return true;
-}
-
-/** How a new piece's opening is laid on the slot's opening: centre to centre, low edge to low edge, or high edge to high edge. */
-const anchor = (code: number, slotLo: number, slotHi: number, slotC: number, myLo: number, myHi: number, myC: number): number => (code === 1 ? slotLo - myLo : code === 2 ? slotHi - myHi : slotC - myC);
-
-/** Builds one candidate placement of `tile` (orientation rot / mirror) against `slot`, or null when it does not work. `align` (0-8) picks the lateral anchors, `levelPick` the vertical choice. */
-export function placeAgainst(
-  ctx: GenContext,
-  st: State,
-  slot: Exposed,
-  tile: ParsedTile,
-  rot: number,
-  mirror: boolean,
-  patchPick: number,
-  levelPick: number | null,
-  minScore: number,
-  align = 0,
-  why?: Rejections,
-  /** a nest probe: the new piece's box low corner, in cells from the neighbour's (a notch is filled by a piece shifted along the lattice), instead of lining openings up */
-  nestAt?: [number, number, number],
-): Candidate | null {
-  if (why) why.tried++;
-  const parent = st.boxes.find((b) => b.piece.id === slot.pieceId);
-  if (!parent) return null;
-  const o = getOriented(tile, rot, mirror, 1);
-  const occ = getOcc(o);
-  const myFace = OPPOSITE[slot.face];
-  const myOpenings = occ.features[myFace];
-  if (!myOpenings.length && !nestAt) {
-    if (why) why.noOpening++;
-    return null;
-  }
-  const q = myOpenings.length ? myOpenings[Math.min(patchPick, myOpenings.length - 1)] : undefined;
-  const dims = o.dims;
-  const axis = FACE_AXIS[slot.face];
-  const [o1, o2] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1];
-  const min: [number, number, number] = [0, 0, 0];
-  if (nestAt) {
-    min[0] = parent.min[0] + nestAt[0];
-    min[1] = parent.min[1] + nestAt[1];
-    min[2] = parent.min[2] + nestAt[2];
-  } else if (q) {
-    // along the axis: the new piece's opening plane lies on the slot's plane (a box face of either piece, or the wall of a notch)
-    min[axis] = slot.plane - q.plane;
-    const sp = slot.patch;
-    min[o1] = Math.round(parent.min[o1] + anchor(align % 3, sp.u0, sp.u1, sp.cu, q.u0, q.u1, q.cu));
-    min[o2] = Math.round(parent.min[o2] + anchor(Math.floor(align / 3) % 3, sp.v0, sp.v1, sp.cv, q.v0, q.v1, q.cv));
-  }
-  if (!nestAt && levelPick !== null && axis !== 2) {
-    // vertical choices beyond "opening to opening": a storey up or down (floor 1 meets floor 2), or any floor of this piece to any floor of the neighbour
-    const facts = getFacts(tile, rot, mirror, 1);
-    const code = levelPick & 7;
-    if (code < 2) min[2] += code === 0 ? STOREY_CELLS : -STOREY_CELLS;
-    else {
-      const pf = getFacts(parent.tile, parent.piece.rotZ, parent.piece.mirrorX, parent.piece.scale);
-      if (pf.levelsZ.length && facts.levelsZ.length) {
-        const idx = levelPick >> 3;
-        min[2] = parent.min[2] + pf.levelsZ[idx % pf.levelsZ.length] - facts.levelsZ[Math.floor(idx / pf.levelsZ.length) % facts.levelsZ.length];
-      }
-    }
-  }
-  const max: [number, number, number] = [min[0] + dims[0], min[1] + dims[1], min[2] + dims[2]];
-  if (!inSite(ctx.site, min, max)) {
-    if (why) why.site++;
-    return null;
-  }
-  const piece: Piece = { id: "candidate", tileId: tile.id, pos: [toFt(min[0]), toFt(min[1]), toFt(min[2])], rotZ: rot, mirrorX: mirror, scale: 1, locked: false };
-  const box = placeBox(piece, tile);
-  // the cells decide, not the boxes: boxes may overlap where the shapes nest
-  if (!placementFree(box, st.boxes)) {
-    if (why) why.collided++;
-    return null;
-  }
-  const all = boundsOfBoxes([...st.boxes, box])!;
-  const l = ctx.rules.limits;
-  if ((l.maxHeightFt > 0 && toFt(all.max[2] - all.min[2]) > l.maxHeightFt + 1e-6) || (l.maxFootprintFt > 0 && Math.max(toFt(all.max[0] - all.min[0]), toFt(all.max[1] - all.min[1])) > l.maxFootprintFt + 1e-6)) {
-    if (why) why.limits++;
-    return null;
-  }
-
-  const tol = connectorReachFt(ctx.rules);
-  const withMe = [...st.boxes, box];
-  // the joint with the piece it attaches to comes first: most candidates fail there, and the rest of the neighbours are only read for those that do not
-  const parentContacts = contactsBetween(box, parent);
-  if (!parentContacts.length) return null;
-  const primary = jointFromContacts(parentContacts, withMe, tol);
-  if (ruleBetween(ctx.rules, tile, parent.tile, primary.axis === 2) === "never") {
-    if (why) why.rule++;
-    return null;
-  }
-  // a walkable route from a floor that can already be reached into the new piece's own main floor (not into a pocket of it)
-  const wk = getWalk(box.occ);
-  let route = primary.connect.crossings.some((x) => {
-    const mine = x.aId === "candidate" ? x.zoneA : x.bId === "candidate" ? x.zoneB : -1;
-    const theirs = x.aId === "candidate" ? `${x.bId}#${x.zoneB}` : `${x.aId}#${x.zoneA}`;
-    return mine === wk.main && (!st.reached || st.reached.has(theirs));
-  });
-  // floors a doorway apart: with connectors switched on, a stair or ramp built into the lower room may make the way (lib/arrange/connectors.ts)
-  if (!route && ctx.rules.autoConnectors && primary.connect.kind === "connector") {
-    const via = connectJoint(withMe, primary, ctx.rules);
-    if (via) {
-      const made = via.made[0];
-      const cand = via.boxes.find((b) => b.piece.id === "candidate")!;
-      const par = via.boxes.find((b) => b.piece.id === parent.piece.id)!;
-      const cs = contactsBetween(cand, par);
-      if (cs.length) {
-        const j2 = jointFromContacts(cs, via.boxes, tol);
-        const candMain = getWalk(cand.occ).main;
-        route = j2.connect.crossings.some((x) => {
-          const mine = x.aId === "candidate" ? x.zoneA : x.bId === "candidate" ? x.zoneB : -1;
-          const theirsZone = x.aId === "candidate" ? x.zoneB : x.zoneA;
-          const theirs = made.hostId === parent.piece.id ? `${parent.piece.id}#${made.hostZoneBefore}` : `${parent.piece.id}#${theirsZone}`;
-          return mine === candMain && (!st.reached || st.reached.has(theirs));
-        });
-      }
-    }
-  }
-  if (!route) {
-    if (why) why.noRoute++;
-    return null;
-  }
-  if ((primary.score ?? 0) < minScore) {
-    if (why) why.weak++;
-    return null;
-  }
-  const neighbors: PlacedBox[] = [parent];
-  const joints: Joint[] = [primary];
-  const contacts = [];
-  for (const b of st.boxes) {
-    if (b === parent || box.max[0] < b.min[0] || b.max[0] < box.min[0] || box.max[1] < b.min[1] || b.max[1] < box.min[1] || box.max[2] < b.min[2] || b.max[2] < box.min[2]) continue;
-    const cs = contactsBetween(box, b);
-    if (!cs.length) continue;
-    neighbors.push(b);
-    contacts.push(...cs);
-  }
-  for (const g of groupByPair(contacts)) {
-    const j = jointFromContacts(g, withMe, tol);
-    const other = st.boxes.find((b) => b.piece.id === (j.aId === "candidate" ? j.bId : j.aId))!;
-    if (ruleBetween(ctx.rules, tile, other.tile, j.axis === 2) === "never") {
-      if (why) why.rule++;
-      return null;
-    }
-    joints.push(j);
-  }
-  if (why) why.accepted++;
-  return { piece, box, primary, joints, slot, score: 0, parts: {}, neighbors };
-}
-
-/** The objective for one candidate (higher is better): always-on goals plus the user's priorities and the shape. */
-export function scoreCandidate(ctx: GenContext, st: State, c: Candidate): number {
-  const p = ctx.priorities;
-  const w = (v: number) => (v / 100) * 2; // 50 -> 1
-  const parts: Record<string, number> = {};
-  const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
-  parts.joint = mean(c.joints.map((j) => j.score ?? 0)) / 100;
-  parts.floors = mean(c.joints.map((j) => (j.parts.floors ?? 100))) / 100;
-  parts.program = mean(c.joints.map((j) => (ruleValue(ruleBetween(ctx.rules, c.box.tile, st.boxes.find((b) => b.piece.id === (j.aId === "candidate" ? j.bId : j.aId))!.tile, j.axis === 2)) + 1) / 2));
-  // openings of the new piece that face outside (not covered by a neighbour)
-  const mine = exposedPatches([...c.neighbors, c.box]).filter((e) => e.pieceId === "candidate");
-  const sideFaces = new Set(mine.filter((e) => FACE_AXIS[e.face] !== 2).map((e) => e.face));
-  parts.daylight = clamp01(mine.filter((e) => FACE_AXIS[e.face] !== 2).length / 3) * 0.6 + clamp01(sideFaces.size / 3) * 0.2 + (mine.some((e) => e.face === "z+") ? 0.2 : 0);
-  const all = boundsOfBoxes([...st.boxes, c.box])!;
-  const volBox = (all.max[0] - all.min[0]) * (all.max[1] - all.min[1]) * (all.max[2] - all.min[2]);
-  // the cells really occupied (nested pieces share boxes: counting boxes would count the empty notches twice)
-  let vol = 0;
-  for (const b of [...st.boxes, c.box]) vol += b.occ.inside;
-  parts.compactness = vol / Math.max(1, volBox);
-  parts.variety = 1 / (1 + (st.copies.get(c.box.tile.id) ?? 0));
-  const zs = new Set(st.boxes.map((b) => b.min[2]));
-  parts.vertical = zs.has(c.box.min[2]) ? 0.25 : 1;
-  parts.openness = clamp01(mine.reduce((a, e) => a + e.patch.cells, 0) / 900);
-  parts.structure = supportFraction({ boxes: [...st.boxes, c.box], bounds: all }, c.box.piece.id);
-  const centroid: Vec3 = [0, 0, 0];
-  for (const b of st.boxes) {
-    const cb = centerOf(b);
-    for (let k = 0; k < 3; k++) centroid[k] += cb[k] / st.boxes.length;
-  }
-  const root = centerOf(st.boxes[0]);
-  // knit: a piece that touches several neighbours is part of the mass; a piece on one joint is a stub
-  parts.knit = clamp01((c.neighbors.length - 1) / 2);
-  // tuck: how much the bounding box has to grow to take the piece (a piece out on its own makes a long thin reach)
-  const before = boundsOfBoxes(st.boxes)!;
-  const volBefore = (before.max[0] - before.min[0]) * (before.max[1] - before.min[1]) * (before.max[2] - before.min[2]);
-  const pieceVol = c.box.occ.inside;
-  parts.tuck = 1 / (1 + Math.max(0, volBox - volBefore) / Math.max(1, pieceVol) / 1.5);
-  // fit: how much of the new piece's own surface lies against something useful (matched openings and meeting structure), and how far it sits
-  // inside its neighbours' bounding boxes (a nested fit); the overlap of boxes alone earns nothing, only the interface cells do
-  const surfaceFt2 = Math.max(1, c.box.occ.faces * 0.25);
-  const touching = c.joints.reduce((a, j) => a + j.connect.contactFt2, 0);
-  const matched = c.joints.reduce((a, j) => a + j.connect.voidFt2, 0);
-  let inside = 0;
-  for (const b of c.neighbors) {
-    const ox = Math.min(b.max[0], c.box.max[0]) - Math.max(b.min[0], c.box.min[0]);
-    const oy = Math.min(b.max[1], c.box.max[1]) - Math.max(b.min[1], c.box.min[1]);
-    const oz = Math.min(b.max[2], c.box.max[2]) - Math.max(b.min[2], c.box.min[2]);
-    if (ox > 0 && oy > 0 && oz > 0) inside += ox * oy * oz;
-  }
-  const nestShare = clamp01(inside / Math.max(1, c.box.occ.dims[0] * c.box.occ.dims[1] * c.box.occ.dims[2]));
-  parts.nesting = clamp01(0.55 * clamp01(touching / (surfaceFt2 * 0.5)) + 0.25 * clamp01(matched / 40) + 0.45 * nestShare);
-  parts.shape = shapeScore(ctx.settings.shape, ctx.settings.direction, centerOf(c.box), { boxes: st.boxes, root, centroid, count: st.pieces.length, amount: ctx.settings.amount, contacts: c.joints.filter((j) => j.axis !== 2).length });
-  const order = ctx.rules.sequenceOrder;
-  const pa = order.indexOf(categoryOf(st.boxes.find((b) => b.piece.id === (c.primary.aId === "candidate" ? c.primary.bId : c.primary.aId))!.tile) as never);
-  const na = order.indexOf(categoryOf(c.box.tile) as never);
-  parts.sequence = pa < 0 || na < 0 ? 0.6 : na > pa ? 1 : na === pa ? 0.7 : 0.4;
-  c.parts = parts;
-  return (
-    3 * parts.joint +
-    1.6 * parts.knit +
-    1.3 * parts.tuck +
-    1.5 * parts.sequence +
-    2.4 * parts.shape +
-    2 * w(p.floors) * parts.floors +
-    w(p.program) * parts.program +
-    w(p.daylight) * parts.daylight +
-    w(p.compactness) * 1.5 * parts.compactness +
-    w(p.variety) * parts.variety +
-    w(p.vertical) * parts.vertical +
-    w(p.openness) * parts.openness +
-    w(p.structure) * parts.structure +
-    w(p.nesting ?? 50) * 1.4 * parts.nesting
-  );
-}
-
-/** Rooted at the piece list's first piece; tiles that carry a wanted minimum count are favoured. */
-function pickTile(ctx: GenContext, st: State, rng: () => number, total: number): ParsedTile | null {
-  const pool = ctx.bank.filter((t) => isPlaceable(t) && allowedByCounts(t, st, ctx, total));
-  if (!pool.length) return null;
-  const weights = pool.map((t) => {
-    let wgt = 1 / (1 + (st.copies.get(t.id) ?? 0));
-    const pc = ctx.rules.counts.perCategory[categoryOf(t)];
-    if (pc && pc.min > 0 && (st.cats.get(categoryOf(t)) ?? 0) < pc.min) wgt *= 4;
-    const pt = ctx.rules.counts.perTile[t.id];
-    if (pt && pt.min > 0 && (st.copies.get(t.id) ?? 0) < pt.min) wgt *= 4;
-    return wgt;
-  });
-  let r = rng() * weights.reduce((a, b) => a + b, 0);
-  for (let i = 0; i < pool.length; i++) {
-    r -= weights[i];
-    if (r <= 0) return pool[i];
-  }
-  return pool[pool.length - 1];
-}
-
-export function pickSlot(st: State, rng: () => number): Exposed | null {
-  if (!st.exposed.length) return null;
-  let r = rng() * st.exposed.reduce((a, e) => a + e.patch.cells, 0);
-  for (const e of st.exposed) {
-    r -= e.patch.cells;
-    if (r <= 0) return e;
-  }
-  return st.exposed[st.exposed.length - 1];
-}
-
-/** How the next piece is lifted against its neighbour: mostly opening to opening, often a storey up or down, sometimes any floor to any floor. */
-function pickLevel(rng: () => number): number | null {
-  const r = rng();
-  if (r < 0.4) return null;
-  if (r < 0.75) return rng() < 0.5 ? 0 : 1;
-  return 2 + 8 * Math.floor(rng() * 40);
-}
-
-const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
-
-/** One step: the candidates found in a random sample, the one picked (among the top few by score) first and the rest best first; empty when nothing fits. */
-function step(ctx: GenContext, st: State, rng: () => number, minScore: number, total: number, why: Rejections, deadline: number): Candidate[] {
-  const found: Candidate[] = [];
-  for (let k = 0; k < ATTEMPTS && found.length < 60; k++) {
-    if ((k & 31) === 31 && now() > deadline && found.length) break;
-    const slot = pickSlot(st, rng);
-    const tile = slot && pickTile(ctx, st, rng, total);
-    if (!slot || !tile) break;
-    // a notch (a stepped top, a bay) is filled by a piece shifted along the lattice: probe those spots against a notched neighbour
-    let nest: [number, number, number] | undefined;
-    const parent = st.boxes.find((b) => b.piece.id === slot.pieceId);
-    if (parent && rng() < 0.4 && parent.occ.inside < parent.o.dims[0] * parent.o.dims[1] * parent.o.dims[2] * 0.97) {
-      const pickOff = () => [-20, -20, 0, 20, 20][Math.floor(rng() * 5)];
-      nest = [pickOff(), pickOff(), [-20, 0, 20, 20][Math.floor(rng() * 4)]];
-    }
-    const c = placeAgainst(ctx, st, slot, tile, Math.floor(rng() * 4), rng() < 0.5, Math.floor(rng() * 3), nest ? null : pickLevel(rng), minScore, Math.floor(rng() * 9), why, nest);
-    if (c) {
-      c.score = scoreCandidate(ctx, st, c) + rng() * 0.15;
-      found.push(c);
-    }
-  }
-  if (!found.length) return [];
-  found.sort((a, b) => b.score - a.score);
-  // a seeded nudge among the best few, strongly favouring the best
-  const pool = found.slice(0, TOP_K);
-  const weights = pool.map((c) => Math.exp((c.score - pool[0].score) * 2.5));
-  let r = rng() * weights.reduce((a, b) => a + b, 0);
-  let pick = pool[0];
-  for (let i = 0; i < pool.length; i++) {
-    r -= weights[i];
-    if (r <= 0) {
-      pick = pool[i];
-      break;
-    }
-  }
-  return [pick, ...found.filter((c) => c !== pick)];
-}
-
-// ---- the whole run ---------------------------------------------------------------------------------------------------
 
 export interface GenResult {
   doc: ArrangementDoc;
@@ -505,140 +60,754 @@ export interface GenResult {
   score: number;
   /** one line on why this result */
   why: string;
-  /** what the search turned down, over the whole run */
-  rejections?: Rejections;
+  report?: GenReport;
 }
 
-function rootPiece(ctx: GenContext, rng: () => number, doc: ArrangementDoc): Piece | null {
-  const pool = ctx.bank.filter(isPlaceable);
-  if (!pool.length) return null;
-  const lobbies = pool.filter((t) => categoryOf(t) === "lobby");
-  const from = lobbies.length ? lobbies : pool;
-  const tile = from[Math.floor(rng() * from.length)];
-  const min = ctx.site.enabled ? ([toCell(ctx.site.min[0] + ctx.site.size[0] / 2 - 10), toCell(ctx.site.min[1] + ctx.site.size[1] / 2 - 10), 0] as const) : ([0, 0, 0] as const);
-  return makePiece(doc, tile.id, [toFt(min[0]), toFt(min[1]), toFt(min[2])], { rotZ: Math.floor(rng() * 4), mirrorX: rng() < 0.5 });
+export interface GenOptions {
+  /** how many pieces the result should have in all (default: the pieces already there plus `settings.amount`, or `settings.amount` for a fresh start) */
+  target?: number;
 }
 
-/** A sentence on what stopped the search: the most common reason candidates were turned down. */
-export function explainRejections(r: Rejections, bank: ParsedTile[]): string {
-  if (!r.tried) return "no opening was free to build on";
-  const pct = (n: number) => `${Math.round((100 * n) / r.tried)}%`;
-  const reasons: [string, number][] = [
-    ["would collide with, or fill a room of, a piece already there", r.collided],
-    ["had no opening of the right kind to meet", r.noOpening],
-    ["met no walkable floor (no floor to stand on, too narrow or low, or a pocket)", r.noRoute],
-    ["broke a program rule", r.rule],
-    ["fell outside the site", r.site],
-    ["went over a height or footprint limit", r.limits],
-    ["joined too weakly", r.weak],
-  ];
-  reasons.sort((a, b) => b[1] - a[1]);
-  const top = reasons.filter((x) => x[1] > 0).slice(0, 2).map(([t, n]) => `${pct(n)} ${t}`);
-  return `${r.tried} placements tried across ${bank.length} tiles: ${top.join("; ") || "none fitted"}`;
+const NODE_LIMIT = 30000;
+const MAX_ATTEMPTS = 90;
+const TRIES_PER_LEVEL = 2;
+/** Growing from pieces that are there: the new cells are chosen at random, so an impossible set of places is not the end of a level: other places are tried. */
+const GROW_TRIES = 8;
+/** Plans with more cells than this are searched in stages of this many cells. */
+const STAGE_AT = 10;
+const STAGE = 8;
+/** How many stage searches one plan may spend before it counts as not buildable. */
+const STAGE_TRIES = 40;
+/** [how much of the Tall setting is kept, how much of the Min joint is kept] */
+const LADDER: [number, number][] = [[1, 1], [0.85, 0.9], [0.7, 0.75], [0.55, 0.65], [0.4, 0.5], [0.28, 0.4], [0.18, 0.3], [0.08, 0.15], [0, 0]];
+/** A floor that climbs at least this far, ft, is a stair or a ramp: its top must meet something. */
+const CLIMB_FT = 6;
+/** A floor smaller than this, ft2, is a pocket (a doormat behind a door), not a floor plate: it need not be reached. */
+const PLATE_FT2 = 30;
+/** How near the top of a climb a crossing must be to count as meeting it, ft. */
+const TOP_FT = 3;
+
+// ---- the lattice -----------------------------------------------------------------------------------------------------
+
+interface Lattice {
+  /** names the bank, so what is remembered about it is not mixed up with another bank */
+  sig: string;
+  /** the tile pitch on the plan, cells */
+  px: number;
+  /** half a tile's height, cells: the vertical step */
+  hz: number;
+  states: LState[];
+  skipped: ParsedTile[];
 }
 
-function growOnce(ctx: GenContext, base: ArrangementDoc, target: number, seed: number, why: Rejections, deadline: number): { doc: ArrangementDoc; stopped: string | null } {
-  const rng = mulberry32(seed);
-  let doc = base;
-  if (!doc.pieces.length) {
-    const r = rootPiece(ctx, rng, doc);
-    if (!r) return { doc, stopped: "no tile in the bank can be placed" };
-    doc = { ...doc, pieces: [r], entranceId: r.id };
+/** The size most tiles in the bank share (a cube of whole cells) sets the lattice; tiles of another size cannot sit on it and are left out. */
+function latticeOf(bank: ParsedTile[]): Lattice | null {
+  const count = new Map<string, { n: number; dims: [number, number, number] }>();
+  const placeable = bank.filter(isPlaceable);
+  for (const t of placeable) {
+    const d = getOriented(t, 0, false, 1).dims;
+    if (d[0] !== d[1]) continue;
+    const k = d.join(",");
+    count.set(k, { n: (count.get(k)?.n ?? 0) + 1, dims: d });
   }
-  let stopped: string | null = null;
-  while (doc.pieces.length < target) {
-    if (now() > deadline) {
-      stopped = `stopped at ${doc.pieces.length} of ${target}: the time allowed for one search ran out`;
-      break;
+  const best = [...count.values()].sort((a, b) => b.n - a.n)[0];
+  if (!best) return null;
+  const states: LState[] = [];
+  const skipped: ParsedTile[] = [];
+  for (const t of placeable) {
+    const d = getOriented(t, 0, false, 1).dims;
+    if (d.join(",") === best.dims.join(",")) states.push(...statesOf(t));
+    else skipped.push(t);
+  }
+  let h = 5381;
+  for (const ch of states.map((x) => x.id).join(";")) h = ((h << 5) + h + ch.charCodeAt(0)) | 0;
+  return { sig: String(h), px: best.dims[0], hz: Math.round(best.dims[2] / 2), states, skipped };
+}
+
+// ---- what a tile offers -----------------------------------------------------------------------------------------------
+
+const isEntrance = (s: LState): boolean => {
+  const f = factsOf(s);
+  const main = f.floors.find((x) => x.zone === f.main);
+  return !!main && main.loFt <= 3 && f.openFt2["x-"] + f.openFt2["x+"] + f.openFt2["y-"] + f.openFt2["y+"] >= 40;
+};
+
+// ---- the search -------------------------------------------------------------------------------------------------------
+
+interface Slot {
+  cell: Cell;
+  /** the low corner, cells */
+  at: [number, number, number];
+  /** a piece already there (Grow more): its state is fixed */
+  fixed?: LState;
+  pieceId?: string;
+}
+
+interface Counts {
+  copies: Map<string, number>;
+  cats: Map<string, number>;
+  total: number;
+}
+
+function tally(c: Counts, t: ParsedTile, sign: 1 | -1) {
+  c.copies.set(t.id, (c.copies.get(t.id) ?? 0) + sign);
+  const k = categoryOf(t);
+  c.cats.set(k, (c.cats.get(k) ?? 0) + sign);
+  c.total += sign;
+}
+
+const gumbel = (rng: () => number) => -Math.log(-Math.log(Math.max(1e-9, rng())));
+
+class Blocked {
+  reasons = new Map<string, number>();
+  add(r: string) {
+    this.reasons.set(r, (this.reasons.get(r) ?? 0) + 1);
+  }
+  top(): string[] {
+    return [...this.reasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+  }
+}
+
+interface Attempt {
+  slots: Slot[];
+  states: (LState | null)[];
+  depth: number;
+  ok: boolean;
+  /** the search tried everything and nothing fits (not: it ran out of effort): this plan cannot be built from these tiles */
+  impossible: boolean;
+}
+
+/** The search for one plan. Yields now and then so the caller can show progress or stop. */
+function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: number, entry: number, known: Map<number, number[]>, limit: number, preset: (LState | null)[], rng: () => number, tol: number, minScore: number, blocked: Blocked, attemptNo: number): Generator<GenProgress, Attempt, void> {
+  const n = slots.length;
+  const { priorities: pr, rules } = ctx;
+  const states: (LState | null)[] = preset.slice();
+  const counts: Counts = { copies: new Map(), cats: new Map(), total: 0 };
+  for (const s of states) if (s) tally(counts, s.tile, 1);
+  const bankTiles = new Set(lat.states.map((s) => s.tile.id)).size;
+  const variedW = (pr.varied - 50) / 50;
+  const capTier = pr.varied >= 90 ? 1 : pr.varied >= 70 ? 2 : pr.varied >= 45 ? 3 : pr.varied >= 20 ? 4 : Infinity;
+  const needCopies = Math.ceil(n / Math.max(1, bankTiles));
+  const rulesCap = rules.counts.maxCopies > 0 ? rules.counts.maxCopies : Infinity;
+  const copyCap = Math.min(rulesCap, Math.max(capTier, needCopies));
+  const brightW = (pr.bright / 100) * 2;
+  const programW = (pr.program / 100) * 1.5;
+  // which cells touch which (plan neighbours), by index
+  const nb: number[][] = slots.map(() => []);
+  for (let i = 0; i < n; i++) for (let j = 0; j < i; j++) if (touches(slots[i].cell, slots[j].cell)) {
+    nb[i].push(j);
+    nb[j].push(i);
+  }
+  const offset = (a: Slot, b: Slot): [number, number, number] => [b.at[0] - a.at[0], b.at[1] - a.at[1], b.at[2] - a.at[2]];
+  const stackedPair = (a: Slot, b: Slot) => a.cell.x === b.cell.x && a.cell.y === b.cell.y;
+  const topFree = slots.map((s) => !slots.some((o) => o !== s && o.cell.x === s.cell.x && o.cell.y === s.cell.y && o.cell.z > s.cell.z));
+  const sideFree = slots.map((s) => {
+    const free: [boolean, boolean, boolean, boolean] = [true, true, true, true];
+    slots.forEach((o) => {
+      if (o === s) return;
+      const dx = o.cell.x - s.cell.x;
+      const dy = o.cell.y - s.cell.y;
+      if (Math.abs(o.cell.z - s.cell.z) > 1) return;
+      if (dx === 1 && dy === 0) free[0] = false;
+      if (dx === -1 && dy === 0) free[1] = false;
+      if (dy === 1 && dx === 0) free[2] = false;
+      if (dy === -1 && dx === 0) free[3] = false;
+    });
+    return free;
+  });
+  const brightOf = (i: number, s: LState): number => {
+    const f = factsOf(s).openFt2;
+    const free = sideFree[i];
+    return Math.min(1, ((free[0] ? f["x+"] : 0) + (free[1] ? f["x-"] : 0) + (free[2] ? f["y+"] : 0) + (free[3] ? f["y-"] : 0)) / 400) + (topFree[i] ? Math.min(0.6, f["z+"] / 250) : 0);
+  };
+
+  // the floors, as a graph over the cells placed so far, and the rules that need it
+  const entranceIdx = entry >= 0 ? entry : slots.findIndex((s) => s.cell.parent < 0 && !s.fixed);
+  const pairOf = (i: number, j: number): PairInfo => pairInfo(states[i]!, states[j]!, offset(slots[i], slots[j]), tol);
+
+  let lastReached = new Set<number>();
+  let lastTops = new Map<number, number[]>();
+  /** Fails (returns a reason) when a cell whose neighbours are all placed has a stranded floor or a dead-end climb. */
+  const floorRules = (upTo: number): string | null => {
+    const placed: number[] = [];
+    for (let i = 0; i < n; i++) if (states[i] && (i <= upTo || slots[i].fixed)) placed.push(i);
+    const inSet = new Set(placed);
+    // nodes: i*64 + zone; heights per node
+    const adj = new Map<number, number[]>();
+    const tops = new Map<number, number[]>();
+    const link = (u: number, v: number) => {
+      (adj.get(u) ?? adj.set(u, []).get(u)!).push(v);
+      (adj.get(v) ?? adj.set(v, []).get(v)!).push(u);
+    };
+    for (const i of placed) for (const j of nb[i]) {
+      if (j <= i || !inSet.has(j)) continue;
+      const info = pairOf(i, j);
+      for (const c of info.crossings) {
+        link(i * 64 + c.za, j * 64 + c.zb);
+        (tops.get(i * 64 + c.za) ?? tops.set(i * 64 + c.za, []).get(i * 64 + c.za)!).push(c.ya);
+        (tops.get(j * 64 + c.zb) ?? tops.set(j * 64 + c.zb, []).get(j * 64 + c.zb)!).push(c.yb);
+      }
     }
-    const st = stateOf(doc.pieces, ctx, true, doc.entranceId);
-    let chosen: Candidate | null = null;
-    let next: ArrangementDoc | null = null;
-    for (const f of RELAX) {
-      const options = step(ctx, st, rng, ctx.settings.minScore * f, doc.pieces.length, why, deadline);
-      // a new piece may take the clearance away from a route that was already there: keep the first option that leaves the arrangement valid
-      for (const o of options.slice(0, 6)) {
-        const trial: ArrangementDoc = { ...doc, pieces: [...doc.pieces, { ...o.piece, id: newPieceId(doc) }] };
-        const l = analyzeLayout(trial, ctx.tileById, ctx.rules);
-        if (l.overlaps.length === 0 && l.islands.length === 0 && l.unreachable.length <= (st.layout?.unreachable.length ?? 0)) {
-          chosen = o;
-          next = trial;
+    const reached = new Set<number>();
+    const stack: number[] = [];
+    const root = entranceIdx >= 0 ? entranceIdx : placed[0];
+    for (const zone of entryZones(states[root]!, sideFree[root])) {
+      reached.add(root * 64 + zone);
+      stack.push(root * 64 + zone);
+    }
+    // pieces that are already there: the floors that can be walked to now still can
+    for (const [i, zones] of known) for (const zone of zones) if (states[i] && !reached.has(i * 64 + zone)) {
+      reached.add(i * 64 + zone);
+      stack.push(i * 64 + zone);
+    }
+    while (stack.length) {
+      const u = stack.pop()!;
+      for (const v of adj.get(u) ?? []) if (!reached.has(v)) {
+        reached.add(v);
+        stack.push(v);
+      }
+    }
+    lastReached = reached;
+    lastTops = tops;
+    for (const i of placed) {
+      if (slots[i].fixed) continue;
+      // a cell is closed when everything it touches is placed: nothing else can come to meet its floors
+      if (nb[i].some((j) => j > upTo && !slots[j].fixed)) continue;
+      for (const f of factsOf(states[i]!).floors) {
+        const node = i * 64 + f.zone;
+        if (f.areaFt2 >= PLATE_FT2 && !reached.has(node)) return "a floor that nothing else reaches";
+        if (f.hiFt - f.loFt >= CLIMB_FT && !(tops.get(node) ?? []).some((y) => y >= f.hiFt - TOP_FT)) return "a stair or ramp that ends nowhere";
+      }
+    }
+    return null;
+  };
+
+  /**
+   * Looks ahead: a floor plate that nothing reaches yet, or a climb whose top nothing meets yet, needs one of the cells still to come to supply it. Fails (with a
+   * reason) when none of them could, whatever tile went there.
+   */
+  const potential = (i: number): string | null => {
+    const st = states[i]!;
+    for (const f of factsOf(st).floors) {
+      const climbs = f.hiFt - f.loFt >= CLIMB_FT;
+      const plate = f.areaFt2 >= PLATE_FT2;
+      if (!plate && !climbs) continue;
+      const node = i * 64 + f.zone;
+      const tops = lastTops.get(node) ?? [];
+      const reachedNow = lastReached.has(node) && (!plate || tops.length > 0 || slots[i].cell.parent < 0);
+      const topNow = tops.some((y) => y >= f.hiFt - TOP_FT);
+      if ((!plate || reachedNow) && (!climbs || topNow)) continue;
+      let can = false;
+      for (const j of nb[i]) {
+        if (states[j] || slots[j].fixed || !beside(slots[i].cell, slots[j].cell)) continue;
+        const list = partnersOf(st, offset(slots[i], slots[j]), lat.states, lat.sig, tol);
+        if (list.some((p) => p.info.crossings.some((c) => c.za === f.zone && (!climbs || topNow || c.ya >= f.hiFt - TOP_FT)))) {
+          can = true;
           break;
         }
-        why.noRoute++;
       }
-      if (chosen) break;
+      if (!can) return climbs && !topNow ? "a stair or ramp that ends nowhere" : "a floor that nothing else reaches";
     }
-    if (!chosen || !next) {
-      stopped = `stopped at ${doc.pieces.length} of ${target}: nothing else fits within the rules`;
-      break;
+    return null;
+  };
+
+  const placedBoxes = (upTo: number) => {
+    const out = [];
+    for (let i = 0; i <= upTo; i++) {
+      const s = states[i];
+      if (!s) continue;
+      const piece: Piece = { id: `s${i}`, tileId: s.tile.id, pos: [toFt(slots[i].at[0]), toFt(slots[i].at[1]), toFt(slots[i].at[2])], rotZ: s.rot, mirrorX: s.mirror, scale: 1, locked: false };
+      out.push(placeBox(piece, s.tile));
     }
-    doc = next;
+    return out;
+  };
+
+  const countsAllow = (t: ParsedTile): boolean => {
+    const copies = counts.copies.get(t.id) ?? 0;
+    if (copies >= copyCap) return false;
+    const pt = rules.counts.perTile[t.id];
+    if (pt && pt.max > 0 && copies >= pt.max) return false;
+    const pc = rules.counts.perCategory[categoryOf(t)];
+    if (pc && pc.max > 0 && (counts.cats.get(categoryOf(t)) ?? 0) >= pc.max) return false;
+    return true;
+  };
+  const children: number[][] = slots.map(() => []);
+  slots.forEach((sl, k) => {
+    if (sl.cell.parent >= 0 && !sl.fixed) children[sl.cell.parent].push(k);
+  });
+  let nodes = 0;
+  let deepest = (() => {
+    let k = 0;
+    while (k < slots.length && states[k]) k++;
+    return Math.max(firstFree, k);
+  })();
+  let bestStates: (LState | null)[] = states.slice();
+
+  function* dfs(i: number): Generator<GenProgress, boolean, void> {
+    if (i >= limit) return true;
+    if (slots[i].fixed || preset[i]) return yield* dfs(i + 1);
+    const slot = slots[i];
+    const parent = slot.cell.parent;
+    // the candidates for this cell, best first
+    const cand: { s: LState; v: number }[] = [];
+    const parentState = parent >= 0 ? states[parent] : null;
+    const options: { s: LState; info: PairInfo | null }[] = parentState ? partnersOf(parentState, offset(slots[parent], slot), lat.states, lat.sig, tol) : lat.states.filter(isEntrance).map((x) => ({ s: x, info: null }));
+    for (const { s, info } of options) {
+      if (counts.total >= (rules.counts.total.max || Infinity)) {
+        blocked.add("the total piece limit");
+        break;
+      }
+      if (!countsAllow(s.tile)) continue;
+      const copies = counts.copies.get(s.tile.id) ?? 0;
+      let v = 0;
+      if (parentState && info) {
+        // the way in: a walkable crossing between floors, joint good enough
+        if (info.score < minScore) continue;
+        const level = ruleBetween(rules, parentState.tile, s.tile, false);
+        if (level === "never") continue;
+        v += (1.5 * info.score) / 100 + programW * ruleValue(level);
+      } else if (categoryOf(s.tile) === "lobby") v += 2;
+      v += variedW * (copies === 0 ? 1 : -Math.min(copies, 3) * 0.4);
+      v += brightW * brightOf(i, s);
+      const pcat = rules.counts.perCategory[categoryOf(s.tile)];
+      if (pcat && pcat.min > 0 && (counts.cats.get(categoryOf(s.tile)) ?? 0) < pcat.min) v += 1.5;
+      const ptile = rules.counts.perTile[s.tile.id];
+      if (ptile && ptile.min > 0 && copies < ptile.min) v += 1.5;
+      v += 0.55 * gumbel(rng);
+      cand.push({ s, v });
+    }
+    cand.sort((a, b) => b.v - a.v);
+    if (!cand.length) blocked.add(parent < 0 ? "no tile can be the entrance" : "no tile meets its neighbour with a walkable floor at that height");
+    for (const { s } of cand) {
+      if (nodes++ > NODE_LIMIT) return false;
+      states[i] = s;
+      // everything else it touches: no collision, no floors a doorway apart, the program's "never"
+      let ok = true;
+      for (const j of nb[i]) {
+        if (j === parent || !states[j]) continue;
+        const info = pairOf(i, j);
+        if (!info.free) ok = false;
+        else if (info.kind === "connector") ok = false;
+        else if (ruleBetween(rules, s.tile, states[j]!.tile, stackedPair(slots[i], slots[j])) === "never") ok = false;
+        if (!ok) break;
+      }
+      if (!ok) {
+        blocked.add("a neighbour it would collide with or meet at the wrong height");
+        states[i] = null;
+        continue;
+      }
+      // pieces that are not neighbours in the plan can still collide when the tiles are not the lattice's size (kept pieces); check the cells
+      if (slots.some((o, j) => j !== i && o.fixed && !nb[i].includes(j))) {
+        const box = placeBox({ id: `s${i}`, tileId: s.tile.id, pos: [toFt(slot.at[0]), toFt(slot.at[1]), toFt(slot.at[2])], rotZ: s.rot, mirrorX: s.mirror, scale: 1, locked: false }, s.tile);
+        const others = placedBoxes(slots.length - 1).filter((b) => b.piece.id !== `s${i}`);
+        if (!placementFree(box, others)) {
+          states[i] = null;
+          continue;
+        }
+      }
+      tally(counts, s.tile, 1);
+      const why = floorRules(i);
+      if (why) {
+        blocked.add(why);
+        tally(counts, s.tile, -1);
+        states[i] = null;
+        continue;
+      }
+      // look ahead: this cell's floors, and its placed neighbours', must still be able to be met by the cells that are left
+      let lacking: string | null = potential(i);
+      if (!lacking) for (const j of nb[i]) if (states[j] && !slots[j].fixed && (lacking = potential(j))) break;
+      if (lacking) {
+        blocked.add(lacking);
+        tally(counts, s.tile, -1);
+        states[i] = null;
+        continue;
+      }
+      // forward check: every cell that grows from this one must still have a tile that can meet it
+      let starved = false;
+      for (const j of children[i]) {
+        if (!partnersOf(s, offset(slot, slots[j]), lat.states, lat.sig, tol).some((p) => p.info.score >= minScore && countsAllow(p.s.tile))) {
+          starved = true;
+          break;
+        }
+      }
+      if (starved) {
+        blocked.add("a neighbour that no tile can meet at that height");
+        tally(counts, s.tile, -1);
+        states[i] = null;
+        continue;
+      }
+      if (i + 1 > deepest) {
+        deepest = i + 1;
+        bestStates = states.slice();
+      }
+      if ((nodes & 63) === 0)
+        yield { phase: "searching", attempt: attemptNo, placed: deepest, total: n, nodes, message: `Attempt ${attemptNo + 1}: ${deepest} of ${n} pieces placed` };
+      if (yield* dfs(i + 1)) return true;
+      tally(counts, s.tile, -1);
+      states[i] = null;
+    }
+    return false;
   }
-  return { doc, stopped };
+
+  const ok = yield* dfs(0);
+  return { slots, states: ok ? states : bestStates, depth: ok ? limit : deepest, ok, impossible: !ok && nodes <= NODE_LIMIT };
 }
 
-/** How good a finished arrangement is as a whole (used to keep the best of a few tries). */
-export function assemblyScore(doc: ArrangementDoc, ctx: GenContext): number {
+/**
+ * A big plan is built in stages: the first stretch is searched and kept, the next is searched beside it, and so on, stepping back a stage when one cannot be built (the
+ * floors of a kept piece are still checked once everything beside it is there). Searching the whole plan at once grows too hard for many pieces.
+ */
+function* stagedSearch(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: number, entry: number, known: Map<number, number[]>, rng: () => number, tol: number, minScore: number, blocked: Blocked, attemptNo: number): Generator<GenProgress, Attempt, void> {
+  const n = slots.length;
+  let preset: (LState | null)[] = slots.map((q) => q.fixed ?? null);
+  if (n - firstFree <= STAGE_AT) return yield* searchPlan(ctx, lat, slots, firstFree, entry, known, n, preset, rng, tol, minScore, blocked, attemptNo);
+  let committed = firstFree;
+  let best: Attempt | null = null;
+  let spent = 0;
+  while (committed < n && spent < STAGE_TRIES) {
+    const limit = Math.min(n, committed + STAGE);
+    let done: Attempt | null = null;
+    for (let t = 0; t < 4 && !done; t++) {
+      spent++;
+      const a = yield* searchPlan(ctx, lat, slots, firstFree, entry, known, limit, preset, rng, tol, minScore, blocked, attemptNo);
+      if (a.ok) done = a;
+      else if (!best || a.depth > best.depth) best = a;
+    }
+    if (done) {
+      preset = done.states.slice();
+      committed = limit;
+    } else {
+      if (committed <= firstFree) break;
+      const back = Math.max(firstFree, committed - STAGE);
+      for (let i = back; i < committed; i++) if (!slots[i].fixed) preset[i] = null;
+      committed = back;
+    }
+  }
+  if (committed >= n) return { slots, states: preset, depth: n, ok: true, impossible: false };
+  return best ?? { slots, states: preset, depth: committed, ok: false, impossible: false };
+}
+
+// ---- turning a plan into a building ------------------------------------------------------------------------------------
+
+function slotsFor(cells: Cell[], origin: [number, number, number], lat: Lattice): Slot[] {
+  return cells.map((c) => ({ cell: c, at: [origin[0] + c.x * lat.px, origin[1] + c.y * lat.px, origin[2] + c.z * lat.hz] as [number, number, number] }));
+}
+
+const pieceFor = (doc: ArrangementDoc, s: Slot, st: LState): Piece => makePiece(doc, st.tile.id, [toFt(s.at[0]), toFt(s.at[1]), toFt(s.at[2])], { rotZ: st.rot, mirrorX: st.mirror });
+
+function fitsSiteAndLimits(ctx: GenContext, slots: Slot[], lat: Lattice): boolean {
+  const { site, rules } = ctx;
+  const lo = [Infinity, Infinity, Infinity];
+  const hi = [-Infinity, -Infinity, -Infinity];
+  for (const s of slots) for (let k = 0; k < 3; k++) {
+    lo[k] = Math.min(lo[k], s.at[k]);
+    hi[k] = Math.max(hi[k], s.at[k] + (k === 2 ? 2 * lat.hz : lat.px));
+  }
+  if (site.enabled) {
+    if (toFt(lo[0]) < site.min[0] - 1e-6 || toFt(lo[1]) < site.min[1] - 1e-6 || toFt(hi[0]) > site.min[0] + site.size[0] + 1e-6 || toFt(hi[1]) > site.min[1] + site.size[1] + 1e-6) return false;
+    if (site.maxHeight > 0 && toFt(hi[2]) > site.maxHeight + 1e-6) return false;
+  }
+  const l = rules.limits;
+  if (l.maxHeightFt > 0 && toFt(hi[2] - lo[2]) > l.maxHeightFt + 1e-6) return false;
+  if (l.maxFootprintFt > 0 && Math.max(toFt(hi[0] - lo[0]), toFt(hi[1] - lo[1])) > l.maxFootprintFt + 1e-6) return false;
+  return true;
+}
+
+export interface Audit {
+  /** floor plates (a floor of 30 ft2 or more) that nobody can walk to from the entrance */
+  stranded: number;
+  /** stairs and ramps (a floor that climbs 6 ft or more) whose top meets no neighbouring floor */
+  deadEnds: number;
+}
+
+/** What the generator promises, read back from a finished layout with the program's own analysis: no floor plate nobody can reach, no stair that ends nowhere. */
+export function auditBuilding(layout: Layout, skip: Set<string> = new Set()): Audit {
+  let stranded = 0;
+  let deadEnds = 0;
+  for (const b of layout.boxes) {
+    const id = b.piece.id;
+    if (skip.has(id)) continue;
+    for (const f of factsOf(stateFor(b.tile, b.piece.rotZ, b.piece.mirrorX)).floors) {
+      if (f.areaFt2 >= PLATE_FT2 && !layout.reachedZones.has(`${id}#${f.zone}`)) stranded++;
+      if (f.hiFt - f.loFt >= CLIMB_FT) {
+        const top = b.min[2] + Math.round(f.hiFt / ARRANGE_CELL);
+        const met = layout.joints.some((j) => j.connect.crossings.some((x) => ((x.aId === id && x.zoneA === f.zone) || (x.bId === id && x.zoneB === f.zone)) && x.floor >= top - TOP_FT / ARRANGE_CELL));
+        if (!met) deadEnds++;
+      }
+    }
+  }
+  return { stranded, deadEnds };
+}
+
+/**
+ * New cells for Grow more: each one beside a piece that is already there, in a place where some tile in the bank could actually meet that piece (its face has an opening and
+ * a floor there), so the random choice is never wasted on a wall. Once those places are used up, further cells go beside the new ones.
+ */
+function growCells(cells: Cell[], slots: Slot[], known: Map<number, number[]>, extra: number, rng: () => number, lift: number, knit: number, lat: Lattice, tol: number, bank: LState[]): Cell[] {
+  const out = cells.map((c) => ({ ...c }));
+  const fixed = slots.filter((q) => q.fixed);
+  for (let k = 0; k < extra; k++) {
+    let best: { cell: Cell; v: number } | null = null;
+    for (const p of fixed) {
+      const reachedHere = new Set(known.get(slots.indexOf(p)) ?? []);
+      const pi = out.findIndex((c) => c.x === p.cell.x && c.y === p.cell.y && c.z === p.cell.z);
+      for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]] as [number, number][])
+        for (const dz of [-1, 0, 1]) {
+          const z = p.cell.z + dz;
+          const x = p.cell.x + dx;
+          const y = p.cell.y + dy;
+          if (z < 0 || out.some((c) => c.x === x && c.y === y && Math.abs(c.z - z) < 2)) continue;
+          // some tile must be able to meet a floor of that piece that a person can walk to now
+          if (!partnersOf(p.fixed!, [dx * lat.px, dy * lat.px, dz * lat.hz], bank, lat.sig, tol).some((pt) => pt.info.crossings.some((c) => reachedHere.has(c.za)))) continue;
+          const near = out.filter((c) => touches(c, { x, y, z })).length;
+          const v = Math.pow(near, 0.4 + 2.2 * knit) + rng() * 0.6 + (dz === 1 ? lift * 0.5 : dz === 0 ? 0.2 : 0);
+          if (!best || v > best.v) best = { cell: { x, y, z, parent: pi }, v };
+        }
+    }
+    if (best) out.push(best.cell);
+    else out.splice(0, out.length, ...branchCells(out, 1, rng, lift, knit));
+  }
+  return out;
+}
+
+/** How good a finished arrangement is as a whole (used to rank replacements and to keep the better of two results). */
+export { assemblyScore } from "./candidates";
+
+/**
+ * Tiles that are not cubes of one size (a long block, a tall one, an assembly added as a tile) cannot sit on the lattice. A bank with no lattice of its own is grown one
+ * piece at a time instead: each piece laid against an opening of one already there (lib/arrange/candidates.ts), the best of a sample of placements, kept only when the
+ * whole stays collision-free, one connected piece, and walkable from the entrance. It knows nothing about shapes or levels.
+ */
+function* looseSteps(ctx: GenContext, base: ArrangementDoc, target: number, notes: string[]): Generator<GenProgress, GenResult, void> {
+  const rng = mulberry32(ctx.settings.seed * 7919 + 17);
+  const bank = ctx.bank.filter(isPlaceable);
+  let doc = base;
+  if (!doc.pieces.length) {
+    if (!bank.length) return { doc, notes: ["no tile in the bank can be placed"], score: 0, why: "" };
+    const lobbies = bank.filter((t) => categoryOf(t) === "lobby");
+    const from = lobbies.length ? lobbies : bank;
+    const root = makePiece(doc, from[Math.floor(rng() * from.length)].id, [0, 0, 0], { rotZ: Math.floor(rng() * 4), mirrorX: rng() < 0.5 });
+    doc = { ...doc, pieces: [root], entranceId: root.id };
+  }
+  let stopped = false;
+  while (doc.pieces.length < target && !stopped) {
+    yield { phase: "searching", attempt: 0, placed: doc.pieces.length, total: target, nodes: 0, message: `${doc.pieces.length} of ${target} pieces placed` };
+    const st = stateOf(doc.pieces, ctx, true, doc.entranceId);
+    const before = st.layout?.unreachable.length ?? 0;
+    let best: { score: number; piece: Piece } | null = null;
+    for (let k = 0; k < 900 && st.exposed.length; k++) {
+      const slot = st.exposed[Math.floor(rng() * st.exposed.length)];
+      const tile = bank[Math.floor(rng() * bank.length)];
+      if (!allowedByCounts(tile, st, ctx, doc.pieces.length)) continue;
+      const r = rng();
+      const level = r < 0.4 ? null : r < 0.75 ? (rng() < 0.5 ? 0 : 1) : 2 + 8 * Math.floor(rng() * 40);
+      const c = placeAgainst(ctx, st, slot, tile, Math.floor(rng() * 4), rng() < 0.5, Math.floor(rng() * 3), level, ctx.settings.minScore, Math.floor(rng() * 9));
+      if (!c) continue;
+      const score = scoreCandidate(ctx, st, c) + rng() * 0.2;
+      if (best && score <= best.score) continue;
+      const trial: ArrangementDoc = { ...doc, pieces: [...doc.pieces, { ...c.piece, id: newPieceId(doc) }] };
+      const l = analyzeLayout(trial, ctx.tileById, ctx.rules);
+      if (l.overlaps.length === 0 && l.islands.length === 0 && l.unreachable.length <= before) best = { score, piece: trial.pieces[trial.pieces.length - 1] };
+    }
+    if (!best) stopped = true;
+    else doc = { ...doc, pieces: [...doc.pieces, best.piece] };
+  }
   const layout = analyzeLayout(doc, ctx.tileById, ctx.rules);
   const js = layout.joints.filter((j) => j.score !== null);
-  const meanJ = js.length ? js.reduce((a, j) => a + (j.score ?? 0), 0) / js.length / 100 : 0;
-  const seq = buildSequence(layout, ctx.rules).quality / 100;
-  const boxes = layout.boxes;
-  const root = centerOf(boxes[0]);
-  const centroid: Vec3 = [0, 0, 0];
-  for (const b of boxes) {
-    const cb = centerOf(b);
-    for (let k = 0; k < 3; k++) centroid[k] += cb[k] / boxes.length;
-  }
-  let shape = 0;
-  boxes.forEach((b, i) => {
-    shape += shapeScore(ctx.settings.shape, ctx.settings.direction, centerOf(b), { boxes: boxes.slice(0, i), root, centroid, count: i, amount: boxes.length, contacts: 0 });
-  });
-  shape /= boxes.length;
-  const degree = new Map<string, number>(boxes.map((b) => [b.piece.id, 0]));
-  for (const j of layout.joints) {
-    degree.set(j.aId, (degree.get(j.aId) ?? 0) + 1);
-    degree.set(j.bId, (degree.get(j.bId) ?? 0) + 1);
-  }
-  const leaves = [...degree.values()].filter((d) => d <= 1).length / Math.max(1, boxes.length);
-  const meanDeg = [...degree.values()].reduce((a, d) => a + d, 0) / Math.max(1, boxes.length);
-  const knit = 1.4 * Math.min(1, meanDeg / 3) - 2.4 * Math.max(0, leaves - 0.25);
-  return 3 * meanJ + 2 * seq + 1.5 * shape + knit + (layout.islands.length === 0 ? 1 : -2) + (layout.unreachable.length === 0 ? 1 : -1) - 2 * layout.overlaps.length;
+  const avg = js.length ? js.reduce((a, j) => a + (j.score ?? 0), 0) / js.length : 0;
+  if (stopped) notes.push("The tile bank could not satisfy the constraints for the rest: no placement beside the building was walkable, collision-free and within the rules.");
+  return { doc: { ...doc, entranceId: doc.entranceId ?? layout.entranceId }, notes, score: avg, why: `${doc.pieces.length} pieces of tiles that do not share one lattice, joints average ${avg.toFixed(0)}.` };
 }
 
-export function generateArrangement(ctx: GenContext, base: ArrangementDoc, opts: { target?: number; tries?: number } = {}): GenResult {
-  const target = opts.target ?? ctx.settings.amount;
-  const tries = opts.tries ?? 4;
-  const why = newRejections();
-  const budget = ctx.budgetMs ?? 6000;
-  const t0 = now();
-  let best: { doc: ArrangementDoc; stopped: string | null; score: number } | null = null;
-  for (let t = 0; t < tries; t++) {
-    // each try gets its share of what is left; the first try always gets to finish what it can
-    const deadline = t0 + (budget * (t + 1)) / tries;
-    const r = growOnce(ctx, base, target, ctx.settings.seed * 7919 + t * 104729 + 1, why, deadline);
-    const score = assemblyScore(r.doc, ctx);
-    if (!best || score > best.score) best = { ...r, score };
-    if (now() > t0 + budget) break;
-  }
-  if (!best) return { doc: base, notes: ["nothing to generate"], score: 0, why: "" };
-  const layout = analyzeLayout(best.doc, ctx.tileById, ctx.rules);
-  const seq = buildSequence(layout, ctx.rules);
-  const mean = layout.joints.filter((j) => j.score !== null);
-  const avg = mean.length ? mean.reduce((a, j) => a + (j.score ?? 0), 0) / mean.length : 0;
+/**
+ * Plans and searches until it has a building, or has tried every attempt. Yields progress; the return value is the result.
+ * `base` holds pieces that stay (the entrance is theirs).
+ */
+export function* generateSteps(ctx: GenContext, base: ArrangementDoc, opts: GenOptions = {}): Generator<GenProgress, GenResult, void> {
+  const settings = ctx.settings;
+  const lat = latticeOf(ctx.bank);
   const notes: string[] = [];
-  if (best.stopped) {
-    notes.push(best.stopped);
-    notes.push(`The tile bank could not satisfy the constraints for the rest: ${explainRejections(why, ctx.bank)}.`);
+  // a bank with no lattice of its own (fewer than two cube tiles of one size), or with a shaped tile (a notch or a step that another tile may nest into: the lattice puts
+  // pieces a whole tile apart, so it would never use one), is grown piece by piece instead
+  const shaped = ctx.bank.some((t) => {
+    if (!isPlaceable(t)) return false;
+    const o = getOriented(t, 0, false, 1);
+    return getOcc(o).inside < o.dims[0] * o.dims[1] * o.dims[2] * 0.97;
+  });
+  if (!lat || shaped || new Set(lat.states.map((x) => x.tile.id)).size < 2) {
+    notes.push(shaped ? "The bank has tiles with a notch or a step, so the building is grown piece by piece to let them nest: it has no shape and no levels planned." : "The tiles do not share one cube size, so the building is grown piece by piece: it has no shape and no levels planned.");
+    return yield* looseSteps(ctx, base, Math.max(1, opts.target ?? (base.pieces.length ? base.pieces.length + settings.amount : settings.amount)), notes);
   }
-  const nestedCount = layout.nested.length;
-  const whyLine = `${best.doc.pieces.length} pieces, ${ctx.settings.shape} shape, a route of ${seq.steps.length} spaces from the entrance, joints average ${avg.toFixed(0)}${nestedCount ? `, ${nestedCount} nested fit${nestedCount === 1 ? "" : "s"}` : ""}.`;
-  return { doc: { ...best.doc, entranceId: best.doc.entranceId ?? layout.entranceId }, notes, score: best.score, why: whyLine, rejections: why };
+  if (lat.skipped.length) notes.push(`${lat.skipped.length} tile${lat.skipped.length === 1 ? "" : "s"} of another size were left out: the generator builds on the ${toFt(lat.px)} ft lattice of the rest.`);
+  const tol = connectorReachFt(ctx.rules);
+  const target = Math.max(1, opts.target ?? (base.pieces.length ? base.pieces.length + settings.amount : settings.amount));
+  const fresh = base.pieces.length === 0;
+  const blocked = new Blocked();
+  let bestPartial: Attempt | null = null;
+  let attempts = 0;
+
+  // pieces that stay: they are cells too, when they stand on the lattice
+  const keepSlots: Slot[] = [];
+  const knownZones = new Map<number, number[]>();
+  let origin: [number, number, number] = [0, 0, 0];
+  if (!fresh) {
+    const first = base.pieces.find((p) => p.id === base.entranceId) ?? base.pieces[0];
+    origin = [toCell(first.pos[0]), toCell(first.pos[1]), toCell(first.pos[2])];
+    base.pieces.forEach((p) => {
+      const t = ctx.tileById.get(p.tileId);
+      if (!t || !isPlaceable(t)) return;
+      const rel = [toCell(p.pos[0]) - origin[0], toCell(p.pos[1]) - origin[1], toCell(p.pos[2]) - origin[2]];
+      const x = rel[0] / lat.px;
+      const y = rel[1] / lat.px;
+      const z = rel[2] / lat.hz;
+      if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z)) return; // off the lattice: an obstacle, not a neighbour
+      const st = statesOf(t).find((s) => s.rot === ((p.rotZ % 4) + 4) % 4 && s.mirror === p.mirrorX && s.dims.join() === `${lat.px},${lat.px},${lat.hz * 2}`);
+      if (!st) return;
+      keepSlots.push({ cell: { x, y, z, parent: -2 }, at: [origin[0] + x * lat.px, origin[1] + y * lat.px, origin[2] + z * lat.hz], fixed: st, pieceId: p.id });
+    });
+    if (!keepSlots.length) return { doc: base, notes: ["the pieces already there are not on the 10 ft lattice, so nothing can be grown from them"], score: 0, why: "" };
+    // the floors of the pieces already there that a person can walk to now, read by the program's own analysis
+    const now = analyzeLayout(base, ctx.tileById, ctx.rules);
+    keepSlots.forEach((k, i) => {
+      const zones = factsOf(k.fixed!).floors.map((f) => f.zone).filter((z) => now.reachedZones.has(`${k.pieceId}#${z}`));
+      knownZones.set(i, zones);
+    });
+  } else if (ctx.site.enabled) origin = [toCell(ctx.site.min[0] + ctx.site.size[0] / 2 - 10), toCell(ctx.site.min[1] + ctx.site.size[1] / 2 - 10), 0];
+
+  // The plan is tried as asked. When a plan is proven impossible with these tiles (every choice was tried), the next one is a little simpler: not as tall, then a lower
+  // bar for the joint. A plan that only ran out of effort is tried again with another seed. The rules about floors are never eased.
+  let level = 0;
+  let triesAtLevel = 0;
+  for (attempts = 0; attempts < MAX_ATTEMPTS && level < LADDER.length; attempts++) {
+    const rng = mulberry32(settings.seed * 7919 + attempts * 104729 + 1);
+    const [eased, barScale] = LADDER[level];
+    const minScore = ctx.settings.minScore * barScale;
+    yield { phase: "planning", attempt: attempts, placed: 0, total: target, nodes: 0, message: `Attempt ${attempts + 1}: planning the ${settings.shape === "free" ? "free-form" : settings.shape} shape${level ? " (simpler)" : ""}` };
+    let slots: Slot[];
+    let firstFree = 0;
+    let entryIdx = -1;
+    if (fresh) {
+      const input = planInput(settings, { ...ctx.priorities, tall: ctx.priorities.tall * eased }, settings.direction, rng, target);
+      slots = slotsFor(planShape(input), origin, lat);
+    } else {
+      // grow from what is there: new cells go beside the kept ones
+      const cells: Cell[] = keepSlots.map((k) => ({ ...k.cell }));
+      const grown = growCells(cells, keepSlots, knownZones, Math.max(0, target - keepSlots.length), rng, (ctx.priorities.tall / 100) * eased, ctx.priorities.compact / 100, lat, tol, lat.states);
+      slots = [...keepSlots, ...slotsFor(grown.slice(keepSlots.length), origin, lat)];
+      firstFree = keepSlots.length;
+      entryIdx = Math.max(0, keepSlots.findIndex((k) => k.pieceId === (base.entranceId ?? keepSlots[0].pieceId)));
+    }
+    if (!fitsSiteAndLimits(ctx, slots, lat)) {
+      blocked.add("the site or a height or footprint limit");
+      level++;
+      triesAtLevel = 0;
+      continue;
+    }
+    const attempt = yield* stagedSearch(ctx, lat, slots, firstFree, entryIdx, knownZones, rng, tol, minScore, blocked, attempts);
+    if (!bestPartial || attempt.depth > bestPartial.depth) bestPartial = attempt;
+    if (attempt.ok) {
+      bestPartial = attempt;
+      yield { phase: "checking", attempt: attempts, placed: slots.length, total: slots.length, nodes: 0, message: "Checking the whole building" };
+      const built = finish(ctx, base, attempt, attempts + 1);
+      if (built) return { ...built, notes: [...notes, ...(level ? ["It is a simpler building than asked for (not as tall): the tiles could not make the first plan work within the floor rules."] : []), ...built.notes] };
+      blocked.add("the whole building did not pass the final check");
+      bestPartial = { ...attempt, ok: false, depth: attempt.depth - 1 };
+    }
+    triesAtLevel++;
+    if ((fresh && attempt.impossible) || triesAtLevel >= (fresh ? TRIES_PER_LEVEL : GROW_TRIES)) {
+      level++;
+      triesAtLevel = 0;
+    }
+  }
+
+  // nothing passed in every attempt: the deepest plan that kept every rule, as far as it got
+  if (bestPartial) {
+    const built = finish(ctx, base, { ...bestPartial, states: bestPartial.states.map((s) => s), ok: false }, attempts, true);
+    if (built) {
+      const why = blocked.top();
+      return { ...built, notes: [...notes, `Built ${built.doc.pieces.length - base.pieces.length} of ${target - base.pieces.length} new pieces: no tile fitted the rest within the rules.`, ...(why.length ? [`What stopped it most: ${why.join("; ")}.`] : []), ...built.notes] };
+    }
+  }
+  return { doc: base, notes: [...notes, `Nothing could be built within the rules${blocked.top().length ? `: ${blocked.top().join("; ")}` : ""}.`], score: 0, why: "" };
 }
 
-/** Removes the branch that grew past each bad joint (and everything only reachable through it, except locked pieces), then regrows. */
-export function regenerateMarked(ctx: GenContext, doc: ArrangementDoc, badJointIds: Set<string>, target: number): GenResult {
+/** Builds the document from a finished search and checks the whole building with the program's own analysis. */
+function finish(ctx: GenContext, base: ArrangementDoc, att: Attempt, attempts: number, partial = false): GenResult | null {
+  const pieces: Piece[] = [...base.pieces];
+  let doc: ArrangementDoc = { ...base, pieces };
+  let entranceId = base.entranceId;
+  const placedStates = att.states.map((s, i) => ({ s, slot: att.slots[i] }));
+  for (const { s, slot } of placedStates) {
+    if (!s || slot.fixed) continue;
+    const piece = pieceFor(doc, slot, s);
+    pieces.push(piece);
+    doc = { ...doc, pieces };
+    if (slot.cell.parent < 0 && !entranceId) entranceId = piece.id;
+  }
+  if (partial && pieces.length === base.pieces.length) return null;
+  doc = { ...doc, pieces, entranceId };
+  let layout = analyzeLayout(doc, ctx.tileById, ctx.rules);
+  const keptIds = new Set(base.pieces.map((p) => p.id));
+  let audit = auditBuilding(layout, keptIds);
+  const sound = () => !layout.overlaps.length && !layout.islands.length && !layout.unreachable.length && !audit.stranded && !audit.deadEnds;
+  if (partial) {
+    // as many pieces as keep every rule: pieces come in plan order, each beside an earlier one, so a shorter list is still one connected building, and taking away the last
+    // ones takes away what a floor or a stair at the edge was waiting for
+    while (pieces.length > base.pieces.length + 1 && !sound()) {
+      pieces.pop();
+      doc = { ...doc, pieces };
+      layout = analyzeLayout(doc, ctx.tileById, ctx.rules);
+      audit = auditBuilding(layout, keptIds);
+    }
+    if (!sound()) return null;
+  }
+  if (!partial && !sound()) return null;
+  const metrics = planMetrics(att.slots.filter((s, i) => att.states[i] && !s.fixed || s.fixed).map((s) => s.cell));
+  const tilesUsed = new Set(pieces.map((p) => p.tileId));
+  const lo = layout.bounds?.min ?? [0, 0, 0];
+  const hi = layout.bounds?.max ?? [0, 0, 0];
+  const js = layout.joints.filter((j) => j.score !== null);
+  const avg = js.length ? js.reduce((a, j) => a + (j.score ?? 0), 0) / js.length : 0;
+  const climbing = layout.boxes.filter((b) => factsOf(stateFor(b.tile, b.piece.rotZ, b.piece.mirrorX)).climbFt >= CLIMB_FT).length;
+  const report: GenReport = {
+    asked: { pieces: ctx.settings.amount, shape: ctx.settings.shape, tall: ctx.priorities.tall, compact: ctx.priorities.compact, bright: ctx.priorities.bright, varied: ctx.priorities.varied, branching: !!ctx.settings.branching },
+    got: { pieces: pieces.length, levels: metrics.levels, heightFt: toFt(hi[2] - lo[2]), widthFt: toFt(hi[0] - lo[0]), depthFt: toFt(hi[1] - lo[1]), stackedPairs: metrics.stackedPairs, distinctTiles: tilesUsed.size, climbingTiles: climbing, routeSteps: layout.walk.size },
+    attempts,
+  };
+  const why = `${pieces.length} pieces, ${ctx.settings.shape} shape${ctx.settings.branching ? " with wings" : ""}, ${metrics.levels} level${metrics.levels === 1 ? "" : "s"} (${report.got.heightFt.toFixed(0)} ft), ${tilesUsed.size} different tiles, joints average ${avg.toFixed(0)}.`;
+  return { doc: { ...doc, entranceId: doc.entranceId ?? layout.entranceId }, notes: [], score: avg, why, report };
+}
+
+// ---- running it ----------------------------------------------------------------------------------------------------
+
+/** Runs to the end (scripts, tests). */
+export function generateArrangement(ctx: GenContext, base: ArrangementDoc, opts: GenOptions = {}): GenResult {
+  const it = generateSteps(ctx, base, opts);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** Runs any of the step generators without freezing the page: gives the browser a turn every few milliseconds, reports progress, and stops when the signal says so (then resolves to null). */
+export async function drive(it: Generator<GenProgress, GenResult, void>, onProgress?: (p: GenProgress) => void, signal?: AbortSignal): Promise<GenResult | null> {
+  let last = Date.now();
+  for (;;) {
+    if (signal?.aborted) return null;
+    const r = it.next();
+    if (r.done) return r.value;
+    if (Date.now() - last > 40) {
+      onProgress?.(r.value);
+      await new Promise((res) => setTimeout(res, 0));
+      last = Date.now();
+    }
+  }
+}
+
+export const generateAsync = (ctx: GenContext, base: ArrangementDoc, opts: GenOptions = {}, onProgress?: (p: GenProgress) => void, signal?: AbortSignal) => drive(generateSteps(ctx, base, opts), onProgress, signal);
+
+/** Removes the branch that grew past each bad joint (and everything only reachable through it, except locked pieces), then grows it back. */
+export function* regenerateSteps(ctx: GenContext, doc: ArrangementDoc, badJointIds: Set<string>, target: number): Generator<GenProgress, GenResult, void> {
   const layout = analyzeLayout(doc, ctx.tileById, ctx.rules);
   const root = layout.entranceId ?? doc.pieces[0]?.id;
   const adj = new Map<string, string[]>();
@@ -677,7 +846,16 @@ export function regenerateMarked(ctx: GenContext, doc: ArrangementDoc, badJointI
     }
   }
   const kept: ArrangementDoc = { ...doc, pieces: doc.pieces.filter((p) => !remove.has(p.id)), ratings: Object.fromEntries(Object.entries(doc.ratings).filter(([k]) => !badJointIds.has(k))) };
-  return generateArrangement(ctx, kept, { target: Math.max(target, kept.pieces.length + 1), tries: 3 });
+  return yield* generateSteps(ctx, kept, { target: Math.max(target, kept.pieces.length + 1) });
 }
 
-export { boxesOverlap };
+export const regenerateAsync = (ctx: GenContext, doc: ArrangementDoc, bad: Set<string>, target: number, onProgress?: (p: GenProgress) => void, signal?: AbortSignal) => drive(regenerateSteps(ctx, doc, bad, target), onProgress, signal);
+
+export function regenerateMarked(ctx: GenContext, doc: ArrangementDoc, badJointIds: Set<string>, target: number): GenResult {
+  const it = regenerateSteps(ctx, doc, badJointIds, target);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+  }
+}
+

@@ -61,6 +61,8 @@ export interface Crossing {
   zoneB: number;
   /** the step between the two floors, ft (never more than the shared step limit) */
   stepFt: number;
+  /** the height of the higher of the two floors, in world cells */
+  floor: number;
 }
 
 /** Two floors across a joint that are open and clear but further apart than a step: a stair or ramp would join them. Not a route. */
@@ -174,7 +176,7 @@ export function crossingsOf(c: Contact, voidA: Uint8Array, voidB: Uint8Array, wo
         }
         reached.clear = true;
         const prev = found.get(key);
-        if (!prev) found.set(key, { aId: A.piece.id, bId: B.piece.id, zoneA, zoneB, stepFt: rise });
+        if (!prev) found.set(key, { aId: A.piece.id, bId: B.piece.id, zoneA, zoneB, stepFt: rise, floor: zm });
         else if (rise < prev.stepFt) prev.stepFt = rise;
         if (firstOnly) return { crossings: [...found.values()], connectors: [], reached };
       }

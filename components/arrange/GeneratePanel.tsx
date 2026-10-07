@@ -1,37 +1,37 @@
 "use client";
 
-import { Loader2, RefreshCw, Sparkles, Plus } from "lucide-react";
+import { Loader2, RefreshCw, Sparkles, Plus, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { NumberSlider } from "@/components/shared/NumberSlider";
-import type { Priorities, ShapeKind } from "@/lib/arrange/types";
+import { normalizePriorities, PRIORITY_LABELS, SHAPES } from "@/lib/arrange/types";
 import { Cap, Chip, Num } from "@/components/arrange/ui";
 import { useArrange } from "@/components/arrange/useArrange";
 
-/** The few kinds of building that work well. The other shapes still exist in older saved arrangements; they just are not offered. */
-const KINDS: { key: ShapeKind; label: string; hint: string }[] = [
-  { key: "compact", label: "Compact", hint: "pieces packed tightly into one mass" },
-  { key: "spineV", label: "Tower", hint: "stacked pieces, a few beside" },
-  { key: "slab", label: "Wide", hint: "wide layers stacked on each other" },
-  { key: "courtyard", label: "Courtyard", hint: "a ring of pieces round an open middle" },
-  { key: "stepped", label: "Terraced", hint: "terraces rising along one direction" },
-];
-
-/** Four sliders instead of eight: each one moves the settings that pull the same way, so each makes a clear difference. */
-const FEELS: { label: string; hint: string; keys: (keyof Priorities)[] }[] = [
-  { label: "Compact", hint: "a tight, knitted mass rather than a sprawl (also keeps pieces well supported)", keys: ["compactness", "structure"] },
-  { label: "Tall", hint: "more floors, pieces stacked above each other", keys: ["vertical"] },
-  { label: "Bright", hint: "more spaces open to the outside, more daylight", keys: ["daylight", "openness"] },
-  { label: "Varied", hint: "use many different tiles instead of repeating a few", keys: ["variety"] },
-  { label: "Interlocking", hint: "pieces that nest into each other's notches and steps, so shaped tiles fit together", keys: ["nesting"] },
-];
+/** One line of "asked, got" for the result. */
+function Row({ label, asked, got }: { label: string; asked?: string; got: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="text-right">
+        {asked ? <span className="text-muted-foreground">{asked} → </span> : null}
+        {got}
+      </span>
+    </div>
+  );
+}
 
 export function GeneratePanel() {
   const A = useArrange();
-  const { gen, priorities } = A.ui;
+  const { gen } = A.ui;
+  const priorities = normalizePriorities(A.ui.priorities);
   const setGen = (patch: Partial<typeof gen>) => A.patchUi({ gen: { ...gen, ...patch } });
   const badCount = Object.values(A.doc.ratings).filter((r) => r === "bad").length;
+  const working = A.busy === "Generating" || A.busy === "Growing" || A.busy === "Regenerating";
+  const p = A.progress;
+  const shape = SHAPES.find((k) => k.key === gen.shape);
+  const rep = A.report;
 
   return (
     <div className="space-y-3">
@@ -40,49 +40,77 @@ export function GeneratePanel() {
       <div className="space-y-1.5">
         <Cap>Kind of building</Cap>
         <div className="flex flex-wrap gap-1">
-          {KINDS.map((k) => (
+          {SHAPES.map((k) => (
             <Chip key={k.key} active={gen.shape === k.key} title={k.hint} onClick={() => setGen({ shape: k.key })}>
               {k.label}
             </Chip>
           ))}
         </div>
-        {KINDS.find((k) => k.key === gen.shape) && <p className="text-[10px] text-muted-foreground">{KINDS.find((k) => k.key === gen.shape)!.hint}</p>}
+        {shape && <p className="text-[10px] text-muted-foreground">{shape.hint}</p>}
+        <div className="flex items-center justify-between pt-1">
+          <div>
+            <Label className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Branching wings</Label>
+            <p className="text-[10px] text-muted-foreground">Off: the whole building is the shape, uniform. On: the last third grows out as wings.</p>
+          </div>
+          <Switch checked={!!gen.branching} onCheckedChange={(v) => setGen({ branching: v })} />
+        </div>
       </div>
 
       <div className="space-y-2">
         <Cap>How it should feel</Cap>
-        {FEELS.map((f) => (
-          <div key={f.label} title={f.hint}>
-            <NumberSlider
-              label={f.label}
-              value={priorities[f.keys[0]] ?? 50}
-              min={0}
-              max={100}
-              step={5}
-              onChange={(v) => A.patchUi({ priorities: { ...priorities, ...Object.fromEntries(f.keys.map((k, i) => [k, i === 0 ? v : Math.round(30 + v * 0.5)])) } as Priorities })}
-            />
+        {PRIORITY_LABELS.map((f) => (
+          <div key={f.key} title={f.hint}>
+            <NumberSlider label={f.label} value={priorities[f.key]} min={0} max={100} step={5} onChange={(v) => A.patchUi({ priorities: { ...priorities, [f.key]: v } })} />
           </div>
         ))}
-        <p className="text-[10px] text-muted-foreground">A connected route, good joints and your program rules are always on.</p>
+        <p className="text-[10px] text-muted-foreground">Always on: floors meet floors, no dead-end stair, every floor plate reachable from another, one way in on the ground, your program rules.</p>
       </div>
 
       <div className="space-y-2">
-        <Button className="w-full" disabled={!!A.busy || !A.bank.length} onClick={A.generate}>
-          {A.busy === "Generating" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
-          Generate a new arrangement
-        </Button>
+        {working ? (
+          <div className="space-y-1.5 rounded-md border border-border p-2">
+            <div className="flex items-center gap-2 text-[11px]">
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              <span className="min-w-0 flex-1 truncate">{p?.message ?? `${A.busy}…`}</span>
+            </div>
+            <div className="h-1 overflow-hidden rounded bg-muted">
+              <div className="h-full bg-pink transition-all" style={{ width: `${p ? Math.round((100 * p.placed) / Math.max(1, p.total)) : 4}%` }} />
+            </div>
+            <p className="text-[10px] text-muted-foreground">There is no time limit: it runs until the building is made. The first run works out how the tiles fit together and is the slowest.</p>
+            <Button variant="outline" size="sm" className="w-full" onClick={A.stopGen}>
+              <Square className="mr-1.5 h-3 w-3" />
+              Stop
+            </Button>
+          </div>
+        ) : (
+          <Button className="w-full" disabled={!A.bank.length} onClick={A.generate}>
+            <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+            Generate a new arrangement
+          </Button>
+        )}
         <div className="grid grid-cols-2 gap-2">
           <Button variant="outline" size="sm" disabled={!!A.busy || !A.bank.length} onClick={A.growMore} title="Add more pieces around everything already placed (locked pieces stay)">
-            {A.busy === "Growing" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-1.5 h-3.5 w-3.5" />}
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
             Grow more
           </Button>
           <Button variant="outline" size="sm" disabled={!!A.busy || badCount === 0} onClick={A.regenerate} title="Regrow only the parts past joints marked bad; locked pieces stay">
-            {A.busy === "Regenerating" ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
             Regenerate marked ({badCount})
           </Button>
         </div>
         {!A.bank.length && <p className="text-[11px] text-muted-foreground">Check the tiles it may use in the Bank first.</p>}
         {A.why && <p className="text-[11px] text-pink">{A.why}</p>}
+        {rep && (
+          <div className="space-y-0.5 rounded-md border border-border p-2 text-[11px]">
+            <Row label="Pieces" asked={String(rep.asked.pieces)} got={String(rep.got.pieces)} />
+            <Row label="Levels" got={`${rep.got.levels} (${rep.got.heightFt.toFixed(0)} ft tall)`} />
+            <Row label="Footprint" got={`${rep.got.widthFt.toFixed(0)} × ${rep.got.depthFt.toFixed(0)} ft`} />
+            <Row label="Stacked above another" got={String(rep.got.stackedPairs)} />
+            <Row label="Different tiles" asked={`up to ${Math.max(1, Math.round(1 + (rep.asked.varied / 100) * (rep.asked.pieces - 1)))}`} got={String(rep.got.distinctTiles)} />
+            <Row label="Climbing tiles (stair or ramp)" got={String(rep.got.climbingTiles)} />
+            <Row label="Search" got={`${rep.attempts} plan${rep.attempts === 1 ? "" : "s"} tried`} />
+          </div>
+        )}
         <p className="font-mono text-[10px] text-muted-foreground">{gen.seedLocked ? `seed ${gen.seed} (kept)` : `last seed ${gen.seed} · a new one each press`}</p>
         {A.notes.map((n, i) => (
           <p key={i} className="text-[11px] text-orange">

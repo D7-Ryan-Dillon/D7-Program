@@ -75,7 +75,6 @@ const ctxFor = (shape: (typeof SHAPES)[number]["key"], seed: number, amount = 8,
   settings: { ...defaultGen(), shape, seed, amount },
   // the generator stops searching after a wall-clock budget (6 s by default); the first run also warms the walking caches of every tile, so on a slower or busy machine it could stop early and
   // place only a few pieces. The checks test validity, not speed: give the search room.
-  budgetMs: 30000,
 });
 
 // ---- 1. every shape gives one connected, walkable, overlap-free building --------------------------------------------
@@ -83,7 +82,7 @@ const docs = new Map<string, ArrangementDoc>();
 for (const s of SHAPES) {
   for (const seed of [1, 2, 3]) {
     const t0 = Date.now();
-    const r = generateArrangement(ctxFor(s.key, seed), emptyDoc(), { tries: 3 });
+    const r = generateArrangement(ctxFor(s.key, seed), emptyDoc());
     const l = analyzeLayout(r.doc, tileById, rules);
     const ms = Date.now() - t0;
     const tag = `${s.key} seed ${seed}`;
@@ -104,7 +103,7 @@ for (const s of SHAPES) {
 // ---- 2. hard "never" rules are never produced ---------------------------------------------------------------------------
 {
   const never: Partial<ProgramRules> = { adjacency: { ...rules.adjacency, [pairKey("lobby", "gathering")]: { side: "never", stacked: "never" } } };
-  const r = generateArrangement(ctxFor("compact", 5, 10, never), emptyDoc(), { tries: 2 });
+  const r = generateArrangement(ctxFor("compact", 5, 10, never), emptyDoc());
   const l = analyzeLayout(r.doc, tileById, { ...rules, ...never });
   const bad = l.joints.filter((j) => ruleBetween({ ...rules, ...never }, l.byId.get(j.aId)!.tile, l.byId.get(j.bId)!.tile, j.axis === 2) === "never");
   ok(bad.length === 0, `never rule broken by ${bad.length} joints`);
@@ -451,7 +450,7 @@ for (const s of SHAPES) {
   ok(o.dims[0] === 80 && o.dims[1] === 40, "a quarter turn of a 20 x 40 tile is not 40 x 20");
   for (const bank of [[tiles[5], long], [tiles[2], tall], [long, tall, tiles[7]]]) {
     const ctx: GenContext = { tileById: map2, bank, rules, priorities: defaultPriorities(), site: defaultSite(), settings: { ...defaultGen(), seed: 4, amount: 6 } };
-    const r = generateArrangement(ctx, emptyDoc(), { tries: 2 });
+    const r = generateArrangement(ctx, emptyDoc());
     const l = analyzeLayout(r.doc, map2, rules);
     const used = new Set(r.doc.pieces.map((p) => p.tileId));
     ok(l.overlaps.length === 0 && l.islands.length === 0, `non-cubic ${[...used].join("+")}: overlaps ${l.overlaps.length}, islands ${l.islands.length}`);

@@ -1,16 +1,16 @@
-// Reads tiles of the V4 set with the app's own code: where a person can stand and walk (the shared walking rules), which floors join, which openings on the
+// Reads tiles of the project's set with the app's own code: where a person can stand and walk (the shared walking rules), which floors join, which openings on the
 // container surface have a floor and clearance behind them, how much of the carved space is usable, and the matrix measurements.
-//   npx tsx scripts/eval-tile.ts <name>...        from the engine export folders (C:/tmp/tiles4 or $V4_EXPORTS)
+//   npx tsx scripts/eval-tile.ts <name>...        from the engine export folders (C:/tmp/tiles7 or $TILE_EXPORTS)
 //   npx tsx scripts/eval-tile.ts --fixtures       the committed fixtures, every tile of the set
-// Writes <export>/<name>/eval/standing.u8 and zone.i32 so engine/tiles/v4/view_walk.py can draw the walkable floors over the sections.
+// Writes <export>/<name>/eval/standing.u8 and zone.i32 so engine/tiles/v7/view4.py can draw the walkable floors over the sections.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { arrangeKernel, getOcc, getWalk } from "../lib/arrange/occupancy";
 import { getOriented } from "../lib/arrange/orient";
 import { usableSpace } from "../lib/scoring/usable";
 import { evaluateTile } from "../lib/scoring/matrixEval";
-import { EXPORTS, loadExport, loadFixture, V4_ORDER } from "./v4/load";
+import { EXPORTS, loadExport, loadFixture, TILE_ORDER } from "./tiles/load";
 import type { ParsedTile } from "../lib/types";
 
 export interface Port {
@@ -121,19 +121,18 @@ function report(t: ParsedTile, dumpTo?: string) {
 if (process.argv[1]?.endsWith("eval-tile.ts")) {
   const args = process.argv.slice(2);
   if (args[0] === "--fixtures") {
-    for (const n of V4_ORDER) {
+    for (const n of TILE_ORDER) {
       const t = loadFixture(n);
       if (t) report(t);
     }
   } else {
     for (const n of args) {
-      const t = loadExport(n.includes("_v4") ? n : n);
+      const t = loadExport(n);
       if (!t) {
         console.log(`no export for ${n} in ${EXPORTS}`);
         continue;
       }
       report(t, join(EXPORTS, n, "eval"));
-      void existsSync;
     }
   }
 }

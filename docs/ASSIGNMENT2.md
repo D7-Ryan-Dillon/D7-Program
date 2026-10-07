@@ -2,9 +2,9 @@
 
 The brief is `Assignemnt_02_ProtoArchitecturalSpaces.pdf` (due 10.01.2026 as printed in the PDF). One geometrical system for all fifteen tiles; every tile repeats, mirrors or shifts, rotates in 90 degree steps and **interlocks as complementary geometry** (not six flat cube faces butted together; the 20 ft lattice is "not a sealed cube"); the test is one gathering, one office and one lobby at 2, 4 and 8 copies by repeat, mirror and shift. The Grasshopper / engine script is frozen: everything below is the app or the recipes.
 
-## The tile set to hand in (updated: V7 is the set built on the first set; V6 below is the earlier cubic rework)
+## The tile set to hand in
 
-**V6** (`engine/tiles/v6`, `docs/TILE_SET_V6.md`): fifteen cubic tiles plus a matching cubic backup (`v6c`) of the five whose tops are notched. If the stepped tiles are accepted, use them; if not, the backups are the same tiles with the notch left out. Import the `_analysis` zips (`engine/tiles/v6/package/analysis/`, local) into a **new project** in the app (the V6 project loaded this way is `v6tiles`).
+Fifteen 20 ft cubes, one per typology (`engine/tiles/v7`, `docs/TILE_SET_V7.md`): smooth carved masses with floors that walk, an opening with a floor behind it on every face, and every tile a single printable piece. Import the `_analysis` zips (`engine/tiles/v7/package/analysis/`, local; rebuild them with `python engine/tiles/v7/package.py`) into a **new project** in the app. How the tiles are written is `docs/RECIPE_WRITER.md`.
 
 ## PDF section to app sheet
 
@@ -26,13 +26,13 @@ Outside the app: the Part 1 text-to-image diagrams, the Versur run logs, and the
 
 ## The tests the brief asks for, in the app
 
-- **Arrange tab, Interlock test**: choose a tile, pattern (repeat, mirror, shift) and count (2, 4, 8); the result is valid when the copies are attached, collision-free, and every one reachable on foot. `npm run check:v6` runs all fifteen at all counts and writes the table and pictures to `engine/tiles/v6/assemblies/`.
-- **Arrange tab, Auto Generate**: mixed gathering / office / lobby aggregations, with the optional **Build connectors automatically** toggle for floors a step too far apart (a ramp or stair of ordinary foam is built into the lower room and checked by the same walking rules).
+- **Arrange tab, Interlock test**: choose a tile, pattern (repeat, mirror, shift) and count (2, 4, 8); the result is valid when the copies are attached, collision-free, and every one reachable on foot. `npm run check:tiles` runs all fifteen at all counts and writes the table and pictures to `engine/tiles/v7/assemblies/`.
+- **Arrange tab, Generate**: ten shapes (tower, terraced, courtyard, bridge, village ...) with branching wings and five sliders; every result has floors that meet floors, no dead-end stair and no stranded floor plate (`npm run check:generate`). The optional **Build connectors automatically** toggle covers floors a step too far apart (a ramp or stair of ordinary foam is built into the lower room and checked by the same walking rules).
 - **Analysis tab**: the twelve descriptors, each with a bar (strength on the app's scale words, a fit line to the typology's target), the at-a-glance strip, the compare view, and the usable-space check.
 - **Boards tab**: all of the sheets above.
 
 ## Honest limits (to say in the document)
 
-- A nest into a stepped top is **walkable only for G5**; the other four stepped tiles nest collision-free, so the aggregate reads as one interlocked mass, but the nested cube is reached from its own neighbours, not through the notch.
-- G3's shelf has no stair of its own in a 20 ft cube; it is a receiving floor (a neighbour's ramp arrives at it).
-- Auto Generate does not choose nests on its own yet (they must be walkable to count), so the interlocking aggregations in 6.1 are the interlock tests, not the generator.
+- A building climbs only through tiles that lift circulation inside themselves (G5, L1, L5; L4 and G1 part of the way): the other upper floors (G2, G3, O3, O4, L3 and O2's top) are receiving floors that a neighbouring tile has to supply. The generator therefore builds towers and terraces as chains of climbing tiles, and reports what it came out as against what was asked.
+- Joints: 198 of 225 ordered pairs and 117 of 120 unordered pairs join on foot; G1, L4 and L5 join only as the second tile of a pair in the pair matrix (in Arrange they join from any face once rotated).
+- A few door-level pockets (G4 and L5 on -Y, O4's void foot, G1's upper ledge) are not joined to their tile's main floor; they are not counted as floor plates.

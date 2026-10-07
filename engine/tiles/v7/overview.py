@@ -1,5 +1,5 @@
 """The labelled 3 x 5 overview of the V7 set: gathering, office and lobby in rows, typologies 1 to 5 in columns, every tile drawn at the same scale (so a 40 ft lobby is twice as
-tall as a 20 ft tile) as an isometric cutaway (iso.py). Reads C:/tmp/tiles7, writes engine/tiles/v4/recipes/previews/V7_overview_3x5.png.
+tall as a 20 ft tile) as an isometric cutaway (iso.py). Reads C:/tmp/tiles7, writes engine/tiles/v7/recipes/previews/V7_overview_3x5.png.
 
   python overview.py
 """

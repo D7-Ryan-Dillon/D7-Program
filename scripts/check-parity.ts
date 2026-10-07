@@ -1,6 +1,6 @@
 // Proves lib/tiles/analyze.ts (the browser's reading of a tile) agrees with the Grasshopper engine's own analysis
 // (data/spaces.json, data/structure.json) on the 15 typology tiles. Run: npm run check:parity
-// Fixtures come from engine/tiles/make_fixtures.py (lib/tiles/fixtures: the first set; lib/tiles/fixtures-v4: the V4 set, with masks for its L-shaped and single-storey tiles). Exit code 1 if anything that matters disagrees.
+// Fixtures come from engine/tiles/make_fixtures.py (lib/tiles/fixtures: the project's fifteen tiles). Exit code 1 if anything that matters disagrees.
 
 import { gunzipSync } from "node:zlib";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import { basename, join } from "node:path";
 import { analyzeTile } from "../lib/tiles/analyze";
 import type { SpacesData, StructureData } from "../lib/tiles/types";
 
-const roots = ["fixtures", "fixtures-v4", "fixtures-v5", "fixtures-v6", "fixtures-v7"].map((d) => join(__dirname, "..", "lib", "tiles", d)).filter((r) => existsSync(r));
+const roots = [join(__dirname, "..", "lib", "tiles", "fixtures")].filter((r) => existsSync(r));
 const names = roots.flatMap((r) => readdirSync(r).filter((n) => existsSync(join(r, n, "meta.json"))).map((n) => join(r, n)));
 if (!names.length) {
   console.error("No fixtures found in lib/tiles/fixtures. Run engine/tiles/make_fixtures.py first.");
@@ -50,7 +50,7 @@ function compare(a: Json, b: Json, path: string, out: string[]) {
 }
 
 for (const dir of names) {
-  const name = basename(dir) + (dir.includes("fixtures-v4") ? " (v4)" : dir.includes("fixtures-v5") ? " (v5)" : dir.includes("fixtures-v6") ? " (v6)" : dir.includes("fixtures-v7") ? " (v7)" : "");
+  const name = basename(dir);
   const meta = JSON.parse(readFileSync(join(dir, "meta.json"), "utf8")) as { grid: [number, number, number]; cell_ft: number };
   const engineSpaces = JSON.parse(readFileSync(join(dir, "spaces.json"), "utf8")) as SpacesData;
   const engineStructure = JSON.parse(readFileSync(join(dir, "structure.json"), "utf8")) as StructureData;

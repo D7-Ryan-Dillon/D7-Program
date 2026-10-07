@@ -5,7 +5,7 @@
 import type { ParsedTile } from "@/lib/types";
 import { toCell, toFt } from "./geometry";
 import { analyzeLayout, type Exposed } from "./layout";
-import { allowedByCounts, assemblyScore, placeAgainst, scoreCandidate, stateOf, type Candidate, type GenContext } from "./generate";
+import { allowedByCounts, assemblyScore, placeAgainst, scoreCandidate, stateOf, type Candidate, type GenContext } from "./candidates";
 import { isPlaceable, orientedDims } from "./orient";
 import { makePiece, patchPieces, removePieces } from "./ops";
 import type { ArrangementDoc, Piece, Vec3 } from "./types";

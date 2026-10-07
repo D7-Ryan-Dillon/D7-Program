@@ -1,10 +1,10 @@
 """An isometric cutaway of an exported V7 tile: the corner nearest the camera (south-west) is cut away above the ground slab so the rooms, ramps, floors and doorways
 show; foam pink, floor plates blue, branches orange; outside the container nothing is drawn (the notch of an L stays empty).
 
-  python iso.py <name>            reads C:/tmp/tiles7/<name>/<name>_analysis, writes engine/tiles/v4/recipes/previews/<name>_iso.png
+  python iso.py <name>            reads C:/tmp/tiles7/<name>/<name>_analysis, writes engine/tiles/v7/recipes/previews/<name>_iso.png
   python iso.py --all             every tile in C:/tmp/tiles7
   options: --scale 6   --cut 10 (feet, the size of the cut-away corner; 0 = none)   --view sw|se|ne|nw
-           --root C:/tmp/tiles7_asm --out <folder>   draw ASSEMBLIES written by scripts/check-v4.ts (a voxel box with an owner.i16 per cell: each piece gets its own colour)
+           --root C:/tmp/tiles7_asm --out <folder>   draw ASSEMBLIES written by scripts/check-tiles.ts (a voxel box with an owner.i16 per cell: each piece gets its own colour)
 
 A plain painter's algorithm over the voxel grid (no GPU, no three.js), so it runs anywhere Python and Pillow do.
 """

@@ -130,46 +130,54 @@ export const connectorReachFt = (rules: ProgramRules) => {
 
 // ---- generating --------------------------------------------------------------------------------------------------
 
-/** Independent weights, 0 to 100 each. Circulation, sequence and joint quality are always on (not here). */
+/**
+ * What the building should feel like, 0 to 100 each. Each one steers the shape of the building itself (how many levels it climbs, how tightly
+ * it packs, how many different tiles it uses), not just a score: lib/arrange/patterns.ts reads them. Joint quality, floors that meet floors, no dead-end
+ * stair and no stranded floor are always on (lib/arrange/generate.ts).
+ */
 export interface Priorities {
-  floors: number;
+  /** how many levels it climbs: 0 stays low and wide, 100 climbs as far as the pieces allow */
+  tall: number;
+  /** 0 a loose, branching spread; 100 a tight mass with many shared walls */
+  compact: number;
+  /** how many spaces open to the outside and to the sky */
+  bright: number;
+  /** 0 repeat a few tiles; 100 every tile different */
+  varied: number;
+  /** how strongly the adjacency rules of the Program pull (preferred beside preferred) */
   program: number;
-  daylight: number;
-  compactness: number;
-  variety: number;
-  vertical: number;
-  openness: number;
-  structure: number;
-  /** pieces that nest into each other's notches and steps (shared surface, a tight fit) */
-  nesting: number;
 }
 
-export const defaultPriorities = (): Priorities => ({ floors: 60, program: 50, daylight: 40, compactness: 40, variety: 50, vertical: 30, openness: 30, structure: 50, nesting: 50 });
+export const defaultPriorities = (): Priorities => ({ tall: 50, compact: 60, bright: 50, varied: 60, program: 50 });
+
+/** Sliders saved by older versions had other names; read what is there and fill the rest with defaults. */
+export const normalizePriorities = (p: Partial<Priorities> & { vertical?: number; compactness?: number; variety?: number; daylight?: number } | undefined | null): Priorities => {
+  const d = defaultPriorities();
+  if (!p) return d;
+  const pick = (v: unknown, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : fallback);
+  return { tall: pick(p.tall ?? p.vertical, d.tall), compact: pick(p.compact ?? p.compactness, d.compact), bright: pick(p.bright ?? p.daylight, d.bright), varied: pick(p.varied ?? p.variety, d.varied), program: pick(p.program, d.program) };
+};
 
 export const PRIORITY_LABELS: { key: keyof Priorities; label: string; hint: string }[] = [
-  { key: "floors", label: "Continuous floors", hint: "floors that meet at the same height across joints" },
+  { key: "tall", label: "Tall", hint: "how many levels it climbs, in 10 ft steps" },
+  { key: "compact", label: "Compact", hint: "a tight mass with many shared walls, or a loose spread" },
+  { key: "bright", label: "Bright", hint: "more spaces open to the outside and the sky" },
+  { key: "varied", label: "Varied", hint: "many different tiles, or a few repeated" },
   { key: "program", label: "Program fit", hint: "follow the adjacency rules (preferred beside preferred)" },
-  { key: "daylight", label: "Daylight", hint: "spaces that open to the outside" },
-  { key: "compactness", label: "Compactness", hint: "a tight mass rather than a sprawl" },
-  { key: "variety", label: "Variety of tiles", hint: "use many different tiles" },
-  { key: "vertical", label: "Vertical mix", hint: "more levels, pieces stacked above each other" },
-  { key: "openness", label: "Openness to outside", hint: "more opening area on the outer faces" },
-  { key: "structure", label: "Structural soundness", hint: "no hanging or poorly supported pieces" },
-  { key: "nesting", label: "Interlocking fit", hint: "pieces that nest into each other's notches and steps" },
 ];
 
 export type ShapeKind = "compact" | "spineV" | "spineH" | "courtyard" | "stepped" | "cascade" | "slab" | "village" | "bridge" | "free";
 
 export const SHAPES: { key: ShapeKind; label: string; hint: string }[] = [
-  { key: "compact", label: "Compact / chunks", hint: "clusters of pieces packed tightly" },
-  { key: "spineV", label: "Spine, vertical", hint: "a tower: pieces stacked, a few beside" },
-  { key: "spineH", label: "Spine, horizontal", hint: "a long bar along one direction" },
-  { key: "courtyard", label: "Courtyard", hint: "a ring of pieces around an open middle" },
-  { key: "stepped", label: "Stepped", hint: "terraces rising along a direction" },
-  { key: "cascade", label: "Cascade / slope", hint: "heights falling steadily along a direction" },
-  { key: "slab", label: "Slab", hint: "wide layers stacked" },
-  { key: "village", label: "Village", hint: "several small towers on a shared base" },
-  { key: "bridge", label: "Bridge", hint: "a raised span across a gap" },
+  { key: "compact", label: "Compact", hint: "a tight mass of pieces sharing walls, stepping up and down in 10 ft" },
+  { key: "spineV", label: "Tower", hint: "pieces climbing in 10 ft steps round a small footprint" },
+  { key: "spineH", label: "Long bar", hint: "a long bar of pieces along one direction" },
+  { key: "courtyard", label: "Courtyard", hint: "a ring of pieces round an open middle" },
+  { key: "stepped", label: "Terraced", hint: "terraces rising along a direction, a few pieces to each level" },
+  { key: "cascade", label: "Cascade", hint: "a slope climbing a level with every piece" },
+  { key: "slab", label: "Wide", hint: "a wide low block, two or three levels" },
+  { key: "village", label: "Village", hint: "several small towers standing on a shared base" },
+  { key: "bridge", label: "Bridge", hint: "two towers and a raised span between them" },
   { key: "free", label: "Free-form", hint: "no overall shape, just good joints" },
 ];
 
@@ -179,13 +187,15 @@ export interface GenSettings {
   shape: ShapeKind;
   /** 0 +X, 1 +Y, 2 -X, 3 -Y: the direction stepped, cascade and the horizontal spine run in. */
   direction: number;
-  /** The lowest joint score accepted (relaxed in steps when nothing fits). */
+  /** The lowest joint score accepted on the joint that carries a route. */
   minScore: number;
   /** true: Generate keeps using `seed` (same settings, same result). Default: every Generate picks a new random seed. */
   seedLocked?: boolean;
+  /** true: after the shape's core is built, the remaining pieces branch out as wings. Default off: the shape stays uniform. */
+  branching?: boolean;
 }
 
-export const defaultGen = (): GenSettings => ({ amount: 8, seed: 1, shape: "compact", direction: 0, minScore: 40 });
+export const defaultGen = (): GenSettings => ({ amount: 8, seed: 1, shape: "compact", direction: 0, minScore: 40, branching: false });
 
 // ---- site, smoothing, joints, warnings ---------------------------------------------------------------------------
 
@@ -247,7 +257,7 @@ export interface JointConnect {
   /** the smallest step between floors on a walkable route, ft */
   stepFt: number | null;
   /** the pairs of floors (a zone of each piece; see occupancy.ts) that walkable routes join */
-  crossings: { aId: string; zoneA: number; bId: string; zoneB: number }[];
+  crossings: { aId: string; zoneA: number; bId: string; zoneB: number; /** the height of the higher floor, world cells */ floor: number }[];
   /** the floors on the two sides are open and clear but further apart than one step: a stair or ramp would join them. Not a route. */
   connector: { riseFt: number; count: number; /** where they are (cells), for the planner */ items?: import("./walk").Connector[] } | null;
   /** walkable: a person can cross; connector: open and clear but needs a stair or ramp that is not there; void: open space continues but nobody can walk it (a view); contact: the pieces only touch */

@@ -11,11 +11,9 @@
     "check:arrange": "tsx scripts/check-arrange.ts",
     "check:interlock": "tsx scripts/check-interlock.ts",
     "check:analysis": "tsx scripts/check-analysis.ts",
-    "check:v4": "tsx scripts/check-v4.ts",
-    "check:v5": "tsx scripts/check-v5.ts",
-    "check:v6": "tsx scripts/check-v6.ts",
-    "check:v7": "tsx scripts/check-v7.ts",
-    "boxiness": "tsx scripts/v5-boxiness.ts"
+    "check:tiles": "tsx scripts/check-tiles.ts",
+    "check:generate": "tsx scripts/check-generate.ts",
+    "tiles:table": "tsx scripts/tiles/table.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

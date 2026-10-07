@@ -30,7 +30,7 @@ import { buildComposite, compositeToTile } from "../lib/arrange/composite";
 import { makePiece, withPiece } from "../lib/arrange/ops";
 import { defaultRules, emptyDoc } from "../lib/arrange/types";
 import { L, Lfilled, block, closed, corridor, cube, pocket, skylit } from "./fixtures/shaped";
-import { loadFixture } from "./v4/load";
+import { loadFixture } from "./tiles/load";
 
 let failures = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -527,13 +527,14 @@ async function assemblies() {
         (by.get(t.name) ?? by.set(t.name, new Map()).get(t.name)!).set(k, { value: r.measure.value, idx: r.interpretation.index });
       }
     }
-    for (const k of keys) ok((seen.get(k)?.size ?? 0) >= 3, `${k} reads the same on (nearly) every tile of the first set: ${[...(seen.get(k) ?? [])].join(", ")}`);
+    // Graduated counts enclosure steps from the way in to the far floors; the set's tiles are one to two steps deep, so it takes two values (0 and 1): the others take three or more
+    for (const k of keys) ok((seen.get(k)?.size ?? 0) >= (k === "graduated" ? 2 : 3), `${k} reads the same on (nearly) every tile of the set: ${[...(seen.get(k) ?? [])].join(", ")}`);
     // the tiles with many steps and terraces say so
-    const g1 = by.get("gathering_1_stepped_amphitheater");
+    const g1 = by.get("gathering_1_stepped_amphitheater_v7");
     ok(!!g1 && (g1.get("stepped")!.idx ?? 0) >= 3, `the stepped amphitheater should read as terraced: ${JSON.stringify(g1?.get("stepped"))}`);
-    const o2 = by.get("office_2_cascaded_terraced_plates");
+    const o2 = by.get("office_2_cascaded_terraced_plates_v7");
     ok(!!o2 && (o2.get("stepped")!.idx ?? 0) >= 2 && (o2.get("resistant")!.idx ?? 0) >= 2, `the cascaded plates should read as stepped with retained floors: ${JSON.stringify([o2?.get("stepped"), o2?.get("resistant")])}`);
-    console.log(`  the eight fixed descriptors take ${keys.map((k) => `${k} ${seen.get(k)?.size}`).join(", ")} distinct values across ${tiles.length} first-set tiles`);
+    console.log(`  the eight fixed descriptors take ${keys.map((k) => `${k} ${seen.get(k)?.size}`).join(", ")} distinct values across ${tiles.length} tiles`);
   }
 }
 

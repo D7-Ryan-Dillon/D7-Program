@@ -1,17 +1,17 @@
 1. THE TILES
-  G1  gathering_1_stepped_amphitheater_v7            20 x 20 x 20 ft  container 8000 ft3  carved 4944 ft3
+  G1  gathering_1_stepped_amphitheater_v7            20 x 20 x 20 ft  container 8000 ft3  carved 4935 ft3
   G2  gathering_2_void_field_gathering_v7            20 x 20 x 20 ft  container 8000 ft3  carved 4794 ft3
-  G3  gathering_3_inserted_horizontal_plate_v7       20 x 20 x 20 ft  container 8000 ft3  carved 5129 ft3
+  G3  gathering_3_inserted_horizontal_plate_v7       20 x 20 x 20 ft  container 8000 ft3  carved 4418 ft3
   G4  gathering_4_contained_room_within_volume_v7    20 x 20 x 20 ft  container 8000 ft3  carved 4488 ft3
   G5  gathering_5_linear_edge_gallery_v7             20 x 20 x 20 ft  container 8000 ft3  carved 5089 ft3
   O1  office_1_open_hall_workspace_v7                20 x 20 x 20 ft  container 8000 ft3  carved 4434 ft3
   O2  office_2_cascaded_terraced_plates_v7           20 x 20 x 20 ft  container 8000 ft3  carved 4507 ft3
-  O3  office_3_flat_deep_plan_plate_v7               20 x 20 x 20 ft  container 8000 ft3  carved 4831 ft3
+  O3  office_3_flat_deep_plan_plate_v7               20 x 20 x 20 ft  container 8000 ft3  carved 4789 ft3
   O4  office_4_void_edge_workspace_v7                20 x 20 x 20 ft  container 8000 ft3  carved 3968 ft3
   O5  office_5_folded_undulating_work_surface_v7     20 x 20 x 20 ft  container 8000 ft3  carved 4134 ft3
-  L1  lobby_1_vertical_void_lobby_v7                 20 x 20 x 20 ft  container 8000 ft3  carved 4263 ft3
+  L1  lobby_1_vertical_void_lobby_v7                 20 x 20 x 20 ft  container 8000 ft3  carved 4505 ft3
   L2  lobby_2_compressed_sequential_lobby_v7         20 x 20 x 20 ft  container 8000 ft3  carved 4065 ft3
-  L3  lobby_3_continuous_hall_lobby_v7               20 x 20 x 20 ft  container 8000 ft3  carved 2913 ft3
+  L3  lobby_3_continuous_hall_lobby_v7               20 x 20 x 20 ft  container 8000 ft3  carved 4355 ft3
   L4  lobby_4_topographic_ground_field_lobby_v7      20 x 20 x 20 ft  container 8000 ft3  carved 4621 ft3
   L5  lobby_5_linear_gallery_lobby_v7                20 x 20 x 20 ft  container 8000 ft3  carved 4102 ft3
 
@@ -27,12 +27,12 @@
   O3  W   W   W   W   W   W   W   W   W   W   W   W   W   W   W  
   O4  W   W   W   W   W   W   W   W   W   W   W   W   W   W   W  
   O5  W   W   W   W   W   W   W   W   W   W   W   W   W   .   W  
-  L1  W   W   W   W   W   W   W   W   W   .   W   W   W   W   W  
+  L1  W   W   W   W   W   W   W   W   W   W   W   W   W   W   W  
   L2  W   W   W   W   W   W   W   W   W   W   W   W   W   W   W  
   L3  W   W   W   W   W   W   W   W   W   W   W   W   W   W   W  
   L4  W   W   W   W   W   W   W   W   W   .   W   W   W   W   W  
-  L5  .   .   .   .   W   .   W   .   .   W   .   .   .   .   W  
-  196 of 225 ordered pairs (87%) have a walkable joint in their best placement  (13 s)
+  L5  .   .   .   .   W   .   W   .   .   W   W   .   .   .   W  
+  198 of 225 ordered pairs (88%) have a walkable joint in their best placement  (26 s)
   counted either way round: 117 of 120 unordered pairs (98%) can be joined on foot
   G1: walkable partners 13/15  (first tile 0, second tile 13)
   G2: walkable partners 15/15  (first tile 15, second tile 13)
@@ -43,12 +43,12 @@
   O2: walkable partners 15/15  (first tile 15, second tile 14)
   O3: walkable partners 15/15  (first tile 15, second tile 13)
   O4: walkable partners 15/15  (first tile 15, second tile 13)
-  O5: walkable partners 14/15  (first tile 14, second tile 12)
-  L1: walkable partners 15/15  (first tile 14, second tile 13)
+  O5: walkable partners 14/15  (first tile 14, second tile 13)
+  L1: walkable partners 15/15  (first tile 15, second tile 14)
   L2: walkable partners 15/15  (first tile 15, second tile 13)
   L3: walkable partners 15/15  (first tile 15, second tile 13)
   L4: walkable partners 14/15  (first tile 14, second tile 12)
-  L5: walkable partners 14/15  (first tile 4, second tile 14)
+  L5: walkable partners 14/15  (first tile 5, second tile 14)
 
 3. REPEAT / MIRROR / SHIFT in 2, 4 and 8 copies (the Arrange tab's interlock test): V = valid (attached, no collision, every copy reachable on foot), a = attached and collision-free but not every copy reachable, X = collides or detached
   G1  repeat 2: a   repeat 4: a   repeat 8: a   mirror 2: a   mirror 4: a   mirror 8: a   shift 2: a   shift 4: a   shift 8: a
@@ -63,7 +63,33 @@
   O5  repeat 2: V   repeat 4: V   repeat 8: a   mirror 2: V   mirror 4: V   mirror 8: a   shift 2: a   shift 4: a   shift 8: a
   L1  repeat 2: a   repeat 4: a   repeat 8: a   mirror 2: V   mirror 4: a   mirror 8: a   shift 2: a   shift 4: a   shift 8: a
   L2  repeat 2: V   repeat 4: V   repeat 8: a   mirror 2: V   mirror 4: V   mirror 8: a   shift 2: a   shift 4: a   shift 8: a
-  L3  repeat 2: V   repeat 4: V   repeat 8: a   mirror 2: V   mirror 4: V   mirror 8: a   shift 2: a   shift 4: a   shift 8: a
+  L3  repeat 2: V   repeat 4: a   repeat 8: a   mirror 2: V   mirror 4: a   mirror 8: a   shift 2: V   shift 4: a   shift 8: a
   L4  repeat 2: a   repeat 4: a   repeat 8: a   mirror 2: V   mirror 4: V   mirror 8: a   shift 2: a   shift 4: a   shift 8: a
   L5  repeat 2: a   repeat 4: a   repeat 8: a   mirror 2: V   mirror 4: V   mirror 8: a   shift 2: a   shift 4: a   shift 8: a
   14 of 15 tiles make at least one valid repeat / mirror / shift aggregation by themselves
+
+6. VERTICAL: a tile standing with its ground floor at an upper level of L1 (ring ramp) or G5 (gallery ramp), joined where the ramp arrives, found by lining up doors and floors (all host orientations)
+  the ring ramp of L1: 12 of 14 other tiles stand at an upper level of the host and are reached on foot (G1 G2 G3 G4 G5 O1 O3 O4 L2 L3 L4 L5)  [244 walkable raised placements checked]
+  the gallery ramp of G5: 12 of 14 other tiles stand at an upper level of the host and are reached on foot (G1 G2 G3 G4 O1 O3 O4 L1 L2 L3 L4 L5)  [710 walkable raised placements checked]
+
+7. RECEIVING FLOORS: tiles with more than one floor of their own (G2, G3, G4, O2, O4 ...) next to a host whose ramp arrives at their upper floor: the share of the guest's floor area a person can reach
+  G1: 86% of its floor on its main floor alone; 86% best beside (alone)
+      (G1: its other floor is not a receiving floor by design)
+  G2: 79% of its floor on its main floor alone; 79% best beside (alone)
+      (G2: its other floor is not a receiving floor by design)
+  G3: 83% of its floor on its main floor alone; 100% best beside L1
+  G4: 85% of its floor on its main floor alone; 85% best beside (alone)
+      (G4: its other floor is not a receiving floor by design)
+  G5: 77% of its floor on its main floor alone; 77% best beside (alone)
+      (G5: its other floor is not a receiving floor by design)
+  O2: 31% of its floor on its main floor alone; 58% best beside L1
+      (O2: its other floor is not a receiving floor by design)
+  O3: 71% of its floor on its main floor alone; 90% best beside L1
+      (O3: its other floor is not a receiving floor by design)
+  O4: 46% of its floor on its main floor alone; 84% best beside L1
+  O5: 55% of its floor on its main floor alone; 100% best beside L1
+      (O5: its other floor is not a receiving floor by design)
+  L3: 62% of its floor on its main floor alone; 82% best beside L1
+      (L3: its other floor is not a receiving floor by design)
+  L5: 82% of its floor on its main floor alone; 88% best beside L1
+      (L5: its other floor is not a receiving floor by design)

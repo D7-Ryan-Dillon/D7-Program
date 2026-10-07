@@ -1,4 +1,4 @@
-"""Helpers for writing engine 7 recipes by hand (used by build_tiles.py).
+"""Helpers for writing engine 7 recipes by hand (used by engine/tiles/v7/defs7.py).
 
 Everything is in feet, Z up, tile low corner at (0, 0, 0). A recipe is a plain dict that is written as JSON.
 

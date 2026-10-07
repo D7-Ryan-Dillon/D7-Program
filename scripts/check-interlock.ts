@@ -431,9 +431,9 @@ function generation() {
     let nestedHere = 0;
     for (const seed of [1, 2, 3, 4, 5]) {
       const shape = shapes[(seed + amount) % 3];
-      const ctx: GenContext = { tileById: tiles, bank, rules, priorities: defaultPriorities(), site: defaultSite(), settings: { ...defaultGen(), shape, seed, amount }, budgetMs: 8000 };
+      const ctx: GenContext = { tileById: tiles, bank, rules, priorities: defaultPriorities(), site: defaultSite(), settings: { ...defaultGen(), shape, seed, amount } };
       const t0 = Date.now();
-      const r = generateArrangement(ctx, emptyDoc(), { tries: 3 });
+      const r = generateArrangement(ctx, emptyDoc());
       const l = lay(r.doc);
       const tag = `${amount} pcs, ${shape}, seed ${seed}`;
       runs++;
@@ -454,10 +454,10 @@ function generation() {
   console.log(`  generation: ${nestedTotal} nested fits found by the generator across ${runs} runs without any position being supplied`);
   for (const s of sample) renderArrangement(lay(s.doc).boxes, join(out, s.name), { sliceZ: [8, 28] });
   // grow more with a locked piece, and regenerate a marked joint
-  const ctx: GenContext = { tileById: tiles, bank, rules, priorities: defaultPriorities(), site: defaultSite(), settings: { ...defaultGen(), seed: 7, amount: 4 }, budgetMs: 8000 };
-  const first = generateArrangement(ctx, emptyDoc(), { tries: 2 });
+  const ctx: GenContext = { tileById: tiles, bank, rules, priorities: defaultPriorities(), site: defaultSite(), settings: { ...defaultGen(), seed: 7, amount: 4 } };
+  const first = generateArrangement(ctx, emptyDoc());
   const locked = patchPieces(first.doc, new Set([first.doc.pieces[0].id]), { locked: true });
-  const grown = generateArrangement(ctx, locked, { target: locked.pieces.length + 3, tries: 2 });
+  const grown = generateArrangement(ctx, locked, { target: locked.pieces.length + 3 });
   const lg = lay(grown.doc);
   ok(grown.doc.pieces[0].id === locked.pieces[0].id && grown.doc.pieces[0].locked && JSON.stringify(grown.doc.pieces[0].pos) === JSON.stringify(locked.pieces[0].pos), "grow more moved a locked piece");
   ok(lg.overlaps.length === 0 && lg.islands.length === 0 && lg.unreachable.length === 0, "grow more left an invalid arrangement");
@@ -468,7 +468,7 @@ function generation() {
   console.log(`  grow more (a locked piece stays): ${first.doc.pieces.length} -> ${grown.doc.pieces.length} pieces; regenerate marked: ${re.doc.pieces.length} pieces`);
   // a bank that cannot be satisfied says so
   const bad: GenContext = { ...ctx, bank: [tBlock], settings: { ...ctx.settings, amount: 4 } };
-  const rb = generateArrangement(bad, emptyDoc(), { tries: 1 });
+  const rb = generateArrangement(bad, emptyDoc());
   ok(rb.doc.pieces.length === 1 && rb.notes.some((n) => /could not satisfy/.test(n)), `a bank of solid blocks should be reported as unable to build: ${rb.notes.join(" | ")}`);
   console.log(`  unsatisfiable bank: ${rb.notes.join(" | ")}`);
 }

@@ -1,6 +1,6 @@
 """Draw an exported V7 tile with the places a person can walk drawn over it (from scripts/eval-tile.ts, which writes <export>/eval/standing.u8 + zone.i32).
 
-  python view4.py <name>              C:/tmp/tiles7/<name>/<name>_analysis  ->  engine/tiles/v4/recipes/previews/<name>_walk.png
+  python view4.py <name>              C:/tmp/tiles7/<name>/<name>_analysis  ->  engine/tiles/v7/recipes/previews/<name>_walk.png
   python view4.py <name> --scale 8
 
 Pink foam, dark void, BLUE plates, ORANGE branches, grey outside the container. Walkable floors: GREEN = the tile's main floor (the biggest zone), CYAN = another

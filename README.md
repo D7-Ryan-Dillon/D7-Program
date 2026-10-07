@@ -72,9 +72,14 @@ Five tabs, in order:
    lists only those.
 4. **Arrange** -- compose the tiles into ONE connected, walkable building.
    Place, drag, turn and group pieces freely (smart snapping to faces, openings
-   and floors; any floor can meet any floor), or generate an arrangement from a
-   shape, priorities and program rules (which kinds of tile may touch, how many
-   of each); every joint is scored in four readable parts, the whole is read as
+   and floors; any floor can meet any floor), or **generate** a building: pick one
+   of ten shapes (compact, tower, long bar, courtyard, terraced, cascade, wide,
+   village, bridge, free-form), optionally with branching wings, and five sliders
+   that change the building itself (Tall, Compact, Bright, Varied, Program fit).
+   The generator plans the shape on a 20 ft by 10 ft lattice and searches for tiles
+   so that floors meet floors, no stair dead-ends, and no floor plate is stranded;
+   there is no time limit, a Stop button, and a report of what it came out as against
+   what was asked. Every joint is scored in four readable parts, the whole is read as
    architecture (levels, longest route, daylight, print checks, the 12
    descriptors), a smoothing pass bridges near-misses and lists floating
    fragments for you to approve, and each arrangement is saved with the project
@@ -112,9 +117,9 @@ phone up to a desktop; on a phone or half-screen laptop the viewport (or the
 board) stays pinned to the top of the tab while you scroll the controls.
 The loaded tiles sit in the top bar on Viewer and Analysis, so they stay on
 screen; filter chips beside them (All, Gathering, Workspace, Lobby, Cube builder)
-show only one kind at a time. The whole app is black with pink, orange and gray only; new viewports
-and boards start in the same look (ghosted foam, magenta void, peach floor
-plates, orange branches).
+show only one kind at a time. The whole app is black with pink, orange and gray only; every tab
+except Boards opens on solid white foam alone (void, floor plates and branches are one switch
+away in Display), and auto-rotate is off until you turn it on and pauses while you drag.
 
 Every viewport (Viewer, Analysis, Arrange, the cube builder) has an
 **Export** button: current view as a high-resolution PNG (pixels or print size
@@ -169,6 +174,66 @@ npm run check:v7       # the same for the V7 set (the first set kept, with small
 npm run check:v6       # the same for the V6 set (cubic, stepped tops, wide openings; 15 tiles + 5 cubic backups)
 npm run check:analysis # the twelve matrix descriptors: variety across the first set, bars, overview strip
 ```
+
+## Layout
+
+```
+app/                     Next.js App Router pages
+components/
+  shared/                Header, tab nav, logo, project-code gate, upload buttons
+  viewer/                 3D viewport, upload zone, metrics legend
+  sections/               Tile bank, correction editor, cube/hex builder
+  analysis/               Descriptor scoring UI
+  arrange/                Bank, generate, program, whole, joints, sequence, selection, viewport, exports
+  boards/                 Tile picker, board settings, live preview canvas, per-tile popup editor
+lib/
+  types.ts                Typed shapes for a tile (ParsedTile) and its faces/sections
+  ingest.ts               Turns a dropped Grasshopper folder/.zip into a ParsedTile
+  tiles/                  How a tile is read from its voxels (levels, rooms, routes, light, structure, plates): the ONE shared pipeline; fixtures/ are the project's fifteen tiles
+  drawing/                Plan and section drawings (canvas + SVG), used by the Viewer, Boards, Analysis and the exports
+  scoring/                The 12-descriptor scoring (measures, drivers, sentences, results exports)
+  walking.ts              The ONE walking model (what can be stood on, what is a step, what is a zone; editable rules) read by Arrange and Analysis alike
+  arrange/                Placement and collisions by occupied cells (shaped tiles nest), snapping, joints, walkable routes, layout (the connected rule), the generator (patterns, pairs, generate), composite model, smoothing, views (Arrange tab)
+  sections/               Photo -> trace -> lofted volume -> ParsedTile (Sections tab)
+  boards/                 Grid layout, frame shape, text fitting, canvas export, GIF/MP4 turntable export (Boards tab)
+  exporters/              CSG fuse, OBJ export, recipe manifest
+  persistence.ts          Save/load a project (tiles + saved cube-builder pieces) by code, via Supabase
+  ui/select.tsx (components) The app's dark dropdown, a drop-in for a native <select>
+  shared/Section.tsx (components) A collapsible group of settings; open state saved per project
+  workspaceUi.ts          Saved workspace state (tab, open/closed sections) + useSectionOpen
+  clipping.ts             Shared clipping-plane system (plane, outline, stencil cut-face caps)
+  viewportCapture.ts      Offscreen high-res PNG / turntable frames from any live viewport
+  useCriteria.ts          The project's carried-forward criteria (uses scoring/selection.ts)
+  presets.ts              Saved presets (boards / viewer / compare), per project
+  renderTile.ts           Headless tile renderer + Boards line decorations (outlines, facet lines)
+  supabase/               Supabase client setup (browser + server-only)
+engine/                    Grasshopper erosion engine 7 (floor plates, any-geometry input, loop), recipes, headless tests -- see engine/README.md
+supabase/setup.sql         Run once in the Supabase SQL Editor for a fresh project
+docs/DATA_FORMAT.md        Exact Grasshopper export data contract
+docs/RECIPE_WRITER.md      How the AI writes the tiles as recipes, and how to check them
+docs/ARRANGE.md            The Arrange tab and the generator
+HANDOFF.md                 Full project context for a new AI session or contributor
+```
+
+## Related repos
+
+See [HANDOFF.md section 2](HANDOFF.md#2-where-this-code-lives-four-repos-one-live-reference-site)
+for the full picture -- the earlier prototype, the Sections tab's source
+asset repo, and the original standalone tool its lofting algorithm was
+ported from (plus a live reference site for that last one).```bash
+npm run lint           # eslint
+npx tsc --noEmit       # typecheck
+npm run build          # production build
+npm run check:parity   # lib/tiles agrees with the Grasshopper engine's own analysis on the 15 tiles
+npm run check:arrange / check:interlock / check:analysis   # no-browser regression checks (Arrange, shaped tiles that interlock, the Analysis against the matrix and the one walking model)
+npm run check:generate # the generator: every shape, the sliders, branching, variation, Grow more, Stop, and no stranded floor or dead-end stair in any result
+npm run check:tiles    # assembly evidence for the tile set: all pairs, repeat / mirror / shift in 2, 4, 8, vertical meetings, receiving floors
+npm run tiles:table    # the tile set's evaluation table (engine/tiles/v7/EVALUATION.md)
+```
+
+## The tiles and the AI recipe writer
+
+The fifteen tiles (three categories by five typologies, 20 ft cubes) are in `lib/tiles/fixtures` and are written as **recipes** by an AI session, not modelled by hand: a recipe says where solvent goes in a foam block and which floors are protected, and the (frozen) engine erodes the block from it. How that works, the helpers, the design rules learned, the printing rules and the checks are in **[docs/RECIPE_WRITER.md](docs/RECIPE_WRITER.md)** (give it to any AI session that has to write or change a tile); the set and its measured results are in [docs/TILE_SET_V7.md](docs/TILE_SET_V7.md); the engine's schema is in [engine/RECIPES.md](engine/RECIPES.md).
 
 ## Layout
 

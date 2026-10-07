@@ -1,5 +1,5 @@
-"""Draw the assemblies that scripts/check-v4.ts wrote to C:/tmp/tiles7_asm: an isometric view of the outside and a cutaway (south-west corner removed), one colour per piece,
-into engine/tiles/v4/assemblies/<name>.png and <name>_cut.png.   python render_assemblies.py [--root C:/tmp/tiles7_asm]
+"""Draw the assemblies that scripts/check-tiles.ts wrote to C:/tmp/tiles7_asm: an isometric view of the outside and a cutaway (south-west corner removed), one colour per piece,
+into engine/tiles/v7/assemblies/<name>.png and <name>_cut.png.   python render_assemblies.py [--root C:/tmp/tiles7_asm]
 """
 import os
 import sys

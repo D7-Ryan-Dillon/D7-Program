@@ -4,7 +4,7 @@
   python build.py G1 O3 ...        only these
   options: --no-run (write recipes only)   --fast (steps stay as written; the export and previews are still made)
 
-Writes engine/tiles/v4/recipes/<name>.recipe.json (with expect.tile_id once run) and previews/<name>.png (foam pink, void dark, plates blue, branches orange,
+Writes engine/tiles/v7/recipes/<name>.recipe.json (with expect.tile_id once run) and previews/<name>.png (foam pink, void dark, plates blue, branches orange,
 outside the container grey). Run with Rhino's bundled Python 3.9 (see engine/headless/run_headless.py):
   set PYTHONPATH=C:\\Users\\<you>\\.rhinocode\\py39-rh8\\site-envs\\default-XXXX
   <Rhino python>\\python.exe engine\\tiles\\v4\\build.py G1

@@ -10,17 +10,17 @@ The fifteen V7 tiles, cut away (south-west corner removed; foam pink, floor plat
 | What | Where |
 |---|---|
 | the recipes (paste one into the engine's `recipe` panel; it ends with `RECIPE CHECK: OK`) | `engine/tiles/v7/recipes/<name>.recipe.json` |
-| the tile definitions: V3's, edited (`lport` = a low port that reaches the floor) | `engine/tiles/v7/defs7.py`; the V3 originals stay in `engine/tiles/tile_defs.py` |
+| the tile definitions: V3's, edited (`lport` = a low port that reaches the floor) | `engine/tiles/v7/defs7.py` |
 | pictures per tile (outside / cut-away isometric, a walking sheet) | `engine/tiles/v7/recipes/previews/` |
 | the app's own evaluation table | `engine/tiles/v7/EVALUATION.md` |
 | import-ready `_analysis` zips (15), reference zips, the whole set in one zip (local, git-ignored) | `engine/tiles/v7/package/` |
-| committed fixtures | `lib/tiles/fixtures-v7/` |
+| committed fixtures | `lib/tiles/fixtures/` |
 
 ```
 python engine/tiles/v7/build.py [G1 O3 ...]       the real engine, headless (seconds per tile)
 python engine/tiles/v7/verify.py                  each recipe rebuilt from the file alone: RECIPE CHECK: OK, 24 sources at most
-python engine/tiles/make_fixtures.py C:/tmp/tiles7 lib/tiles/fixtures-v7   then   npm run check:parity
-npm run check:v7                                  every way Arrange can assemble them
+python engine/tiles/make_fixtures.py C:/tmp/tiles7 lib/tiles/fixtures   then   npm run check:parity
+npm run check:tiles                               every way Arrange can assemble them
 ```
 (Use Rhino's bundled Python 3.9 for the first three.)
 
@@ -66,6 +66,7 @@ Checked on the smooth surface the app prints from (`void_smooth`): every tile is
 - The foam is carved harder than in V3 in several tiles (void share up from about 50% to about 55–65%).
 - G1: the rim ledge reaches 7 ft in one piece and then continues as a separate 19 sq ft ledge (a gap I could not close without changing the bowl).
 - Thin slivers (1 to 5 cu ft each, 18 across the set, most in L1) stand free between pods; they are attached, but fragile.
+- G2's upper floor (44 sq ft) stands at 11 ft, one foot off the 12 ft datum of the other tiles' upper floors, so no neighbour's floor meets it: it is a floor nobody can walk to from another tile (the generator avoids placing G2 where it would be stranded).
 - Not done: G4's -Y door pocket, O4's void-foot pocket and L5's -Y pocket are not connected to the main floor.
 
 ## Touch-ups after the first print round (2026-10-06)

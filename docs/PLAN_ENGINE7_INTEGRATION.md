@@ -1,6 +1,6 @@
 # Plan: engine 7 (floor plates, rooms, the typology tiles) fully into the web app
 
-Status: BUILT 2026-10-03 (steps A to J). Not pushed. This file is the plan as approved; where the build differs, it is listed here and the docs describe what exists:
+Status: BUILT 2026-10-03 (steps A to J). This file is the plan as approved; where the build differs, it is listed here and the docs describe what exists:
 - Plates and branches are a second GLB (`<name>_parts.glb`), not nodes of the main GLB: Arrange, Boards and the OBJ exports render every node of the main file, and Arrange could not be touched.
 - Rooms use a marker watershed with a 2 ft prominence (`ROOM_H_FT`), not a 3 ft neck threshold; light is "within 6 ft of open sky or an open side face"; the engine's `levels` live in `spaces.json` (a summary in `tile.json`).
 - The old Carved calibration and the "what changed" note were dropped at the owner's word (new projects only).
