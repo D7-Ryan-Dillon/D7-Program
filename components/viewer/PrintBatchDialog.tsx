@@ -15,7 +15,7 @@ import { useProject } from "@/lib/project-store";
 import { downloadBlob } from "@/lib/boards/exportBoard";
 import { availableParts, binaryStl, DETAIL_CHOICES, STL_PARTS, tileTriangles, type PrintDetail, type StlPart } from "@/lib/exporters/stl";
 import { fineSoup } from "@/lib/exporters/printMesh";
-import { buildLabelledBlock, findLabelPatch, labelFor, lowered, lowestZ } from "@/lib/exporters/printLabels";
+import { buildLabelledBlock, findLabelPatch, labelFor, lowered, lowestZ, subFor } from "@/lib/exporters/printLabels";
 import { cn } from "@/lib/utils";
 import type { ParsedTile } from "@/lib/types";
 
@@ -58,6 +58,8 @@ export function PrintBatchDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [group, setGroup] = useState<(typeof GROUPS)[number][0]>("all");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [labels, setLabels] = useState<Record<string, string>>({});
+  /** the optional second line (smaller, under the label) per block; empty = none */
+  const [subs, setSubs] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<"scale" | "size">("scale");
   const [ratio, setRatio] = useState(120);
   const [sizeMm, setSizeMm] = useState(100);
@@ -73,6 +75,7 @@ export function PrintBatchDialog({ open, onOpenChange }: { open: boolean; onOpen
 
   const present = GROUPS.filter(([k]) => k === "all" || tiles.some((t) => tileGroup(t) === k));
   const shown = tiles.filter((t) => group === "all" || tileGroup(t) === group);
+  const subOf = (t: ParsedTile) => (subs[t.id] ?? "").trim() || undefined;
   const labelOf = (t: ParsedTile, i: number) => (labels[t.id] ?? labelFor(t.name, i)).trim() || labelFor(t.name, i);
   const ratioFor = (t: ParsedTile) => (mode === "scale" ? ratio : (Math.max(...t.tileFt) * 304.8) / sizeMm);
 
@@ -82,10 +85,10 @@ export function PrintBatchDialog({ open, onOpenChange }: { open: boolean; onOpen
         const r = mode === "scale" ? ratio : (Math.max(...t.tileFt) * 304.8) / sizeMm;
         const mm = 304.8 / r;
         const text = (labels[t.id] ?? labelFor(t.name, i)).trim() || labelFor(t.name, i);
-        const found = findLabelPatch(t, r, { text, depthMm: Number(depth), maxHeightMm: Number(height) });
+        const found = findLabelPatch(t, r, { text, depthMm: Number(depth), maxHeightMm: Number(height), sub: (subs[t.id] ?? "").trim() || undefined });
         return { t, i, size: t.tileFt.map((v) => v * mm) as [number, number, number], found };
       }),
-    [tiles, mode, ratio, sizeMm, labels, depth, height],
+    [tiles, mode, ratio, sizeMm, labels, subs, depth, height],
   );
   const chosen = rows.filter((r) => picked.has(r.t.id));
   const anyPart = (Object.values(parts) as boolean[]).some(Boolean);
@@ -122,7 +125,7 @@ export function PrintBatchDialog({ open, onOpenChange }: { open: boolean; onOpen
         if (want.includes("foam") && labelOn) {
           setProgress({ label: `${text}: cutting the label pocket`, done, total: chosen.length });
           await new Promise((res) => setTimeout(res, 30));
-          const res = await buildLabelledBlock(t, r, { text, depthMm: Number(depth), maxHeightMm: Number(height) }, detail);
+          const res = await buildLabelledBlock(t, r, { text, depthMm: Number(depth), maxHeightMm: Number(height), sub: subOf(t) }, detail);
           if (!("error" in res)) {
             zShift = res.zShift;
             labelled = true;
@@ -198,13 +201,23 @@ export function PrintBatchDialog({ open, onOpenChange }: { open: boolean; onOpen
                           {labelOn && "patch" in r.found && <span className="ml-1">· letters {r.found.patch.textHeightMm.toFixed(1)} mm</span>}
                         </div>
                       </div>
-                      <input
-                        value={labels[r.t.id] ?? labelFor(r.t.name, r.i)}
-                        onChange={(e) => setLabels((l) => ({ ...l, [r.t.id]: e.target.value.slice(0, 8) }))}
-                        aria-label={`Label for ${r.t.name}`}
-                        disabled={!labelOn}
-                        className="h-7 w-16 rounded-md border border-input bg-transparent px-1.5 text-center font-mono text-[11px] outline-none focus-visible:border-ring disabled:opacity-40"
-                      />
+                      <div className="flex flex-col gap-0.5">
+                        <input
+                          value={labels[r.t.id] ?? labelFor(r.t.name, r.i)}
+                          onChange={(e) => setLabels((l) => ({ ...l, [r.t.id]: e.target.value.slice(0, 8) }))}
+                          aria-label={`Label for ${r.t.name}`}
+                          disabled={!labelOn}
+                          className="h-7 w-28 rounded-md border border-input bg-transparent px-1.5 text-center font-mono text-[11px] outline-none focus-visible:border-ring disabled:opacity-40"
+                        />
+                        <input
+                          value={subs[r.t.id] ?? ""}
+                          onChange={(e) => setSubs((l) => ({ ...l, [r.t.id]: e.target.value.slice(0, 24) }))}
+                          placeholder="2nd line"
+                          aria-label={`Second line under the label for ${r.t.name}`}
+                          disabled={!labelOn}
+                          className="h-6 w-28 rounded-md border border-input bg-transparent px-1.5 text-center font-mono text-[10px] outline-none placeholder:text-muted-foreground/60 focus-visible:border-ring disabled:opacity-40"
+                        />
+                      </div>
                     </div>
                   );
                 })}
@@ -289,6 +302,17 @@ export function PrintBatchDialog({ open, onOpenChange }: { open: boolean; onOpen
                       ))}
                     </Select>
                   </label>
+                  <div className="col-span-2 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    <span>Second line: type a smaller line under the label on any block (for example “void field” under G-2).</span>
+                    <span className="flex shrink-0 gap-2">
+                      <button type="button" className="underline-offset-2 hover:text-foreground hover:underline" onClick={() => setSubs(Object.fromEntries(tiles.map((t) => [t.id, subFor(t)])))}>
+                        Name the types
+                      </button>
+                      <button type="button" className="underline-offset-2 hover:text-foreground hover:underline" onClick={() => setSubs({})}>
+                        Clear
+                      </button>
+                    </span>
+                  </div>
                   {Number(depth) === 0.5 && <p className="col-span-2 text-[10px] text-orange">0.5 mm is two and a half layers at 0.2 mm; the slicer will round it. 0.6 mm is three clean layers.</p>}
                 </div>
               )}

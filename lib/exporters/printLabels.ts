@@ -38,6 +38,8 @@ export interface LabelOptions {
   depthMm: number;
   /** the tallest letters wanted, mm */
   maxHeightMm: number;
+  /** an optional second line under the first, in smaller letters ("void field" under "G-2") */
+  sub?: string;
 }
 
 /** The size of one pixel of the label, mm. Far finer than a 0.4 mm nozzle can print. */
@@ -45,8 +47,30 @@ export const LABEL_PX_MM = 0.1;
 /** Letters shorter than this do not read in a 0.4 mm print. */
 export const MIN_TEXT_MM = 3.5;
 
-/** How wide bold letters run compared with their height. */
-const aspectOf = (text: string) => Math.max(1.3, text.length * 0.66);
+/** The second line is this much of the first line's height, with this gap between the two (as fractions of the first line's letter height). */
+export const SUB_RATIO = 0.42;
+export const SUB_GAP = 0.22;
+/** The second line's letters shorter than this do not read in a 0.4 mm print. */
+export const MIN_SUB_MM = 2.0;
+/** The tallest the second line's ink can come out (letters with tails included), as a fraction of the first line's height. */
+const SUB_INK = 0.56;
+
+/** How wide bold letters run compared with their height: the label's width over the first line's letter height, and its total height over the same. */
+function shapeOf(text: string, sub?: string): { wAspect: number; hFactor: number; minTh: number } {
+  const main = Math.max(1.3, text.length * 0.66);
+  if (!sub) return { wAspect: main, hFactor: 1, minTh: MIN_TEXT_MM };
+  return { wAspect: Math.max(main, sub.length * 0.38), hFactor: 1 + SUB_GAP + SUB_INK, minTh: Math.max(MIN_TEXT_MM, MIN_SUB_MM / (SUB_RATIO * 1.1)) };
+}
+
+/** A short second line from a tile's type: "void field gathering" -> "void field" (the category word dropped, cut to 22 characters). */
+export function subFor(tile: { meta?: { typology?: string } | null; name: string }): string {
+  const t = (tile.meta?.typology ?? "")
+    .replace(/[-_/]+/g, " ")
+    .replace(/\b(gathering|lobby|workspace)\s*$/i, "")
+    .trim()
+    .toLowerCase();
+  return t.slice(0, 22).trim();
+}
 
 /** Short label from a tile's name: "office_4_void_edge_workspace" -> "O-4", "gathering_2_..." -> "G-2", "lobby_3_..." -> "L-3". Anything else: its initials. */
 export function labelFor(name: string, fallbackIndex = 0): string {
@@ -99,12 +123,13 @@ export function findLabelPatch(tile: ParsedTile, ratio: number, o: LabelOptions)
       for (let dx = -2; dx <= 2 && ok; dx++) for (let dy = -2; dy <= 2 && ok; dy++) if (!col[(x + dx) * ny + y + dy]) ok = 0;
       safe[x * ny + y] = ok;
     }
-  const aspect = aspectOf(o.text);
+  const sub = o.sub?.trim() || undefined;
+  const { wAspect: aspect, hFactor, minTh } = shapeOf(o.text, sub);
   const size = (wCells: number, hCells: number): { th: number; rotated: boolean } => {
     const w = wCells * cellMm;
     const h = hCells * cellMm;
-    const a = Math.min(o.maxHeightMm, h * 0.9, (w * 0.9) / aspect);
-    const b = Math.min(o.maxHeightMm, w * 0.9, (h * 0.9) / aspect);
+    const a = Math.min(o.maxHeightMm, (h * 0.9) / hFactor, (w * 0.9) / aspect);
+    const b = Math.min(o.maxHeightMm, (w * 0.9) / hFactor, (h * 0.9) / aspect);
     return a >= b ? { th: a, rotated: false } : { th: b, rotated: true };
   };
   let best: { th: number; rotated: boolean; x0: number; x1: number; y0: number; y1: number } | null = null;
@@ -128,14 +153,14 @@ export function findLabelPatch(tile: ParsedTile, ratio: number, o: LabelOptions)
       stack.push(y);
     }
   }
-  if (!best || best.th < MIN_TEXT_MM) {
-    return { error: `no flat patch of foam on the underside is big enough for letters of ${MIN_TEXT_MM} mm at this scale${best ? ` (the best gives ${best.th.toFixed(1)} mm)` : ""}` };
+  if (!best || best.th < minTh) {
+    return { error: `no flat patch of foam on the underside is big enough for ${sub ? "two lines of letters (" + minTh.toFixed(1) + " mm and " + (minTh * SUB_RATIO).toFixed(1) + " mm)" : "letters of " + MIN_TEXT_MM + " mm"} at this scale${best ? ` (the best gives ${best.th.toFixed(1)} mm)` : ""}` };
   }
   return { patch: { x0: best.x0 * cellMm, x1: best.x1 * cellMm, y0: best.y0 * cellMm, y1: best.y1 * cellMm, rotated: best.rotated, textHeightMm: best.th } };
 }
 
-/** The text as a black-and-white bitmap with letters `heightMm` tall (browser only). true = ink. */
-export function labelBitmap(text: string, heightMm: number, maxLengthMm: number): { w: number; h: number; ink: Uint8Array } {
+/** The text as a black-and-white bitmap with letters `heightMm` tall (browser only). true = ink. An optional second line goes under it, smaller and centred. */
+export function labelBitmap(text: string, heightMm: number, maxLengthMm: number, sub?: string): { w: number; h: number; ink: Uint8Array } {
   const px = 1 / LABEL_PX_MM;
   const measure = document.createElement("canvas").getContext("2d")!;
   const font = (size: number) => `800 ${size}px "Arial Black", Arial, Helvetica, sans-serif`;
@@ -151,8 +176,23 @@ export function labelBitmap(text: string, heightMm: number, maxLengthMm: number)
     measure.font = font(size);
     mm = measure.measureText(text);
   }
-  const w = Math.ceil(mm.actualBoundingBoxLeft + mm.actualBoundingBoxRight) + 2;
-  const h = Math.ceil(mm.actualBoundingBoxAscent + mm.actualBoundingBoxDescent) + 2;
+  const line = (t: string, sz: number, tm: TextMetrics) => ({ t, sz, left: tm.actualBoundingBoxLeft, asc: tm.actualBoundingBoxAscent, w: Math.ceil(tm.actualBoundingBoxLeft + tm.actualBoundingBoxRight), h: Math.ceil(tm.actualBoundingBoxAscent + tm.actualBoundingBoxDescent) });
+  const lines = [line(text, size, mm)];
+  const subText = sub?.trim();
+  if (subText) {
+    let sz = size * SUB_RATIO;
+    measure.font = font(sz);
+    let sm = measure.measureText(subText);
+    if (sm.width > maxW) {
+      sz *= maxW / sm.width;
+      measure.font = font(sz);
+      sm = measure.measureText(subText);
+    }
+    lines.push(line(subText, sz, sm));
+  }
+  const gap = subText ? Math.round(heightMm * px * SUB_GAP) : 0;
+  const w = Math.max(...lines.map((l) => l.w)) + 2;
+  const h = lines.reduce((a, l) => a + l.h, 0) + gap + 2;
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
@@ -160,8 +200,12 @@ export function labelBitmap(text: string, heightMm: number, maxLengthMm: number)
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, w, h);
   ctx.fillStyle = "#fff";
-  ctx.font = font(size);
-  ctx.fillText(text, 1 + mm.actualBoundingBoxLeft, 1 + mm.actualBoundingBoxAscent);
+  let top = 1;
+  lines.forEach((l, i) => {
+    ctx.font = font(l.sz);
+    ctx.fillText(l.t, 1 + (w - 2 - l.w) / 2 + l.left, top + l.asc);
+    top += l.h + (i === 0 ? gap : 0);
+  });
   const data = ctx.getImageData(0, 0, w, h).data;
   const ink = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) ink[i] = data[i * 4] > 127 ? 1 : 0;
@@ -528,11 +572,19 @@ export function lowered(soup: Float32Array, dz: number): Float32Array {
 
 /** The foam of a tile with a label pocket in its underside, and the label. Browser only (it draws the text). */
 export async function buildLabelledBlock(tile: ParsedTile, ratio: number, o: LabelOptions, detail: 0 | Detail = 3): Promise<LabelledBlock | { error: string }> {
-  const found = findLabelPatch(tile, ratio, o);
+  const warnings: string[] = [];
+  let found = findLabelPatch(tile, ratio, o);
+  let sub = o.sub?.trim() || undefined;
+  if ("error" in found && sub) {
+    // no room for two lines: the first line alone
+    found = findLabelPatch(tile, ratio, { ...o, sub: undefined });
+    if (!("error" in found)) warnings.push(`the second line "${sub}" did not fit on the underside at this scale, so only "${o.text}" is cut`);
+    sub = undefined;
+  }
   if ("error" in found) return found;
   const { patch } = found;
   const len = (patch.rotated ? patch.y1 - patch.y0 : patch.x1 - patch.x0) * 0.9;
-  const bitmap = labelBitmap(o.text, patch.textHeightMm, len);
+  const bitmap = labelBitmap(o.text, patch.textHeightMm, len, sub);
   const grid = placeBitmap(bitmap, patch.rotated);
   const cx = (patch.x0 + patch.x1) / 2;
   const cy = (patch.y0 + patch.y1) / 2;
@@ -559,7 +611,6 @@ export async function buildLabelledBlock(tile: ParsedTile, ratio: number, o: Lab
   await new Promise((r) => setTimeout(r, 0));
   const block = cutPocket(foam, cutter);
 
-  const warnings: string[] = [];
   const cut = volumeMm3(foam) - volumeMm3(block);
   const want = volumeMm3(label);
   if (want > 0 && Math.abs(cut - want) / want > 0.25) warnings.push(`the pocket volume (${cut.toFixed(0)} mm³) does not match the label (${want.toFixed(0)} mm³): check the underside in the slicer`);

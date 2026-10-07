@@ -10,7 +10,7 @@ import type { ParsedTile } from "../lib/types";
 import type { SpacesData } from "../lib/tiles/types";
 import { analyzeLayout, entrancePoint, orphansIfRemoved } from "../lib/arrange/layout";
 import { planDrone, reversalPoints, reversalsIn } from "../lib/arrange/drone";
-import { cutPocket, findLabelPatch, labelFor, labelSoup, placeBitmap } from "../lib/exporters/printLabels";
+import { cutPocket, findLabelPatch, labelFor, labelSoup, placeBitmap, subFor } from "../lib/exporters/printLabels";
 import { openEdges, volumeMm3 } from "../lib/exporters/stl";
 import { fineSoup } from "../lib/exporters/printMesh";
 import { generateArrangement, regenerateMarked, type GenContext } from "../lib/arrange/generate";
@@ -306,6 +306,18 @@ for (const s of SHAPES) {
 // ---- 5c. print labels -----------------------------------------------------------------------------------------------------------------
 {
   ok(labelFor("office_4_void_edge_workspace_V3") === "O-4" && labelFor("gathering_2_void_field_gathering") === "G-2" && labelFor("lobby_3_x") === "L-3", "label names are wrong");
+  ok(subFor({ name: "x", meta: { typology: "void field gathering" } }) === "void field" && subFor({ name: "x", meta: null }) === "", "second line from the typology is wrong");
+  // the optional second line: the patch for two lines is never bigger than for one, and its first line stays at least 4.4 mm
+  let twoLines = 0;
+  for (const t of tiles) {
+    const one = findLabelPatch(t, 120, { text: "G-2", depthMm: 0.6, maxHeightMm: 6 });
+    const two = findLabelPatch(t, 120, { text: "G-2", depthMm: 0.6, maxHeightMm: 6, sub: "void field" });
+    if ("patch" in two) {
+      twoLines++;
+      ok("patch" in one && two.patch.textHeightMm <= one.patch.textHeightMm + 1e-6 && two.patch.textHeightMm >= 4.4, `${t.name}: two-line label patch`);
+    }
+  }
+  console.log(`  two-line labels fit on ${twoLines} of ${tiles.length} tiles at 1:120`);
   let found = 0;
   for (const t of tiles) {
     const r = findLabelPatch(t, 120, { text: "O-4", depthMm: 0.6, maxHeightMm: 6 });
