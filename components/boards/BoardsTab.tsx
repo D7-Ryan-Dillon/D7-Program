@@ -24,6 +24,7 @@ import { BoardSettingsPanel } from "./BoardSettingsPanel";
 import { AnimatedExportPanel } from "./AnimatedExportPanel";
 import { BoardPreviewCanvas } from "./BoardPreviewCanvas";
 import { TileViewEditor } from "./TileViewEditor";
+import { TilePageDialog } from "./TilePageDialog";
 import { downloadBlob, exportBoardPage1, exportBoardPage2 } from "@/lib/boards/exportBoard";
 import { tileSortKey } from "@/lib/boards/tileLabel";
 import { DEFAULT_AXO_VIEW, defaultBoardConfig, displayName, type AnimationSettings, type AxoViewKey, type BoardConfig, type BoardSlot, type BoardSlotOverrides } from "@/lib/boards/types";
@@ -56,6 +57,7 @@ export function BoardsTab() {
   const [animBusy, setAnimBusy] = useState(false);
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [tilePageOpen, setTilePageOpen] = useState(false);
   const [exportDpi, setExportDpi] = useState(300);
   const [settingsOpen, setSettingsOpen] = useSectionOpen("boards.settings", true);
   const previewAreaRef = useRef<HTMLDivElement>(null);
@@ -251,6 +253,9 @@ export function BoardsTab() {
                 Include the tile selection when saving
               </label>
             </PaneMenu>
+            <Button size="sm" variant="outline" disabled={!tileById.size} onClick={() => setTilePageOpen(true)} title="One tile large on one side, your text on the other, and the information you tick under it">
+              Tile page
+            </Button>
             <Button size="sm" disabled={!config.slots.length && !tileById.size} onClick={() => setExportOpen(true)} title="PNG, GIF or MP4 (E); the analysis and Assignment 2 sheets read the whole project">
               <Download className="mr-1.5 h-3.5 w-3.5" />
               {animBusy ? "Exporting…" : "Export"}
@@ -299,6 +304,8 @@ export function BoardsTab() {
           </GlowPanel>
         </div>
       )}
+
+      <TilePageDialog open={tilePageOpen} onOpenChange={setTilePageOpen} config={config} dpiFromBoard={exportDpi} />
 
       <Dialog open={exportOpen} onOpenChange={(o) => !animBusy && setExportOpen(o)}>
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">

@@ -7,6 +7,8 @@ import { drawToCanvas, drawingSize, drawingStyle, type Ground, type DrawingStyle
 import { drawBlock } from "@/lib/textBlock";
 import { shortName } from "@/lib/scoring/compare";
 import { STATUS_LABEL, type MatrixKey } from "@/lib/scoring/matrix";
+import { barOf, type BarSpec } from "@/lib/scoring/bars";
+import { typologyKey } from "@/lib/scoring/compareSet";
 import type { MatrixResult, TileEvaluation } from "@/lib/scoring/matrixEval";
 import type { ParsedTile } from "@/lib/types";
 
@@ -176,4 +178,186 @@ export async function diagramSheet(tile: ParsedTile, results: MatrixResult[], re
   canvas.height = Math.round(Math.ceil(results.length / cols) * h * scale);
   results.forEach((r, i) => paintDiagram(canvas, tile, r, reading(r), ground, scale, { x: (i % cols) * w, y: Math.floor(i / cols) * h }, w, h));
   return toBlob(canvas);
+}
+
+// ---- the editable table export --------------------------------------------------------------------------------------------------------------------------
+
+/** What goes into the table image, how big it is and how it is drawn. */
+export interface TableOptions {
+  title: string;
+  showTitle: boolean;
+  widthIn: number;
+  heightIn: number;
+  dpi: number;
+  /** tiles across the top and descriptors down the side (default: tiles down the side) */
+  tilesAcross: boolean;
+  showTileNames: boolean;
+  /** the category and type under each tile's name */
+  showType: boolean;
+  /** what each cell holds */
+  content: { bar: boolean; result: boolean; status: boolean; reading: boolean; method: boolean };
+  grid: boolean;
+  /** 0.6 to 1.6: the text size against the fitted size */
+  fontScale: number;
+  transparent: boolean;
+  format: "png" | "jpeg";
+}
+
+export const defaultTableOptions = (): TableOptions => ({
+  title: "RESULTS",
+  showTitle: true,
+  widthIn: 22,
+  heightIn: 11,
+  dpi: 150,
+  tilesAcross: false,
+  showTileNames: true,
+  showType: true,
+  content: { bar: true, result: true, status: true, reading: true, method: false },
+  grid: true,
+  fontScale: 1,
+  transparent: false,
+  format: "png",
+});
+
+const segBar = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, bar: BarSpec, style: DrawingStyle) => {
+  const n = Math.max(1, bar.steps);
+  const gap = Math.max(1, h * 0.3);
+  const segW = (w - gap * (n - 1)) / n;
+  ctx.save();
+  for (let i = 0; i < n; i++) {
+    const sx = x + i * (segW + gap);
+    if (bar.index === null) {
+      ctx.strokeStyle = style.muted;
+      ctx.lineWidth = Math.max(1, h * 0.12);
+      ctx.setLineDash([h * 0.5, h * 0.4]);
+      ctx.strokeRect(sx, y, segW, h);
+    } else if (i <= bar.index) {
+      ctx.globalAlpha = bar.solid ? 1 : 0.5;
+      ctx.fillStyle = style.accent;
+      ctx.fillRect(sx, y, segW, h);
+      ctx.globalAlpha = 1;
+      if (!bar.solid) {
+        ctx.strokeStyle = style.accent;
+        ctx.lineWidth = Math.max(1, h * 0.12);
+        ctx.strokeRect(sx, y, segW, h);
+      }
+    } else {
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = style.accent;
+      ctx.fillRect(sx, y, segW, h);
+      ctx.globalAlpha = 1;
+    }
+  }
+  ctx.restore();
+};
+
+const toBlobAs = (canvas: HTMLCanvasElement, format: "png" | "jpeg") =>
+  new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't write the image."))), format === "jpeg" ? "image/jpeg" : "image/png", 0.92));
+
+/**
+ * The results table as an image you edit: which tiles and descriptors, what each cell holds (a bar, the measured result, its status, the reading, how it was measured), tiles down
+ * the side or across the top, any size and resolution, with a title, grid lines and a transparent or coloured background. The text is fitted to its cell and scaled by `fontScale`.
+ */
+export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground: Ground | DrawingStyle, o: TableOptions): Promise<Blob> {
+  const style = styleOf(ground);
+  const names = new Map(rows[0]?.ev.results.map((r) => [r.key, r.criterion.name]) ?? []);
+  const px = o.dpi;
+  const canvas = document.createElement("canvas");
+  const W = Math.max(64, Math.round(o.widthIn * px));
+  const H = Math.max(64, Math.round(o.heightIn * px));
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable");
+  if (!o.transparent || o.format === "jpeg") {
+    ctx.fillStyle = style.bg;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.textBaseline = "top";
+  const fs = Math.max(0.5, Math.min(2, o.fontScale));
+  const m = 0.4 * px;
+  let top = m;
+  if (o.showTitle && o.title.trim()) {
+    const h = drawBlock(ctx, o.title.toUpperCase(), m, top, W - 2 * m, 0.7 * px, { max: 0.42 * px * fs, min: 0.12 * px, maxLines: 1, weight: "600", family: SANS, color: style.accent });
+    top += h + 0.2 * px;
+  }
+  const rowsN = o.tilesAcross ? keys.length : rows.length;
+  const colsN = o.tilesAcross ? rows.length : keys.length;
+  if (!rowsN || !colsN) return toBlobAs(canvas, o.format);
+  const labelW = Math.min(2.4 * px, (W - 2 * m) * 0.16);
+  const headH = Math.min(0.9 * px, (H - top - m) * 0.14);
+  const cellW = (W - 2 * m - labelW) / colsN;
+  const cellH = (H - top - m - headH) / rowsN;
+  const pad = Math.min(cellW, cellH) * 0.05 + 2;
+
+  // the headings: descriptor names (or tile names), and the other axis down the side
+  const tileLabel = (r: ResultRow, x: number, y: number, w: number, h: number) => {
+    if (!o.showTileNames) return;
+    const used = drawBlock(ctx, shortName(r.tile), x, y, w, o.showType ? h * 0.7 : h, { max: 0.2 * px * fs, min: 0.08 * px, maxLines: 3, weight: "600", family: SANS, color: style.text });
+    if (o.showType) {
+      const cat = r.tile.meta?.category ?? r.tile.guessed.category ?? "";
+      const typ = (r.tile.meta?.typology ?? r.tile.guessed.typology ?? "").replace(/_/g, " ");
+      drawBlock(ctx, [cat, typ].filter(Boolean).join(" · "), x, y + used + 2, w, Math.max(4, h - used - 2), { max: 0.13 * px * fs, min: 0.07 * px, maxLines: 2, family: MONO, color: style.muted });
+    }
+  };
+  const keyLabel = (k: MatrixKey, x: number, y: number, w: number, h: number) =>
+    drawBlock(ctx, (names.get(k) ?? k).toUpperCase(), x, y, w, h, { max: 0.17 * px * fs, min: 0.07 * px, maxLines: 3, weight: "600", family: MONO, color: style.muted });
+  if (o.tilesAcross) {
+    rows.forEach((r, c) => tileLabel(r, m + labelW + c * cellW + pad, top + pad, cellW - 2 * pad, headH - pad));
+    keys.forEach((k, r) => keyLabel(k, m, top + headH + r * cellH + pad, labelW - 2 * pad, cellH - 2 * pad));
+  } else {
+    keys.forEach((k, c) => keyLabel(k, m + labelW + c * cellW + pad, top + pad, cellW - 2 * pad, headH - pad));
+    rows.forEach((r, i) => tileLabel(r, m, top + headH + i * cellH + pad, labelW - 2 * pad, cellH - 2 * pad));
+  }
+  // grid lines
+  if (o.grid) {
+    ctx.save();
+    ctx.strokeStyle = style.frame;
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = Math.max(1, px * 0.006);
+    ctx.beginPath();
+    for (let r = 0; r <= rowsN; r++) {
+      const y = top + headH + r * cellH;
+      ctx.moveTo(m, y);
+      ctx.lineTo(W - m, y);
+    }
+    ctx.moveTo(m + labelW, top);
+    ctx.lineTo(m + labelW, top + headH + rowsN * cellH);
+    ctx.stroke();
+    ctx.restore();
+  }
+  // the cells
+  const c = o.content;
+  rows.forEach((row, ti) => {
+    keys.forEach((k, ki) => {
+      const res = row.ev.results.find((x) => x.key === k);
+      if (!res) return;
+      const col = o.tilesAcross ? ti : ki;
+      const rw = o.tilesAcross ? ki : ti;
+      const x = m + labelW + col * cellW + pad;
+      const y = top + headH + rw * cellH + pad;
+      const w = cellW - 2 * pad;
+      const h = cellH - 2 * pad;
+      let yy = y;
+      if (c.bar) {
+        const bh = Math.min(0.13 * px, h * 0.12);
+        segBar(ctx, x, yy + 1, Math.min(w, 1.6 * px), bh, barOf(res, typologyKey(row.tile)), style);
+        yy += bh + Math.max(3, bh * 0.5);
+      }
+      const parts: { weight: number; draw: (yt: number, ht: number) => void }[] = [];
+      if (c.result) parts.push({ weight: 3, draw: (yt, ht) => drawBlock(ctx, res.measure.headline, x, yt, w, ht, { max: 0.17 * px * fs, min: 0.07 * px, maxLines: 4, weight: "600", family: MONO, color: style.text }) });
+      if (c.status) parts.push({ weight: 1, draw: (yt, ht) => drawBlock(ctx, STATUS_LABEL[res.measure.status].toUpperCase(), x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 1, family: MONO, color: res.measure.status === "measured" ? style.accent : style.muted }) });
+      if (c.reading) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, row.reading(res), x, yt, w, ht, { max: 0.14 * px * fs, min: 0.06 * px, maxLines: 12, family: SANS, color: style.muted }) });
+      if (c.method) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, res.measure.method || "", x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 12, family: SANS, color: style.muted }) });
+      const left = Math.max(4, y + h - yy);
+      const total = parts.reduce((a, p) => a + p.weight, 0) || 1;
+      let yt = yy;
+      for (const p of parts) {
+        const ht = (left * p.weight) / total;
+        p.draw(yt, ht - 2);
+        yt += ht;
+      }
+    });
+  });
+  return toBlobAs(canvas, o.format);
 }
