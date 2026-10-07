@@ -186,7 +186,7 @@ export function TilePageDialog({ open, onOpenChange, config, dpiFromBoard }: { o
                 />
                 <div className="space-y-0.5 text-[10px] text-muted-foreground">
                   Font
-                  <FontField value={st.font ?? ""} onChange={(font) => patch({ font })} />
+                  <FontField value={st.font ?? ""} defaultFont={config.fontFamily} onChange={(font) => patch({ font })} />
                 </div>
                 <label className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                   Text box may take {Math.round(st.textShare * 100)}% of the height

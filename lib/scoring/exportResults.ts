@@ -264,6 +264,8 @@ const toBlobAs = (canvas: HTMLCanvasElement, format: "png" | "jpeg") =>
 export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground: Ground | DrawingStyle, o: TableOptions): Promise<Blob> {
   const style = styleOf(ground);
   const sans = o.font ? `"${o.font}", sans-serif` : SANS;
+  // a chosen font (the Boards font by default) may have no superscripts: ft² and ft³ are written out
+  const clean = (s: string) => (o.font ? s.replace(/ft²/g, "sq ft").replace(/ft³/g, "cu ft") : s);
   const mono = o.font ? `"${o.font}", sans-serif` : MONO;
   const names = new Map(rows[0]?.ev.results.map((r) => [r.key, r.criterion.name]) ?? []);
   const px = o.dpi;
@@ -350,10 +352,10 @@ export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground:
         yy += bh + Math.max(3, bh * 0.5);
       }
       const parts: { weight: number; draw: (yt: number, ht: number) => void }[] = [];
-      if (c.result) parts.push({ weight: 3, draw: (yt, ht) => drawBlock(ctx, res.measure.headline, x, yt, w, ht, { max: 0.17 * px * fs, min: 0.07 * px, maxLines: 4, weight: "600", family: mono, color: style.text }) });
+      if (c.result) parts.push({ weight: 3, draw: (yt, ht) => drawBlock(ctx, clean(res.measure.headline), x, yt, w, ht, { max: 0.17 * px * fs, min: 0.07 * px, maxLines: 4, weight: "600", family: mono, color: style.text }) });
       if (c.status) parts.push({ weight: 1, draw: (yt, ht) => drawBlock(ctx, STATUS_LABEL[res.measure.status].toUpperCase(), x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 1, family: mono, color: res.measure.status === "measured" ? style.accent : style.muted }) });
-      if (c.reading) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, row.reading(res), x, yt, w, ht, { max: 0.14 * px * fs, min: 0.06 * px, maxLines: 12, family: sans, color: style.muted }) });
-      if (c.method) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, res.measure.method || "", x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 12, family: sans, color: style.muted }) });
+      if (c.reading) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, clean(row.reading(res)), x, yt, w, ht, { max: 0.14 * px * fs, min: 0.06 * px, maxLines: 12, family: sans, color: style.muted }) });
+      if (c.method) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, clean(res.measure.method || ""), x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 12, family: sans, color: style.muted }) });
       const left = Math.max(4, y + h - yy);
       const total = parts.reduce((a, p) => a + p.weight, 0) || 1;
       let yt = yy;

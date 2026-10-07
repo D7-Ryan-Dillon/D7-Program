@@ -18,6 +18,7 @@ import { MATRIX, type MatrixKey } from "@/lib/scoring/matrix";
 import { defaultTableOptions, descriptorDiagram, diagramSheet, resultsBoard, resultsCsv, type ResultRow, type TableOptions } from "@/lib/scoring/exportResults";
 import { useProjectUi } from "@/lib/project-store";
 import { FontField } from "@/components/boards/FontField";
+import { defaultBoardConfig } from "@/lib/boards/types";
 import { interpretationFor } from "@/lib/scoring/profile";
 import { useEvaluation } from "@/lib/useEvaluation";
 import type { ParsedTile } from "@/lib/types";
@@ -30,6 +31,8 @@ interface TableUi {
   /** the descriptors in the table (null: the ones this project carries forward) */
   keys: MatrixKey[] | null;
 }
+/** Only the font of the Boards tab is read from the boards settings: every export starts in it. */
+const defaultBoardsFont = () => ({ config: { fontFamily: defaultBoardConfig().fontFamily } });
 const defaultTableUi = (): TableUi => ({ opts: defaultTableOptions(), tileIds: null, keys: null });
 const numInput = "h-7 w-16 rounded-md border border-input bg-transparent px-1.5 text-right font-mono text-[11px] text-foreground";
 
@@ -43,6 +46,8 @@ export function ResultsPanel({ tiles, keys, activeTile }: { tiles: ParsedTile[];
   const [which, setWhich] = useState<string>("all");
   const [imgScale, setImgScale] = useState(2);
   const [tui, setTui] = useProjectUi<TableUi>("resultsTable", defaultTableUi);
+  const [boards] = useProjectUi<{ config: { fontFamily: string } }>("boards", defaultBoardsFont);
+  const boardFont = boards.config.fontFamily;
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [palette] = usePalette();
   const [custom, setCustom] = useState(false);
@@ -84,13 +89,13 @@ export function ResultsPanel({ tiles, keys, activeTile }: { tiles: ParsedTile[];
 
   const g = custom ? paletteStyle(palette) : ground;
   // the live preview of the table image, drawn a moment after the last change
-  const previewKey = JSON.stringify([opts, chosenKeys, chosenRows.map((r) => r.tile.id), ground, custom, palette]);
+  const previewKey = JSON.stringify([opts, boardFont, chosenKeys, chosenRows.map((r) => r.tile.id), ground, custom, palette]);
   useEffect(() => {
     if (!chosenRows.length || !chosenKeys.length) return;
     let alive = true;
     const t = setTimeout(async () => {
       try {
-        const blob = await resultsBoard(chosenRows, chosenKeys, g, { ...opts, dpi: Math.max(20, Math.min(70, 1000 / opts.widthIn)), format: "png" });
+        const blob = await resultsBoard(chosenRows, chosenKeys, g, { ...opts, font: opts.font || boardFont, dpi: Math.max(20, Math.min(70, 1000 / opts.widthIn)), format: "png" });
         if (!alive) return;
         const url = URL.createObjectURL(blob);
         setPreviewUrl((old) => {
@@ -159,7 +164,7 @@ export function ResultsPanel({ tiles, keys, activeTile }: { tiles: ParsedTile[];
             <Download className="mr-1.5 h-3.5 w-3.5" />
             Table (CSV)
           </Button>
-          <Button variant="outline" size="sm" disabled={busy || !chosenRows.length || !chosenKeys.length} onClick={() => void run(async () => downloadBlob(`results_table.${opts.format === "jpeg" ? "jpg" : "png"}`, await resultsBoard(chosenRows, chosenKeys, g, opts)))}>
+          <Button variant="outline" size="sm" disabled={busy || !chosenRows.length || !chosenKeys.length} onClick={() => void run(async () => downloadBlob(`results_table.${opts.format === "jpeg" ? "jpg" : "png"}`, await resultsBoard(chosenRows, chosenKeys, g, { ...opts, font: opts.font || boardFont })))}>
             <Download className="mr-1.5 h-3.5 w-3.5" />
             Table (image)
           </Button>
@@ -274,7 +279,7 @@ export function ResultsPanel({ tiles, keys, activeTile }: { tiles: ParsedTile[];
               Text size
               <input type="range" min={60} max={160} step={5} value={Math.round(opts.fontScale * 100)} onChange={(e) => patchOpts({ fontScale: Number(e.target.value) / 100 })} className="w-24 accent-[var(--magenta)]" />
             </label>
-            <div className="w-44"><FontField value={opts.font ?? ""} onChange={(font) => patchOpts({ font })} /></div>
+            <div className="w-64"><FontField value={opts.font ?? ""} defaultFont={boardFont} onChange={(font) => patchOpts({ font })} /></div>
             <Segmented value={opts.format} options={[{ value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }]} onChange={(format) => patchOpts({ format })} />
           </div>
           <div className="flex min-h-24 items-center justify-center overflow-auto rounded-md border-hair bg-black/30 p-2">
