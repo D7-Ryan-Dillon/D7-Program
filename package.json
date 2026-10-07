@@ -14,6 +14,7 @@
     "check:v4": "tsx scripts/check-v4.ts",
     "check:v5": "tsx scripts/check-v5.ts",
     "check:v6": "tsx scripts/check-v6.ts",
+    "check:v7": "tsx scripts/check-v7.ts",
     "boxiness": "tsx scripts/v5-boxiness.ts"
   },
   "dependencies": {

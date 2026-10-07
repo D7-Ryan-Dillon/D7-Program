@@ -2,7 +2,7 @@
 
 The brief is `Assignemnt_02_ProtoArchitecturalSpaces.pdf` (due 10.01.2026 as printed in the PDF). One geometrical system for all fifteen tiles; every tile repeats, mirrors or shifts, rotates in 90 degree steps and **interlocks as complementary geometry** (not six flat cube faces butted together; the 20 ft lattice is "not a sealed cube"); the test is one gathering, one office and one lobby at 2, 4 and 8 copies by repeat, mirror and shift. The Grasshopper / engine script is frozen: everything below is the app or the recipes.
 
-## The tile set to hand in
+## The tile set to hand in (updated: V7 is the set built on the first set; V6 below is the earlier cubic rework)
 
 **V6** (`engine/tiles/v6`, `docs/TILE_SET_V6.md`): fifteen cubic tiles plus a matching cubic backup (`v6c`) of the five whose tops are notched. If the stepped tiles are accepted, use them; if not, the backups are the same tiles with the notch left out. Import the `_analysis` zips (`engine/tiles/v6/package/analysis/`, local) into a **new project** in the app (the V6 project loaded this way is `v6tiles`).
 
