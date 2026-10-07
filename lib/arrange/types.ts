@@ -164,7 +164,7 @@ export const PRIORITY_LABELS: { key: keyof Priorities; label: string; hint: stri
   { key: "program", label: "Program fit", hint: "follow the adjacency rules (preferred beside preferred)" },
 ];
 
-export type ShapeKind = "compact" | "spineV" | "spineH" | "courtyard" | "stepped" | "village" | "bridge" | "free";
+export type ShapeKind = "compact" | "spineV" | "spineH" | "courtyard" | "stepped" | "bridge" | "free";
 
 export const SHAPES: { key: ShapeKind; label: string; hint: string }[] = [
   { key: "compact", label: "Compact", hint: "a tight mass of pieces sharing walls, stepping up and down in 10 ft" },
@@ -172,7 +172,6 @@ export const SHAPES: { key: ShapeKind; label: string; hint: string }[] = [
   { key: "spineH", label: "Long bar", hint: "a long bar of pieces along one direction" },
   { key: "courtyard", label: "Courtyard", hint: "a ring of pieces round an open middle" },
   { key: "stepped", label: "Terraced", hint: "terraces rising along a direction, a few pieces to each level" },
-  { key: "village", label: "Village", hint: "several small towers standing on a shared base" },
   { key: "bridge", label: "Bridge", hint: "two towers and a raised span between them" },
   { key: "free", label: "Free-form", hint: "no overall shape, just good joints" },
 ];
@@ -191,8 +190,8 @@ export interface GenSettings {
   branching?: boolean;
 }
 
-/** A kind of building saved by an earlier version that no longer exists reads as the nearest one that does (Cascade as Terraced, Wide as a Long bar). */
-export const normalizeShape = (s: string | undefined): ShapeKind => (s === "cascade" ? "stepped" : s === "slab" ? "spineH" : SHAPES.some((k) => k.key === s) ? (s as ShapeKind) : "compact");
+/** A kind of building saved by an earlier version that no longer exists reads as the nearest one that does (Cascade as Terraced, Wide as a Long bar, Village as Compact). */
+export const normalizeShape = (s: string | undefined): ShapeKind => (s === "cascade" ? "stepped" : s === "slab" ? "spineH" : s === "village" ? "compact" : SHAPES.some((k) => k.key === s) ? (s as ShapeKind) : "compact");
 
 export const defaultGen = (): GenSettings => ({ amount: 8, seed: 1, shape: "compact", direction: 0, minScore: 40, branching: false });
 

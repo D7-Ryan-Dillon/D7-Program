@@ -447,6 +447,7 @@ function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: nu
   });
   const reach = planReach(lat, slots, preset, known, tol, minScore);
   if (!reach) return { slots, states: preset.slice(), depth: firstFree, ok: false, impossible: true };
+  const stateById = new Map(lat.states.map((x) => [x.id, x]));
   const allowed: Set<string>[] = reach.map((m) => new Set([...m.values()].map((v) => v.s.id)));
 
   let nodes = 0;
@@ -544,6 +545,23 @@ function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: nu
           break;
         }
       }
+      // and every other cell that touches this one and is still empty must have some tile that can stand there without a collision or a doorway-high near miss
+      if (!starved)
+        for (const j of nb[i]) {
+          if (j <= i || states[j] || slots[j].fixed || children[i].includes(j)) continue;
+          let fits = false;
+          for (const id of allowed[j]) {
+            const info = pairInfo(s, stateById.get(id)!, offset(slot, slots[j]), tol);
+            if (info.free && info.kind !== "connector") {
+              fits = true;
+              break;
+            }
+          }
+          if (!fits) {
+            starved = true;
+            break;
+          }
+        }
       if (starved) {
         blocked.add("a neighbour that no tile can meet at that height");
         tally(counts, s.tile, -1);
@@ -827,13 +845,13 @@ export function* generateSteps(ctx: GenContext, base: ArrangementDoc, opts: GenO
       bestPartial = attempt;
       yield { phase: "checking", attempt: attempts, placed: slots.length, total: slots.length, nodes: 0, message: "Checking the whole building" };
       const built = finish(ctx, base, attempt, attempts + 1);
-      if (built) return { ...built, notes: [...notes, ...(level ? ["It is a simpler building than asked for (not as tall): the tiles could not make the first plan work within the floor rules."] : []), ...built.notes] };
+      if (built) return { ...built, notes: [...notes, ...(level ? [ctx.priorities.tall > 0 ? "It is a simpler building than asked for (not as tall): the tiles could not make the first plan work within the floor rules." : "The first plan could not be built within the floor rules, so the joints are held to a lower score than the Min joint setting."] : []), ...built.notes] };
       blocked.add("the whole building did not pass the final check");
       bestPartial = { ...attempt, ok: false, depth: attempt.depth - 1 };
     }
     triesAtLevel++;
     // a plan that has some chance in it (a mass, a free form, wings) is tried with other seeds before it is given up on; one that is always the same is not
-    const chancy = settings.shape === "compact" || settings.shape === "free" || settings.shape === "village" || settings.shape === "bridge" || !!settings.branching;
+    const chancy = settings.shape === "compact" || settings.shape === "free" || settings.shape === "bridge" || !!settings.branching;
     const tries = fresh ? (chancy ? CHANCE_TRIES : TRIES_PER_LEVEL) : GROW_TRIES;
     if ((fresh && attempt.impossible && !chancy) || triesAtLevel >= tries) {
       triesAtLevel = 0;
