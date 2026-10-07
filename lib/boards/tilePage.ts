@@ -55,6 +55,8 @@ export interface TilePageSettings {
   infoScale: number;
   /** the share of the text side the text box may take when there is info under it */
   textShare: number;
+  /** a font for all the text (empty: the board's font) */
+  font: string;
 }
 
 export const defaultTilePage = (): TilePageSettings => ({
@@ -73,6 +75,7 @@ export const defaultTilePage = (): TilePageSettings => ({
   columns: 1,
   infoScale: 1,
   textShare: 0.4,
+  font: "",
 });
 
 export interface TilePageInput {
@@ -328,7 +331,8 @@ export async function drawTilePage(inp: TilePageInput): Promise<HTMLCanvasElemen
   const c = document.createElement("canvas");
   c.width = Math.round(st.widthIn * inp.dpi);
   c.height = Math.round(st.heightIn * inp.dpi);
-  const family = inp.fontFamily ? `"${inp.fontFamily}", ${BOARD_FONT}` : BOARD_FONT;
+  const fam = st.font || inp.fontFamily;
+  const family = fam ? `"${fam}", ${BOARD_FONT}` : BOARD_FONT;
   const pg = new Page(c, inp.dpi, palette, family);
   const W = st.widthIn;
   const H = st.heightIn;

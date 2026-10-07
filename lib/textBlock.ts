@@ -65,8 +65,11 @@ export function fitBlock(ctx: CanvasRenderingContext2D, text: string, w: number,
   const maxLines = o.maxLines ?? 1;
   const lh = o.lineHeight ?? 1.22;
   let last: Block | null = null;
+  const words = text.split(/s+/).filter(Boolean);
   for (let size = o.max; size >= min; size -= 1) {
     ctx.font = fontOf(size, o);
+    // a word is never split across two lines while a smaller size would keep it whole: the size comes down until the longest word fits the width
+    if (size > min && words.some((word) => ctx.measureText(word).width > w)) continue;
     const lines = wrap(ctx, text, w);
     last = { size, lines, lineHeight: size * lh, height: lines.length * size * lh };
     if (lines.length <= maxLines && last.height <= h) return last;
@@ -74,11 +77,14 @@ export function fitBlock(ctx: CanvasRenderingContext2D, text: string, w: number,
   // nothing fits at the smallest size: keep what fits and end the last line with an ellipsis
   const size = min;
   ctx.font = fontOf(size, o);
-  const lines = wrap(ctx, text, w).slice(0, maxLines);
+  const all = wrap(ctx, text, w);
+  // only as many lines as the box is tall (at least one), so the text never runs into what is below it
+  const room = Math.max(1, Math.min(maxLines, Math.floor(h / (size * lh))));
+  const lines = all.slice(0, room);
   const lastLine = lines[lines.length - 1] ?? "";
   let cut = lastLine;
   while (cut.length > 1 && ctx.measureText(cut + "…").width > w) cut = cut.slice(0, -1);
-  if (cut !== lastLine || wrap(ctx, text, w).length > maxLines) lines[lines.length - 1] = cut + "…";
+  if (cut !== lastLine || all.length > room) lines[lines.length - 1] = cut + "…";
   return { size, lines, lineHeight: size * lh, height: lines.length * size * lh };
 }
 

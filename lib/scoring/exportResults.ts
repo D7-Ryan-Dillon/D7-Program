@@ -201,6 +201,8 @@ export interface TableOptions {
   fontScale: number;
   transparent: boolean;
   format: "png" | "jpeg";
+  /** a font for all the text (empty: the default mix of a sans face for names and readings and a monospaced one for numbers) */
+  font: string;
 }
 
 export const defaultTableOptions = (): TableOptions => ({
@@ -217,6 +219,7 @@ export const defaultTableOptions = (): TableOptions => ({
   fontScale: 1,
   transparent: false,
   format: "png",
+  font: "",
 });
 
 const segBar = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, bar: BarSpec, style: DrawingStyle) => {
@@ -260,6 +263,8 @@ const toBlobAs = (canvas: HTMLCanvasElement, format: "png" | "jpeg") =>
  */
 export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground: Ground | DrawingStyle, o: TableOptions): Promise<Blob> {
   const style = styleOf(ground);
+  const sans = o.font ? `"${o.font}", sans-serif` : SANS;
+  const mono = o.font ? `"${o.font}", sans-serif` : MONO;
   const names = new Map(rows[0]?.ev.results.map((r) => [r.key, r.criterion.name]) ?? []);
   const px = o.dpi;
   const canvas = document.createElement("canvas");
@@ -278,7 +283,7 @@ export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground:
   const m = 0.4 * px;
   let top = m;
   if (o.showTitle && o.title.trim()) {
-    const h = drawBlock(ctx, o.title.toUpperCase(), m, top, W - 2 * m, 0.7 * px, { max: 0.42 * px * fs, min: 0.12 * px, maxLines: 1, weight: "600", family: SANS, color: style.accent });
+    const h = drawBlock(ctx, o.title.toUpperCase(), m, top, W - 2 * m, 0.7 * px, { max: 0.42 * px * fs, min: 0.12 * px, maxLines: 1, weight: "600", family: sans, color: style.accent });
     top += h + 0.2 * px;
   }
   const rowsN = o.tilesAcross ? keys.length : rows.length;
@@ -293,15 +298,15 @@ export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground:
   // the headings: descriptor names (or tile names), and the other axis down the side
   const tileLabel = (r: ResultRow, x: number, y: number, w: number, h: number) => {
     if (!o.showTileNames) return;
-    const used = drawBlock(ctx, shortName(r.tile), x, y, w, o.showType ? h * 0.7 : h, { max: 0.2 * px * fs, min: 0.08 * px, maxLines: 3, weight: "600", family: SANS, color: style.text });
+    const used = drawBlock(ctx, shortName(r.tile), x, y, w, o.showType ? h * 0.7 : h, { max: 0.2 * px * fs, min: 0.08 * px, maxLines: 3, weight: "600", family: sans, color: style.text });
     if (o.showType) {
       const cat = r.tile.meta?.category ?? r.tile.guessed.category ?? "";
       const typ = (r.tile.meta?.typology ?? r.tile.guessed.typology ?? "").replace(/_/g, " ");
-      drawBlock(ctx, [cat, typ].filter(Boolean).join(" · "), x, y + used + 2, w, Math.max(4, h - used - 2), { max: 0.13 * px * fs, min: 0.07 * px, maxLines: 2, family: MONO, color: style.muted });
+      drawBlock(ctx, [cat, typ].filter(Boolean).join(" · "), x, y + used + 2, w, Math.max(4, h - used - 2), { max: 0.13 * px * fs, min: 0.07 * px, maxLines: 2, family: mono, color: style.muted });
     }
   };
   const keyLabel = (k: MatrixKey, x: number, y: number, w: number, h: number) =>
-    drawBlock(ctx, (names.get(k) ?? k).toUpperCase(), x, y, w, h, { max: 0.17 * px * fs, min: 0.07 * px, maxLines: 3, weight: "600", family: MONO, color: style.muted });
+    drawBlock(ctx, (names.get(k) ?? k).toUpperCase(), x, y, w, h, { max: 0.17 * px * fs, min: 0.07 * px, maxLines: 3, weight: "600", family: mono, color: style.muted });
   if (o.tilesAcross) {
     rows.forEach((r, c) => tileLabel(r, m + labelW + c * cellW + pad, top + pad, cellW - 2 * pad, headH - pad));
     keys.forEach((k, r) => keyLabel(k, m, top + headH + r * cellH + pad, labelW - 2 * pad, cellH - 2 * pad));
@@ -345,10 +350,10 @@ export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground:
         yy += bh + Math.max(3, bh * 0.5);
       }
       const parts: { weight: number; draw: (yt: number, ht: number) => void }[] = [];
-      if (c.result) parts.push({ weight: 3, draw: (yt, ht) => drawBlock(ctx, res.measure.headline, x, yt, w, ht, { max: 0.17 * px * fs, min: 0.07 * px, maxLines: 4, weight: "600", family: MONO, color: style.text }) });
-      if (c.status) parts.push({ weight: 1, draw: (yt, ht) => drawBlock(ctx, STATUS_LABEL[res.measure.status].toUpperCase(), x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 1, family: MONO, color: res.measure.status === "measured" ? style.accent : style.muted }) });
-      if (c.reading) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, row.reading(res), x, yt, w, ht, { max: 0.14 * px * fs, min: 0.06 * px, maxLines: 12, family: SANS, color: style.muted }) });
-      if (c.method) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, res.measure.method || "", x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 12, family: SANS, color: style.muted }) });
+      if (c.result) parts.push({ weight: 3, draw: (yt, ht) => drawBlock(ctx, res.measure.headline, x, yt, w, ht, { max: 0.17 * px * fs, min: 0.07 * px, maxLines: 4, weight: "600", family: mono, color: style.text }) });
+      if (c.status) parts.push({ weight: 1, draw: (yt, ht) => drawBlock(ctx, STATUS_LABEL[res.measure.status].toUpperCase(), x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 1, family: mono, color: res.measure.status === "measured" ? style.accent : style.muted }) });
+      if (c.reading) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, row.reading(res), x, yt, w, ht, { max: 0.14 * px * fs, min: 0.06 * px, maxLines: 12, family: sans, color: style.muted }) });
+      if (c.method) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, res.measure.method || "", x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 12, family: sans, color: style.muted }) });
       const left = Math.max(4, y + h - yy);
       const total = parts.reduce((a, p) => a + p.weight, 0) || 1;
       let yt = yy;

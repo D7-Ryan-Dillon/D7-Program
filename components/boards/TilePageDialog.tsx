@@ -14,6 +14,7 @@ import { AXO_VIEWS } from "@/lib/faceViews";
 import { INFO_ITEMS, defaultTilePage, drawTilePage, exportTilePage, type TilePageInput, type TilePageSettings } from "@/lib/boards/tilePage";
 import type { BoardConfig } from "@/lib/boards/types";
 import { useEvaluation } from "@/lib/useEvaluation";
+import { FontField } from "./FontField";
 
 const numField = "h-7 w-16 rounded-md border border-input bg-transparent px-1.5 text-right font-mono text-[11px] text-foreground";
 
@@ -183,6 +184,10 @@ export function TilePageDialog({ open, onOpenChange, config, dpiFromBoard }: { o
                   className="w-full resize-y rounded-md border border-input bg-transparent px-2 py-1.5 text-[11px] leading-relaxed text-foreground outline-none focus-visible:border-ring"
                   aria-label="Text box"
                 />
+                <div className="space-y-0.5 text-[10px] text-muted-foreground">
+                  Font
+                  <FontField value={st.font ?? ""} onChange={(font) => patch({ font })} />
+                </div>
                 <label className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                   Text box may take {Math.round(st.textShare * 100)}% of the height
                   <input type="range" min={20} max={90} step={5} value={Math.round(st.textShare * 100)} onChange={(e) => patch({ textShare: Number(e.target.value) / 100 })} className="w-28 accent-[var(--magenta)]" />

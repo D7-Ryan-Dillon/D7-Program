@@ -17,6 +17,7 @@ import { shortName } from "@/lib/scoring/compare";
 import { MATRIX, type MatrixKey } from "@/lib/scoring/matrix";
 import { defaultTableOptions, descriptorDiagram, diagramSheet, resultsBoard, resultsCsv, type ResultRow, type TableOptions } from "@/lib/scoring/exportResults";
 import { useProjectUi } from "@/lib/project-store";
+import { FontField } from "@/components/boards/FontField";
 import { interpretationFor } from "@/lib/scoring/profile";
 import { useEvaluation } from "@/lib/useEvaluation";
 import type { ParsedTile } from "@/lib/types";
@@ -273,6 +274,7 @@ export function ResultsPanel({ tiles, keys, activeTile }: { tiles: ParsedTile[];
               Text size
               <input type="range" min={60} max={160} step={5} value={Math.round(opts.fontScale * 100)} onChange={(e) => patchOpts({ fontScale: Number(e.target.value) / 100 })} className="w-24 accent-[var(--magenta)]" />
             </label>
+            <div className="w-44"><FontField value={opts.font ?? ""} onChange={(font) => patchOpts({ font })} /></div>
             <Segmented value={opts.format} options={[{ value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }]} onChange={(format) => patchOpts({ format })} />
           </div>
           <div className="flex min-h-24 items-center justify-center overflow-auto rounded-md border-hair bg-black/30 p-2">
