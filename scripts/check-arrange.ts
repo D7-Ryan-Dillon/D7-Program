@@ -9,7 +9,7 @@ import { join } from "node:path";
 import type { ParsedTile } from "../lib/types";
 import type { SpacesData } from "../lib/tiles/types";
 import { analyzeLayout, entrancePoint, orphansIfRemoved } from "../lib/arrange/layout";
-import { planDrone, reversalPoints, reversalsIn } from "../lib/arrange/drone";
+import { planDrone, reversalPoints, reversalsIn, revisitShare } from "../lib/arrange/drone";
 import { cutPocket, findLabelPatch, labelFor, labelSoup, placeBitmap, subFor } from "../lib/exporters/printLabels";
 import { openEdges, volumeMm3 } from "../lib/exporters/stl";
 import { fineSoup } from "../lib/exporters/printMesh";
@@ -208,6 +208,7 @@ for (const s of SHAPES) {
       console.log(`  drone ${key}: no tour (too tight)`);
       continue;
     }
+    ok(revisitShare(plan.path) < 0.08, `drone ${key}: ${(revisitShare(plan.path) * 100).toFixed(0)}% of the flight goes over ground already flown`);
     const [nx, ny, nz] = comp.grid;
     const foamAt = (p: [number, number, number]) => {
       const x = Math.floor((p[0] - comp.origin[0]) / comp.cell);

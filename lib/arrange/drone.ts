@@ -461,10 +461,115 @@ export interface DroneOptions {
   approach?: boolean;
   /** an edited tour: exactly these spaces, in this order (nothing added, nothing dropped) */
   only?: string[];
+  /** Which order the spaces are visited in. "shortest": the order that makes the shortest flight, so no stretch is flown twice; "sequence": the order of the route from the entrance; unset: both are planned and the flight with the least ground flown twice and the least length is kept. */
+  route?: "shortest" | "sequence";
 }
 
-/** Plans the tour. Null when there is nothing to fly through. */
+/** Length of a chain of cells, ft. */
+const chainLength = (g: Grid, cells: [number, number, number][]) => {
+  let L = 0;
+  for (let q = 1; q < cells.length; q++) L += Math.hypot(cells[q][0] - cells[q - 1][0], cells[q][1] - cells[q - 1][1], cells[q][2] - cells[q - 1][2]) * g.cell;
+  return L;
+};
+
+/**
+ * The order in which to visit the stops so that the flight is as short as it can be made, and so flies over no ground twice: a shortest path through them all, starting
+ * where the flight is (the way in). The flying distance between near stops is worked out by the same path search the flight uses; between far ones it is the straight
+ * distance, stretched. The first order is by nearest neighbour, then improved by reversing stretches of it for as long as that shortens the whole.
+ */
+function shortestOrder(g: Grid, r: number, from: [number, number, number] | null, stops: { id: string | null; cell: [number, number, number] }[]): number[] {
+  const n = stops.length;
+  if (n < 3) return stops.map((_, i) => i);
+  const idle = new Float32Array(g.nx * g.ny * g.nz);
+  const eu = (a: [number, number, number], b: [number, number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * g.cell;
+  const D: number[][] = stops.map(() => new Array(n).fill(Infinity));
+  const near = 7;
+  for (let i = 0; i < n; i++) {
+    D[i][i] = 0;
+    const byDist = stops.map((_, j) => j).filter((j) => j !== i).sort((a, b) => eu(stops[i].cell, stops[a].cell) - eu(stops[i].cell, stops[b].cell));
+    for (const j of byDist) {
+      if (Number.isFinite(D[i][j]) && D[i][j] !== Infinity) continue;
+      const close = byDist.indexOf(j) < near;
+      let d = eu(stops[i].cell, stops[j].cell) * 2.2;
+      if (close) {
+        const leg = search(g, stops[i].cell, stops[j].cell, r, idle, OUTSIDE_COST);
+        d = leg ? chainLength(g, leg) : Infinity;
+      }
+      D[i][j] = Math.min(D[i][j], d);
+      D[j][i] = Math.min(D[j][i], d);
+    }
+  }
+  const startD = (j: number) => (from ? eu(from, stops[j].cell) : 0);
+  // nearest neighbour from the way in
+  const left = new Set(stops.map((_, i) => i));
+  const order: number[] = [];
+  let cur = -1;
+  while (left.size) {
+    let bestJ = -1;
+    let bestD = Infinity;
+    for (const j of left) {
+      const d = cur < 0 ? startD(j) : D[cur][j];
+      if (d < bestD) {
+        bestD = d;
+        bestJ = j;
+      }
+    }
+    if (bestJ < 0) bestJ = [...left][0];
+    order.push(bestJ);
+    left.delete(bestJ);
+    cur = bestJ;
+  }
+  const total = (o: number[]) => {
+    let s = o.length ? startD(o[0]) : 0;
+    for (let i = 1; i < o.length; i++) s += Math.min(D[o[i - 1]][o[i]], 1e6);
+    return s;
+  };
+  // 2-opt on an open path: reverse a stretch whenever that makes the path shorter
+  let best = total(order);
+  for (let pass = 0; pass < 40; pass++) {
+    let improved = false;
+    for (let i = 0; i < n - 1; i++)
+      for (let k = i + 1; k < n; k++) {
+        const cand = [...order.slice(0, i), ...order.slice(i, k + 1).reverse(), ...order.slice(k + 1)];
+        const c = total(cand);
+        if (c < best - 1e-6) {
+          order.splice(0, n, ...cand);
+          best = c;
+          improved = true;
+        }
+      }
+    if (!improved) break;
+  }
+  return order;
+}
+
+/** The share of a flight that goes over ground it has already flown: points more than `gap` ft of flight after the first visit and within `near` ft of it. */
+export function revisitShare(path: Vec3[], near = 2.5, gap = 25): number {
+  const pts = resample(path, 1);
+  if (pts.length < 2) return 0;
+  let again = 0;
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = 0; j < i - gap; j++) {
+      if (len3(pts[i], pts[j]) < near) {
+        again++;
+        break;
+      }
+    }
+  }
+  return again / pts.length;
+}
+
+/** Plans the tour. Null when there is nothing to fly through. Unless an order is asked for, the flight is planned in the shortest order and in the order of the route, and the better one (no ground flown twice, then the shorter) is kept. */
 export function planDrone(comp: Composite, opts: DroneOptions): DronePlan | null {
+  if (opts.only || opts.route) return planDroneIn(comp, opts);
+  const a = planDroneIn(comp, { ...opts, route: "shortest" });
+  const b = planDroneIn(comp, { ...opts, route: "sequence" });
+  if (!a || !b) return a ?? b;
+  const cost = (p: DronePlan) => p.lengthFt * (1 + 4 * revisitShare(p.path)) + (p.skipped.length ? 1000 * p.skipped.length : 0);
+  return cost(a) <= cost(b) ? a : b;
+}
+
+function planDroneIn(comp: Composite, opts: DroneOptions): DronePlan | null {
   const g = buildGrid(comp);
   const fov = opts.fov ?? 70;
 
@@ -593,6 +698,12 @@ export function planDrone(comp: Composite, opts: DroneOptions): DronePlan | null
       if (g.dist[idx(g, ...sp.main)] < r) skipped.push(id);
     }
     if (stops.length < 2) continue;
+    if (!opts.only && opts.route !== "sequence") {
+      const fixed = stops.filter((s) => s.id === null).length;
+      const rooms = stops.slice(fixed);
+      const ord = shortestOrder(g, r, fixed ? stops[fixed - 1].cell : null, rooms);
+      stops.splice(fixed, rooms.length, ...ord.map((i) => rooms[i]));
+    }
 
     // join the stops; a stop that cannot be reached is left out
     const cells: [number, number, number][] = [];
@@ -637,9 +748,18 @@ export function planDrone(comp: Composite, opts: DroneOptions): DronePlan | null
       }
     }
     const outShare = after ? out / after : 0;
+    // and how much of it is flown a second time
+    const seen = new Set<number>();
+    let again = 0;
+    cells.forEach(([x, y, z], q) => {
+      const key = idx(g, x, y, z);
+      if (seen.has(key) && q > 0) again++;
+      seen.add(key);
+    });
+    const revisit = again / cells.length;
     const frac = visited.length / Math.max(1, ordered.length);
     candidates.push({
-      score: frac - 1.6 * outShare + 0.04 * r,
+      score: frac - 1.6 * outShare + 0.04 * r - 1.5 * revisit,
       build: () => {
         // the way out: from the last space to the nearest opening to the outside and on to the edge of the free air
         let exitCells: [number, number, number][] = [];
