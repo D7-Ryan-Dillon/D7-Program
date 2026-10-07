@@ -306,7 +306,7 @@ Clicking a tile opens `TileViewEditor.tsx` (live R3F view, 8 locked axo
 corners or free perspective, clipping, colour/opacity, the three line
 settings; per-slot overrides shadow the board-wide masters). Exports two PNGs: the board itself, and a second
 page listing each tile's scored descriptors (the carried criteria) with an
-optional top-N highlight (`config.highlight`). The caption box is one per page (`config.textBox` = page 1, `config.textBox2` = page 2); one caption cell is held on both pages when either is on, so the tiles never move between them. `config.descriptorHeadlines` (default off) prints each descriptor's measured value under its bar.
+optional top-N highlight (`config.highlight`). The caption box is one per page (`config.textBox` = page 1, `config.textBox2` = page 2); one caption cell is held on both pages when either is on, so the tiles never move between them. The caption is drawn in `PageGeometry.captionRect`: from the title's left edge, level with the tiles' top edge, to the tiles' own gap short of the tile beside it and the tile below it (no padding on the left or top). The descriptor list starts clear of the frame's top edge. `config.descriptorHeadlines` (default off) prints each descriptor's measured value under its bar.
 
 **Name tag + labels.** The tag's width and height are fractions of the module
 (`config.nameTag`; `TagGeometry` in `frameShape.ts`, `moduleOutline()`), the

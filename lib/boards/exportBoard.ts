@@ -99,6 +99,8 @@ export interface PageGeometry {
   tag: TagGeometry;
   /** Index into `cells` the caption occupies, or null if disabled. */
   captionCellIndex: number | null;
+  /** The caption box: from the title's left edge, level with the top of the tiles, to a gap short of the tile to its right and of the tile below it. Null when there is no caption. */
+  captionRect: { x: number; y: number; width: number; height: number } | null;
   /** Null when the footer is off. Otherwise everything needed to draw it:
    * the rule's y position, and the vertical center of the text/logo row
    * below it. */
@@ -175,7 +177,7 @@ export function computeGeometry(config: BoardConfig, dpi: number = DPI, tileById
       if (c.showColumnLabels) {
         for (let col = 0; col < CATALOGUE_COLUMNS; col++) labels.push({ text: c.columnLabels[col] ?? "", x: cells[col].x, y: titleBottom, width: cells[col].size, height: colBand, align: "center" });
       }
-      return { ...base, cells, slotCellIndex, placeholders, labels, captionCellIndex: null };
+      return { ...base, cells, slotCellIndex, placeholders, labels, captionCellIndex: null, captionRect: null };
     }
   }
 
@@ -186,6 +188,20 @@ export function computeGeometry(config: BoardConfig, dpi: number = DPI, tileById
   const layout = squareGridLayout(totalCells || 1, availableWidth, availableHeight, gapX, gapY, tag.height);
   const cells = squareGridCells(layout, gapX, gapY).map((cell) => ({ x: cell.x + margin, y: cell.y + titleBottom, size: cell.size }));
 
+  // The caption box starts at the title's left edge and at the top line of the tiles, and keeps the tiles' own gaps on its other two edges: the gap short of the next tile
+  // to its right, and the gap short of the tile below it (the tile's name tag included, as in the grid).
+  let captionRect: PageGeometry["captionRect"] = null;
+  if (hasCaption && cells.length) {
+    const c0 = cells[0];
+    const right = cells.find((c, i) => i > 0 && Math.abs(c.y - c0.y) < 1 && c.x > c0.x);
+    const below = cells.filter((c, i) => i > 0 && Math.abs(c.x - c0.x) < 1 && c.y > c0.y + 1).sort((a, b) => a.y - b.y)[0];
+    const x0 = margin;
+    const y0 = c0.y + c0.size * TOP_EDGE_FRACTION;
+    const x1 = right ? right.x - gapX : c0.x + c0.size;
+    const y1 = below ? below.y - gapY : c0.y + c0.size * (1 + tag.height);
+    captionRect = { x: x0, y: y0, width: Math.max(1, x1 - x0), height: Math.max(1, y1 - y0) };
+  }
+
   return {
     ...base,
     cells,
@@ -193,6 +209,7 @@ export function computeGeometry(config: BoardConfig, dpi: number = DPI, tileById
     placeholders: [],
     labels: [],
     captionCellIndex: hasCaption ? 0 : null,
+    captionRect,
   };
 }
 
@@ -205,12 +222,12 @@ function drawBackgroundAndTitle(ctx: CanvasRenderingContext2D, config: BoardConf
   ctx.fillText(config.name.toUpperCase(), geo.margin, geo.margin);
 }
 
-function drawCaptionCell(ctx: CanvasRenderingContext2D, cell: GridCell, config: BoardConfig, dpi: number, box: BoardTextBox) {
+function drawCaptionBox(ctx: CanvasRenderingContext2D, rect: { x: number; y: number; width: number; height: number }, config: BoardConfig, dpi: number, box: BoardTextBox) {
   ctx.save();
   ctx.fillStyle = box.color;
-  const padding = cell.size * 0.04;
-  const maxWidth = cell.size - padding * 2;
-  const maxHeight = cell.size - padding * 2;
+  // no padding on the left or the top: the text lines up with the title and with the top of the tiles
+  const maxWidth = rect.width;
+  const maxHeight = rect.height;
   const text = box.text || "";
   let fontSize: number;
   let lines: string[];
@@ -219,20 +236,20 @@ function drawCaptionCell(ctx: CanvasRenderingContext2D, cell: GridCell, config: 
     ctx.font = `${fontSize}px "${config.fontFamily}"`;
     lines = wrapToWidth(ctx, text, maxWidth);
   } else {
-    const fit = fitText(ctx, text, maxWidth, maxHeight, { maxFontSize: cell.size * 0.08, minFontSize: 8, maxLines: 20, fontFamily: config.fontFamily });
+    const fit = fitText(ctx, text, maxWidth, maxHeight, { maxFontSize: Math.min(rect.width, rect.height) * 0.08, minFontSize: 8, maxLines: 40, fontFamily: config.fontFamily });
     fontSize = fit.fontSize;
     lines = fit.lines;
   }
   ctx.font = `${fontSize}px "${config.fontFamily}"`;
   ctx.textBaseline = "top";
-  lines.forEach((line, i) => ctx.fillText(line, cell.x + padding, cell.y + padding + i * fontSize * 1.3));
+  lines.forEach((line, i) => ctx.fillText(line, rect.x, rect.y + i * fontSize * 1.3));
   ctx.restore();
 }
 
 /** The caption box of the page being drawn, when that page has one on. */
 function drawPageCaption(ctx: CanvasRenderingContext2D, geo: PageGeometry, config: BoardConfig, dpi: number, page: 1 | 2) {
   const box = page === 1 ? config.textBox : config.textBox2;
-  if (box.enabled && geo.captionCellIndex !== null) drawCaptionCell(ctx, geo.cells[geo.captionCellIndex], config, dpi, box);
+  if (box.enabled && geo.captionRect) drawCaptionBox(ctx, geo.captionRect, config, dpi, box);
 }
 
 /** The credit line along the bottom: a rule spanning the full content
@@ -480,7 +497,8 @@ function drawDescriptorList(ctx: CanvasRenderingContext2D, cell: GridCell, tile:
 
   const padding = descWidth * 0.08;
   const chamferInset = cell.size * 0.03;
-  const listTop = cell.y + Math.max(padding, chamferInset);
+  // the first row starts clear of the frame's top edge (the top-left tab and the edge itself), not on it
+  const listTop = cell.y + Math.max(padding, chamferInset, cell.size * (TOP_EDGE_FRACTION + 0.045));
   const listHeight = cell.y + cell.size - padding - listTop;
   const rowHeight = listHeight / rows.length;
   const labelMaxWidth = descWidth - padding * 2;

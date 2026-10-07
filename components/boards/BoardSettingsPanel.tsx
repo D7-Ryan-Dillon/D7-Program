@@ -371,7 +371,7 @@ export function BoardSettingsPanel({ config, onChange, criteriaCount }: { config
         summary={config.textBox.enabled || config.textBox2.enabled ? [config.textBox.enabled && "page 1", config.textBox2.enabled && "page 2"].filter(Boolean).join(" + ") : "off"}
         onReset={() => reset("textBox", "textBox2", "captionFontSizePt")}
       >
-        <p className="text-[10px] text-muted-foreground">An optional text box in the first cell of the grid. Each page has its own: turn on either or both, with different text. The cell is kept on both pages so the tiles do not move between them.</p>
+        <p className="text-[10px] text-muted-foreground">An optional text box in the first cell of the grid: it starts at the title&apos;s left edge and level with the top of the tiles, and keeps the tiles&apos; gaps from the tile beside it and the tile below it. Each page has its own: turn on either or both, with different text. The cell is kept on both pages so the tiles do not move between them.</p>
         {([
           { key: "textBox", title: "Page 1 (tiles)" },
           { key: "textBox2", title: "Page 2 (descriptors)" },
