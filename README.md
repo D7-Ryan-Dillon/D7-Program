@@ -73,9 +73,9 @@ Five tabs, in order:
 4. **Arrange** -- compose the tiles into ONE connected, walkable building.
    Place, drag, turn and group pieces freely (smart snapping to faces, openings
    and floors; any floor can meet any floor), or **generate** a building: pick one
-   of ten shapes (compact, tower, long bar, courtyard, terraced, cascade, wide,
-   village, bridge, free-form), optionally with branching wings, and five sliders
-   that change the building itself (Tall, Compact, Bright, Varied, Program fit).
+   of eight shapes (compact, tower, long bar, courtyard, terraced,
+   village, bridge, free-form), optionally with branching wings, and four sliders
+   that change the building itself (Tall, Compact, Varied, Program fit).
    The generator plans the shape on a 20 ft by 10 ft lattice and searches for tiles
    so that floors meet floors, no stair dead-ends, and no floor plate is stranded;
    there is no time limit, a Stop button, and a report of what it came out as against

@@ -8,8 +8,8 @@
 //   - The entrance is the first cell, on the ground, and nothing is below it (every z is 0 or more).
 //
 // `branching` turns the last third of a plan into wings that grow out of the core; off, the whole plan is the shape (a uniform tower, terrace or courtyard).
-// The sliders move the plan itself: Tall chooses how many levels there are (how much of the building is tower, how long a terrace plateau is, how many layers a block
-// has; at 0 every plan is flat), Compact how tight it packs. generate.ts then finds tiles that satisfy the floor rules in the plan, and when a plan proves
+// The tall shapes (tower, compact, village, bridge) are built round a SPIRAL CLIMB: every piece one half-tile above the one before, winding round a hollow square. The
+// sliders move the plan itself: Tall chooses how many levels there are (how much of the building is the climb; at 0 every plan is flat), Compact how tight it packs. generate.ts then finds tiles that satisfy the floor rules in the plan, and when a plan proves
 // impossible with the tiles at hand it asks for the same plan with less Tall.
 
 import type { GenSettings, Priorities, ShapeKind } from "./types";
@@ -24,6 +24,8 @@ export interface Cell {
 }
 
 type Rng = () => number;
+/** Says whether the tiles could build a plan: used to grow a plan only into places that can be built. */
+export type Fits = (cells: Cell[]) => boolean;
 type Pt = { x: number; y: number; z: number };
 
 
@@ -89,11 +91,11 @@ function pick(cols: Col[], n: number, prio: (c: Col, m: number) => number, rng: 
  * Grows `extra` more cells outward from the cells there, each beside one of them: the wings. `lift` (0..1) favours climbing (at 0 every wing stays level), `knit` favours
  * places that touch more of the mass, `topZ` is the highest a wing may go.
  */
-export function branchCells(cells: Cell[], extra: number, rng: Rng, lift: number, knit: number, topZ = Infinity): Cell[] {
+export function branchCells(cells: Cell[], extra: number, rng: Rng, lift: number, knit: number, topZ = Infinity, ok?: Fits): Cell[] {
   const out = cells.map((c) => ({ ...c }));
   for (let k = 0; k < extra; k++) {
-    let best: { cell: Cell; v: number } | null = null;
-    for (let s = 0; s < 40; s++) {
+    const found: { cell: Cell; v: number }[] = [];
+    for (let s = 0; s < (ok ? 90 : 40); s++) {
       const pi = Math.floor(rng() * out.length);
       const p = out[pi];
       const [dx, dy] = DIRS4[Math.floor(rng() * 4)];
@@ -107,58 +109,24 @@ export function branchCells(cells: Cell[], extra: number, rng: Rng, lift: number
       if (clashes(out, x, y, z)) continue;
       const near = out.filter((c) => touches(c, { x, y, z })).length;
       const v = Math.pow(near, 0.4 + 2.2 * knit) + rng() * 0.6;
-      if (!best || v > best.v) best = { cell: { x, y, z, parent: pi }, v };
+      found.push({ cell: { x, y, z, parent: pi }, v });
+    }
+    // the best place, or (when the caller can say whether the tiles could build it) the best place where they can
+    found.sort((a, b) => b.v - a.v);
+    let best: { cell: Cell; v: number } | null = null;
+    const tried = new Set<string>();
+    for (const c of found) {
+      const key = `${c.cell.x},${c.cell.y},${c.cell.z}`;
+      if (tried.has(key)) continue;
+      tried.add(key);
+      if (!ok || ok([...out, c.cell])) {
+        best = c;
+        break;
+      }
+      if (tried.size >= 14) break;
     }
     if (!best) break;
     out.push(best.cell);
-  }
-  return out;
-}
-
-/**
- * Terraces a flat set of cells: the heights rise in `levels` plateaus along the direction `ang`, each plateau with about the same number of pieces (so the
- * entrance end is never a lone piece against a wall of higher ones), and no two neighbours more than a half-tile apart. The cell lowest along the direction is the
- * entrance. The result is in plan order (each cell beside an earlier one).
- */
-function terrace(flat: { x: number; y: number }[], levels: number, ang: number): Cell[] {
-  const n = flat.length;
-  if (!n) return [];
-  const dx = Math.cos(ang);
-  const dy = Math.sin(ang);
-  const cx = flat.reduce((a, c) => a + c.x, 0) / n;
-  const cy = flat.reduce((a, c) => a + c.y, 0) / n;
-  const along = flat.map((c) => c.x * dx + c.y * dy + 0.001 * Math.hypot(c.x - cx, c.y - cy));
-  const order = flat.map((_, i) => i).sort((a, b) => along[a] - along[b]);
-  const z = new Array<number>(n).fill(0);
-  order.forEach((idx, rank) => {
-    z[idx] = Math.min(levels - 1, Math.floor((rank * levels) / n));
-  });
-  // neighbours never more than one level apart: the higher one comes down
-  for (let pass = 0; pass < n; pass++) {
-    let changed = false;
-    for (let i = 0; i < n; i++)
-      for (let j = i + 1; j < n; j++) {
-        if (Math.abs(flat[i].x - flat[j].x) + Math.abs(flat[i].y - flat[j].y) !== 1) continue;
-        if (z[i] - z[j] > 1) {
-          z[i] = z[j] + 1;
-          changed = true;
-        } else if (z[j] - z[i] > 1) {
-          z[j] = z[i] + 1;
-          changed = true;
-        }
-      }
-    if (!changed) break;
-  }
-  const root = order[0];
-  z[root] = 0;
-  const out: Cell[] = [{ x: flat[root].x, y: flat[root].y, z: 0, parent: -1 }];
-  const done = new Set<number>([root]);
-  for (let head = 0; head < out.length; head++) {
-    for (const j of order) {
-      if (done.has(j) || !beside(out[head], { x: flat[j].x, y: flat[j].y, z: z[j] })) continue;
-      done.add(j);
-      out.push({ x: flat[j].x, y: flat[j].y, z: z[j], parent: head });
-    }
   }
   return out;
 }
@@ -178,7 +146,6 @@ const normalise = (cells: Cell[]): Cell[] => {
 };
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 export interface PlanInput {
   shape: ShapeKind;
@@ -189,39 +156,47 @@ export interface PlanInput {
   compact: number;
   branching: boolean;
   rng: Rng;
+  /** when given, extra pieces are only put where this says the tiles can build the plan */
+  fits?: Fits;
 }
 
-export const planInput = (g: GenSettings, p: Priorities, direction: number, rng: Rng, n = g.amount): PlanInput => ({ shape: g.shape, n, direction, tall: p.tall / 100, compact: p.compact / 100, branching: !!g.branching, rng });
+export const planInput = (g: GenSettings, p: Priorities, direction: number, rng: Rng, n = g.amount, fits?: Fits): PlanInput => ({ shape: g.shape, n, direction, tall: p.tall / 100, compact: p.compact / 100, branching: !!g.branching, rng, fits });
 
 /** The cells of a shape: the core, then wings when branching is on. The first cell is the entrance. */
 export function planShape(inp: PlanInput): Cell[] {
-  const { shape, n, tall, compact, rng } = inp;
+  const { shape, n, tall, compact, rng, fits } = inp;
   const core = shape === "free" ? n : inp.branching ? Math.max(2, Math.ceil(n * 0.65)) : n;
-  let cells = core > 0 ? corePlan(shape, core, tall, compact, rng) : [];
+  let cells = core > 0 ? corePlan(shape, core, tall, compact, rng, fits) : [];
   // a shape's columns can be fewer than the pieces asked for: the rest of the pieces extend it
-  if (cells.length < n) cells = branchCells(cells, n - cells.length, rng, tall, compact);
+  if (cells.length < n) cells = branchCells(cells, n - cells.length, rng, tall, compact, Infinity, fits);
   return normalise(rotate(cells, inp.direction));
 }
 
-function corePlan(shape: ShapeKind, n: number, tall: number, compact: number, rng: Rng): Cell[] {
+function corePlan(shape: ShapeKind, n: number, tall: number, compact: number, rng: Rng, fits?: Fits): Cell[] {
   const cols: Col[] = [];
   const add = (x: number, y: number, phase: number, depth: number) => cols.push({ x, y, phase, depth });
-  const phaseOf = (x: number, y: number) => (x + y) & 1;
   /** how many pieces share a level in a terrace or a slope: all in one at Tall 0 (flat), one to a level at Tall 100 */
   const plateauOf = () => (tall <= 0.05 ? 999 : Math.max(1, 3 - Math.round(tall * 2)));
   switch (shape) {
     case "spineV": {
-      // a tower: two columns zig-zagging up in 10 ft steps, or four when compact is high. Tall decides how much of the building is the tower: tall puts almost every
-      // piece into it, low puts most into a low base round its foot.
-      const footprint = compact >= 0.7 ? 4 : 2;
-      for (let i = 0; i < footprint; i++) {
-        const x = footprint === 2 ? i : i % 2;
-        const y = footprint === 2 ? 0 : Math.floor(i / 2);
-        add(x, y, phaseOf(x, y), 99);
+      // a tower that is a spiral: every piece of the climb is one half-tile (10 ft) higher than the one before and winds round a hollow square (2 x 2 pieces when
+      // compact, 3 x 3 when not), so the building rises with every block. Tall decides how many of the pieces are the climb; the rest stand beside it at the levels it
+      // reaches (none at Tall 100: the whole building is the spiral; at Tall 0 it is one level).
+      const ringTiles = compact >= 0.35 ? 2 : 3;
+      const ring: [number, number][] = [];
+      for (let i = 0; i < ringTiles; i++) ring.push([i, 0]);
+      for (let j = 1; j < ringTiles; j++) ring.push([ringTiles - 1, j]);
+      for (let i = ringTiles - 2; i >= 0; i--) ring.push([i, ringTiles - 1]);
+      for (let j = ringTiles - 2; j >= 1; j--) ring.push([0, j]);
+      if (rng() < 0.5) ring.reverse();
+      // start the winding at a corner of the ring that has a neighbour on each side along the ring
+      const climbN = Math.max(1, Math.min(n, Math.round(lerp(1, n, Math.pow(tall, 0.8)))));
+      const out: Cell[] = [];
+      for (let i = 0; i < climbN; i++) {
+        const [x, y] = ring[i % ring.length];
+        out.push({ x, y, z: i, parent: i - 1 });
       }
-      const towerN = Math.max(2, Math.min(n, Math.ceil(n * lerp(0.15, 1, tall))));
-      const tower = pick(cols, towerN, (c, m) => c.phase + 2 * m + 0.02 * (c.x + c.y), rng);
-      return towerN < n ? branchCells(tower, n - towerN, rng, 0, compact, 1) : tower;
+      return climbN < n ? branchCells(out, n - climbN, rng, 0, compact, Infinity, fits) : out;
     }
     case "spineH": {
       // a long bar: one or two rows, with raised bays along it when tall (each change of level is one climbing tile, so the bays are few and long)
@@ -254,69 +229,87 @@ function corePlan(shape: ShapeKind, n: number, tall: number, compact: number, rn
       for (let i = 0; i < len; i++) for (let j = 0; j < w; j++) add(i, j, Math.floor(i / plateau), 1);
       return pick(cols, n, (c) => c.x + 0.1 * c.y, rng, 0.05);
     }
-    case "cascade": {
-      // a slope that climbs with every piece (or every second one when tall is lower), falling away to each side when tall is high
-      const plateau = plateauOf() === 999 ? 999 : Math.max(1, Math.min(2, plateauOf() - 1));
-      const w = compact < 0.4 ? 0 : compact < 0.8 ? 1 : 2;
-      const fall = tall > 0.3 ? 1 : 0;
-      const len = Math.ceil(n / (2 * w + 1)) + 2;
-      for (let i = 0; i < len; i++) for (let j = -w; j <= w; j++) add(i, j, Math.floor(i / plateau) + fall * Math.abs(j), 1);
-      return pick(cols, n, (c) => c.phase + 0.05 * c.x, rng, 0.05);
-    }
-    case "slab": {
-      // a wide low block: one layer at Tall 0, up to three terraced layers along its length (each change of level is a line of steps); widest at the bottom
-      const levels = tall < 0.2 ? 1 : tall < 0.6 ? 2 : 3;
-      const w = Math.max(3, Math.ceil(Math.sqrt(n * 2)));
-      const d = Math.max(2, Math.ceil(n / w));
-      for (let x = 0; x < w + 1; x++) for (let y = 0; y < d + 1; y++) add(x, y, 0, 1);
-      const flat = pick(cols, n, (c) => c.x + 0.4 * Math.abs(c.y - d / 2), rng, 0.2);
-      return levels > 1 ? terrace(flat, levels, 0) : flat;
-    }
     case "village": {
-      // a base of ground pieces with small towers standing on it (each a pair of columns, climbing in 10 ft); tall makes the towers a bigger part
-      const baseN = Math.max(2, Math.ceil(n * lerp(0.9, 0.4, tall)));
-      const towers = Math.max(1, Math.round(baseN / 2));
-      const height = tall <= 0.05 ? 0 : Math.max(1, Math.ceil((n - baseN) / Math.max(1, towers * 2)));
-      for (let i = 0; i < baseN; i++) {
-        const isTowerFoot = height > 0 && i % 2 === 0 && i / 2 < towers;
-        add(i, 0, 0, isTowerFoot ? 1 + height : 1);
-        if (isTowerFoot) add(i, 1, 1, height);
+      // a street of ground pieces with towers standing off it, each tower a small spiral that climbs from the street (every piece one half-tile above the last), of
+      // different heights. Tall decides how much of the village is tower; at Tall 0 it is the street alone.
+      const towersN = n >= 12 ? 3 : n >= 7 ? 2 : 1;
+      const towerPieces = tall <= 0.05 ? 0 : Math.min(n - towersN - 1, Math.round(n * lerp(0.15, 0.7, tall)));
+      const streetN = n - towerPieces;
+      const out: Cell[] = [];
+      for (let i = 0; i < streetN; i++) out.push({ x: i, y: 0, z: 0, parent: i - 1 });
+      if (towerPieces > 0) {
+        // the towers stand on street pieces three apart (a tower is two pieces wide), tallest first
+        const anchors: number[] = [];
+        for (let a = Math.min(1, streetN - 1); a < streetN && anchors.length < towersN; a += 3) anchors.push(a);
+        const use = anchors.length;
+        const share = [0.5, 0.3, 0.2].slice(0, use);
+        const sum = share.reduce((p, c) => p + c, 0);
+        let left = towerPieces;
+        anchors.forEach((ax, k) => {
+          const h = k === use - 1 ? left : Math.max(1, Math.min(left - (use - 1 - k), Math.round((towerPieces * share[k]) / sum)));
+          left -= h;
+          // the winding of this tower: a 2 x 2 ring beside the street piece
+          const ring: [number, number][] = [[0, 1], [1, 1], [1, 2], [0, 2]];
+          if (rng() < 0.5) ring.reverse();
+          let parent = ax;
+          for (let i = 0; i < h; i++) {
+            const [rx, ry] = ring[i % 4];
+            out.push({ x: ax + rx, y: ry, z: i + 1, parent });
+            parent = out.length - 1;
+          }
+        });
       }
-      return pick(cols, n, (c, m) => c.phase + 2 * m + (c.y === 0 && m === 0 ? -50 : 0) + 0.01 * c.x, rng);
+      return out.length >= n ? out.slice(0, n) : branchCells(out, n - out.length, rng, 0, compact, Infinity, fits);
     }
     case "bridge": {
-      // two slim towers and a raised span between them: up one tower, across, down the other. Tall sets how high the span is.
-      const gap = tall >= 0.5 ? 1 : 2;
-      const most = Math.max(0, 2 * Math.floor(Math.max(0, (n - gap) / 2 - 1) / 2));
-      const top = tall <= 0.05 ? 0 : Math.max(2, Math.min(most, 2 * Math.round(lerp(1, 4, tall))));
+      // two towers and a span between them: a spiral up one tower, a level run across the top, a spiral down the other. Tall sets how high the span is; whatever the
+      // pieces left over after the towers are, they lengthen the span (at Tall 0 the bridge is a flat run).
+      const top = tall <= 0.05 ? 0 : Math.max(1, Math.round(lerp(1, Math.max(1, Math.floor((n - 2) / 2)), tall)));
+      const spanN = Math.max(top > 0 ? 2 : n, n - 2 * top);
+      const ring: [number, number][] = [[0, 0], [0, 1], [1, 1], [1, 0]];
+      if (rng() < 0.5) ring.reverse();
       const out: Cell[] = [];
-      const push = (x: number, y: number, z: number) => {
-        let parent = -1;
-        for (let i = 0; i < out.length; i++) if (beside(out[i], { x, y, z })) {
-          parent = i;
-          break;
-        }
-        if (out.length && parent < 0) return;
-        out.push({ x, y, z, parent });
-      };
-      const far = gap + 1;
-      for (let z = 0; z <= top && out.length < n; z++) push(0, z & 1, z);
-      for (let x = 1; x <= gap && out.length < n; x++) push(x, 0, top);
-      for (let z = top; z >= 0 && out.length < n; z--) push(far, z & 1, z);
-      return out;
+      // up: z = 0 .. top - 1, round a 2 x 2 ring at the near end
+      for (let i = 0; i < top; i++) out.push({ x: ring[i % 4][0], y: ring[i % 4][1], z: i, parent: i - 1 });
+      // across: one long run on the top level, away from the near tower
+      const x0 = out.length ? out[out.length - 1].x : 0;
+      const y0 = out.length ? out[out.length - 1].y : 0;
+      const dir = x0 === 0 ? -1 : 1;
+      let prev = out.length - 1;
+      const spanTiles = Math.min(spanN, n - out.length);
+      for (let i = 1; i <= spanTiles; i++) {
+        out.push({ x: x0 + dir * i, y: y0, z: top, parent: prev });
+        prev = out.length - 1;
+      }
+      // down: the far tower, z = top - 1 .. 0, winding round a ring at the far end
+      const fx = out.length ? out[out.length - 1].x : 0;
+      const fdir = dir;
+      for (let i = 0; i < top && out.length < n; i++) {
+        const r = ring[i % 4];
+        out.push({ x: fx + fdir * (1 + (fdir > 0 ? r[0] : r[0])), y: y0 + r[1] - ring[0][1], z: top - 1 - i, parent: prev });
+        prev = out.length - 1;
+      }
+      return out.length >= n ? out.slice(0, n) : branchCells(out, n - out.length, rng, 0, compact, Infinity, fits);
     }
     case "free": {
       // no overall shape: a wandering mass, climbing as tall asks and packing as compact asks
-      return branchCells([{ x: 0, y: 0, z: 0, parent: -1 }], n - 1, rng, tall, compact);
+      return branchCells([{ x: 0, y: 0, z: 0, parent: -1 }], n - 1, rng, tall, compact, Infinity, fits);
     }
     default: {
-      // compact: a tight mound, terraced up as tall asks (one flat layer at Tall 0): each change of level is a line of steps across it, so few pieces have to climb
-      const levels = tall < 0.2 ? 1 : clamp(Math.round(lerp(2, 4, tall)), 2, 4);
-      const r = Math.max(1, Math.ceil(Math.sqrt(n)) + (compact < 0.35 ? 1 : 0));
-      for (let x = -r; x <= r; x++) for (let y = -r; y <= r; y++) add(x, y, 0, 1);
-      const squash = lerp(1.6, 0.6, compact);
-      const flat = pick(cols, n, (c) => Math.hypot(c.x, c.y) * squash, rng, 0.3);
-      return levels > 1 ? terrace(flat, Math.min(levels, Math.max(2, Math.floor(n / 2))), rng() * Math.PI * 2) : flat;
+      // compact: a dense block that is tall. A spiral climbs the outside of a small footprint (a hollow square, 2 x 2 pieces for a few, 3 x 3 for more), and the rest
+      // of the pieces pack in beside it at the levels it reaches, so the mass is as tall as the spiral and no wider than it needs to be. Tall decides how much of it
+      // is spiral (at Tall 0 it is a flat mound); Compact how tightly the rest packs.
+      const ringTiles = n >= 10 ? 3 : 2;
+      const ring: [number, number][] = [];
+      for (let i = 0; i < ringTiles; i++) ring.push([i, 0]);
+      for (let j = 1; j < ringTiles; j++) ring.push([ringTiles - 1, j]);
+      for (let i = ringTiles - 2; i >= 0; i--) ring.push([i, ringTiles - 1]);
+      for (let j = ringTiles - 2; j >= 1; j--) ring.push([0, j]);
+      if (rng() < 0.5) ring.reverse();
+      const climbN = Math.max(1, Math.min(n, Math.round(n * lerp(0.1, 0.7, tall))));
+      const out: Cell[] = [];
+      for (let i = 0; i < climbN; i++) out.push({ x: ring[i % ring.length][0], y: ring[i % ring.length][1], z: i, parent: i - 1 });
+      return climbN < n ? branchCells(out, n - climbN, rng, 0, 0.6 + 0.4 * compact, Infinity, fits) : out;
     }
   }
 }

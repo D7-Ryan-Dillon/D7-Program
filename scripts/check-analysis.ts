@@ -10,6 +10,7 @@ import type { ParsedTile } from "../lib/types";
 import { ensureAnalysis } from "../lib/tiles/pipeline";
 import { MATRIX, MATRIX_KEYS, STATUS_LABEL } from "../lib/scoring/matrix";
 import { evaluateTile, type TileEvaluation } from "../lib/scoring/matrixEval";
+import { barOf } from "../lib/scoring/bars";
 import { DESCRIPTOR_META, legacyMeasurementsFor, scoreTile } from "../lib/scoring/descriptors";
 import { DEFAULT_ASSUMPTIONS } from "../lib/scoring/assumptions";
 import { spatialDensityFor } from "../lib/scoring/spatialDensity";
@@ -30,7 +31,7 @@ import { buildComposite, compositeToTile } from "../lib/arrange/composite";
 import { makePiece, withPiece } from "../lib/arrange/ops";
 import { defaultRules, emptyDoc } from "../lib/arrange/types";
 import { L, Lfilled, block, closed, corridor, cube, pocket, skylit } from "./fixtures/shaped";
-import { loadFixture } from "./tiles/load";
+import { loadFixture, TILE_ORDER } from "./tiles/load";
 
 let failures = 0;
 const ok = (cond: boolean, msg: string) => {
@@ -536,6 +537,25 @@ async function assemblies() {
     ok(!!o2 && (o2.get("stepped")!.idx ?? 0) >= 2 && (o2.get("resistant")!.idx ?? 0) >= 2, `the cascaded plates should read as stepped with retained floors: ${JSON.stringify([o2?.get("stepped"), o2?.get("resistant")])}`);
     console.log(`  the eight fixed descriptors take ${keys.map((k) => `${k} ${seen.get(k)?.size}`).join(", ")} distinct values across ${tiles.length} tiles`);
   }
+}
+
+// ---- the bar, the card and the board read one result, and none of the fifteen tiles has a descriptor that cannot be read --------------------------------------------------
+{
+  const settings: [string, Partial<typeof DEFAULT_WALK>][] = [["the standard walking rules", {}], ["headroom 7.5 ft", { headroomFt: 7.5 }], ["clear width 4 ft", { widthFt: 4 }], ["headroom 8 ft and width 3.5 ft", { headroomFt: 8, widthFt: 3.5 }]];
+  for (const [label, patch] of settings) {
+    applyWalk({ ...DEFAULT_WALK, ...patch });
+    for (const tile of TILE_ORDER.map((n) => ensureAnalysis(loadFixture(n)!))) {
+      for (const r of evaluateTile(tile).results) {
+        const bar = barOf(r);
+        const readable = r.measure.status !== "unavailable" && r.measure.status !== "not-applicable";
+        ok(readable, `${tile.name}: ${r.key} is not assessable under ${label}`);
+        ok(readable === (bar.index !== null), `${tile.name}: ${r.key} reads ${r.measure.status} but its bar is ${bar.index === null ? "empty" : "filled"}`);
+        ok(readable === (r.measure.value !== null), `${tile.name}: ${r.key} reads ${r.measure.status} but its value is ${r.measure.value}`);
+      }
+    }
+  }
+  applyWalk({ ...DEFAULT_WALK });
+  console.log("  every descriptor of the fifteen tiles is readable, and its bar, value and status agree, under four sets of walking rules");
 }
 
 (async () => {

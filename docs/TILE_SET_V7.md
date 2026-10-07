@@ -29,7 +29,7 @@ npm run check:tiles                               every way Arrange can assemble
 | | V3 | V7 change | Floor now (main, reached on foot) |
 |---|---|---|---|
 | **G1** Stepped amphitheater | seating terraces, a stage too small to stand on (25 sq ft) | the same bowl and seating (a thicker shell so it prints; the three bitten pits are gone, so the seating plate has no holes); a larger flat stage at the -Y door; a gentle ledge (slope 0.33) up the west and north walls; four corner piers | 114 sq ft, from the stage up the ledge to 7 ft; the upper ledge (19 sq ft) is a separate floor |
-| **G2** Void field | pods joined by throats floating 2 ft above the floor | rooms wider and lower, throats on the floor, a low port on each face | 167 sq ft ground floor touching all four doors; the upper floor is a receiving floor |
+| **G2** Void field | pods joined by throats floating 2 ft above the floor | rooms wider and lower, throats on the floor, a low port on each face | about 184 sq ft ground floor touching all four doors; the waist floor stands at the 12 ft datum with landings running out to the +X and +Y faces (66 sq ft), so a neighbour's upper floor meets it |
 | **G3** Inserted plate | no opening on -Y | open -Y at ground and onto the tongue; the tongue is reached from another space, no stair; the upper cavern and upper doors are lowered so the roof is at least 1 ft thick everywhere (2 ft over most of the tile) | 243 sq ft ground; the tongue (49 sq ft, smaller because it needs 6.5 ft of headroom under a thicker roof) reached from -Y |
 | **G4** Contained room | thin pedestal, a tiny room | the kernel is a retained dome of foam with a room carved in it (about 6 ft across, 7 ft clear) and a door; a ring on the floor around it | 149 sq ft ring floor including the room; the -Y door lands on a 26 sq ft pocket |
 | **G5** Linear edge gallery | both gallery levels narrow and low | both levels widened to 7 ft clear; a ramp (slope about 0.42) running along the hall edge up to the upper gallery, with a solid spine under it down to the ground; two corner piers | 210 sq ft, one floor from the hall (2 ft) up the ramp to the gallery (12.5 ft) |
@@ -66,7 +66,6 @@ Checked on the smooth surface the app prints from (`void_smooth`): every tile is
 - The foam is carved harder than in V3 in several tiles (void share up from about 50% to about 55–65%).
 - G1: the rim ledge reaches 7 ft in one piece and then continues as a separate 19 sq ft ledge (a gap I could not close without changing the bowl).
 - Thin slivers (1 to 5 cu ft each, 18 across the set, most in L1) stand free between pods; they are attached, but fragile.
-- G2's upper floor (44 sq ft) stands at 11 ft, one foot off the 12 ft datum of the other tiles' upper floors, so no neighbour's floor meets it: it is a floor nobody can walk to from another tile (the generator avoids placing G2 where it would be stranded).
 - Not done: G4's -Y door pocket, O4's void-foot pocket and L5's -Y pocket are not connected to the main floor.
 
 ## Touch-ups after the first print round (2026-10-06)

@@ -179,9 +179,11 @@ export function MatrixCard({
           ) : (
             <span />
           )}
-          <span className="font-mono text-[10px] text-muted-foreground" title="The app's older blend of proxies for this descriptor, 0-100. It is not the matrix measurement and is not used to choose criteria.">
-            presence index {Math.round(result.legacy.score)}
-          </span>
+          {m.status !== "unavailable" && (
+            <span className="font-mono text-[10px] text-muted-foreground" title="The app's older blend of proxies for this descriptor, 0-100. It is not the matrix measurement and is not used to choose criteria.">
+              presence index {Math.round(result.legacy.score)}
+            </span>
+          )}
         </div>
       </div>
     </div>

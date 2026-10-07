@@ -20,7 +20,7 @@ import { usableSpace, type UsableSpace } from "@/lib/scoring/usable";
 import { classAt, findRoute, groundEntries, OUT, SOLID, skylights, surfaceStats, VOID, voxelFacts, type RouteOverride0, type VoxelFacts } from "@/lib/scoring/voxelFacts";
 import { levelFacts, plateFacts, plateHeights, routeFacts, SPECK_FT3, treadFacts, voidComponents, walkFacts } from "@/lib/scoring/spaceFacts";
 import { cap, count, ft, ft2, ft3, num, pct } from "@/lib/scoring/words";
-import { WALK, walkKey } from "@/lib/walking";
+import { applyWalk, DEFAULT_WALK, WALK, walkKey } from "@/lib/walking";
 
 /** The walking rules every route in this evaluation was read with (the project's one set, shared with Arrange). */
 const walkUsed = () => `walking rules: ${ft(WALK.headroomFt, 1)} headroom, ${ft(WALK.widthFt, 1)} clear width, steps of ${ft(WALK.stepFt, 1)} or less (shared with Arrange)`;
@@ -935,6 +935,23 @@ export function evaluateTile(tile: ParsedTile, inputs: Partial<EvalInputs> = {})
     }
     return { key: criterion.key, criterion, measure: part.measure, interpretation: { ...part.interpretation, generated: true }, evidence: part.evidence, legacy: ctx.legacy.get(criterion.key)! };
   });
+  // A descriptor the walking rules you set leave nothing to measure (no floor is wide or high enough under them) is read with the standard rules instead and marked as a proxy,
+  // so one setting never turns a tile into a column of "not assessable": that is kept for a tile that really cannot be measured (no floor, no way in, no void).
+  if (walkKey() !== walkKey(DEFAULT_WALK) && results.some((r) => r.measure.status === "unavailable")) {
+    const mine = { ...WALK };
+    applyWalk({ ...DEFAULT_WALK });
+    let standard: TileEvaluation | null = null;
+    try {
+      standard = evaluateTile(tile, inputs);
+    } finally {
+      applyWalk(mine);
+    }
+    results.forEach((r, i) => {
+      const s = standard!.results[i];
+      if (r.measure.status !== "unavailable" || s.measure.status === "unavailable") return;
+      results[i] = { ...s, measure: { ...s.measure, status: "proxy", method: `Read with the standard walking rules (${DEFAULT_WALK.headroomFt} ft headroom, ${DEFAULT_WALK.widthFt} ft width) because nothing in this tile qualified under yours. ${s.measure.method}`, used: [...s.measure.used, "standard walking rules, not your settings"] } };
+    });
+  }
   const out: TileEvaluation = { tileId: tile.id, results, legacyMeasurements, usable: usableSpace(tile), assumptions: a };
   if (byKey.size > 6) byKey.clear();
   byKey.set(key, out);

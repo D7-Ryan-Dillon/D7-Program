@@ -272,7 +272,6 @@ export function scoreCandidate(ctx: GenContext, st: State, c: Candidate): number
     1.5 * parts.sequence +
     parts.structure +
     w(p.program) * parts.program +
-    w(p.bright) * (0.6 * parts.daylight + 0.4 * parts.openness) +
     w(p.compact) * 1.5 * parts.compactness +
     w(p.varied) * parts.variety +
     w(p.tall) * parts.vertical

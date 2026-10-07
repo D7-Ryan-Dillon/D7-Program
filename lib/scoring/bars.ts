@@ -34,7 +34,8 @@ export function barOf(result: MatrixResult, typology?: string, overrides?: Parti
   const assessable = m.status !== "unavailable" && m.status !== "not-applicable" && m.value !== null;
   const steps = scale?.length ?? 4;
   let index: number | null = null;
-  if (assessable && idx !== undefined) index = Math.max(0, Math.min(steps - 1, idx));
+  // a value always has a place on the scale: where the app's own index puts it, else by the older 0-100 presence index
+  if (assessable) index = Math.max(0, Math.min(steps - 1, idx !== undefined ? idx : Math.floor((Math.max(0, Math.min(99.9, result.legacy?.score ?? 0)) / 100) * steps)));
   let fit: number | null = null;
   if (assessable && typology && m.value !== null) fit = fitOf(preferenceFor(typology, result.key, overrides?.[result.key]).pref, m.value);
   return {

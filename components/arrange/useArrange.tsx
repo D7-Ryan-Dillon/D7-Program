@@ -33,6 +33,7 @@ import {
   defaultSmooth,
   emptyDoc,
   normalizePriorities,
+  normalizeShape,
   type ArrangeWarning,
   type ArrangementDoc,
   type GenSettings,
@@ -272,9 +273,14 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
   // sliders saved by an older version had other names: read them into the current five once
   useEffect(() => {
     const keys = Object.keys(ui.priorities ?? {});
-    if (keys.length === 5 && keys.includes("tall")) return;
+    if (keys.length === 4 && keys.includes("tall") && !keys.includes("bright")) return;
     setUi((p) => ({ ...p, priorities: normalizePriorities(p.priorities) }));
   }, [ui.priorities, setUi]);
+  // a kind of building that no longer exists (Cascade, Wide) takes the nearest one
+  useEffect(() => {
+    const shape = normalizeShape(ui.gen.shape);
+    if (shape !== ui.gen.shape) setUi((p) => ({ ...p, gen: { ...p.gen, shape } }));
+  }, [ui.gen.shape, setUi]);
   // a project saved with the old default look (ghosted foam, magenta void) takes the new one once
   useEffect(() => {
     if ((ui.look ?? 0) >= 2) return;

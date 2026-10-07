@@ -100,9 +100,12 @@ def G2():
     by foam and linked by throats. A peanut-shaped great room in the middle (two merged chambers with a waist and an irregular floor
     at the waist), satellites at both levels, and a half-chamber on every face so the field carries on through the joint into the next
     tile. The big room is the assembly; the small ones are the places around it."""
-    waist = blob(10, 10, 4.6, 4.0, 10.6, seed=4, wobble=0.18)
-    plates = [_ground(), plate_group("waist floor", [slab(waist)], thickness=1.7, resistance=2.0, min_support=6.0)]
-    s = [chamber((10, 10, 5.0), 6.0, k=1.5), chamber((10, 10, 14.8), 5.0, k=1.5)]
+    waist = blob(10, 10, 4.6, 4.0, 12.0, seed=4, wobble=0.18)        # the waist floor tops out at the 12 ft datum, level with every other tile's upper floor
+    # landings: a 3.4 ft wide strip of the waist floor runs out to each face at the 12 ft datum, so a neighbour's upper floor meets it
+    w = 1.7
+    landings = [rect_slab(14.0, 10 - w, 20.0, 10 + w, 12.0), rect_slab(0.0, 10 - w, 6.0, 10 + w, 12.0), rect_slab(10 - w, 14.0, 10 + w, 20.0, 12.0), rect_slab(10 - w, 0.0, 10 + w, 6.0, 12.0)]
+    plates = [_ground(), plate_group("waist floor", [slab(waist)] + landings, thickness=1.7, resistance=2.0, min_support=6.0)]
+    s = [chamber((10, 10, 5.0), 6.0, k=1.5), chamber((10, 10, 15.4), 5.5, k=1.5)]
     s += [chamber((4.0, 4.5, 15.2), 3.4), chamber((16.5, 4.0, 15.2), 3.7), chamber((4.5, 16.0, 15.2), 3.5), chamber((16.0, 16.5, 15.0), 3.2)]
     s += [chamber((3.8, 3.8, 4.9), 4.2), chamber((16.4, 16.2, 4.9), 4.4)]
     for f in ("-x", "+x", "-y", "+y"):

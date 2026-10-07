@@ -49,7 +49,7 @@ export interface GenProgress {
 
 /** What was asked, and what the building came out as. */
 export interface GenReport {
-  asked: { pieces: number; shape: string; tall: number; compact: number; bright: number; varied: number; branching: boolean };
+  asked: { pieces: number; shape: string; tall: number; compact: number; varied: number; branching: boolean };
   got: { pieces: number; levels: number; heightFt: number; widthFt: number; depthFt: number; stackedPairs: number; distinctTiles: number; climbingTiles: number; routeSteps: number };
   attempts: number;
 }
@@ -71,14 +71,19 @@ export interface GenOptions {
 const NODE_LIMIT = 30000;
 const MAX_ATTEMPTS = 90;
 const TRIES_PER_LEVEL = 2;
+const CHANCE_TRIES = 5;
 /** Growing from pieces that are there: the new cells are chosen at random, so an impossible set of places is not the end of a level: other places are tried. */
 const GROW_TRIES = 8;
 /** Plans with more cells than this are searched in stages of this many cells. */
 const STAGE_AT = 10;
 const STAGE = 8;
+/** How many cells at the end of a stage are not kept but searched again with the next one. */
+const STAGE_OVERLAP = 4;
 /** How many stage searches one plan may spend before it counts as not buildable. */
 const STAGE_TRIES = 40;
 /** [how much of the Tall setting is kept, how much of the Min joint is kept] */
+/** How many times over the copies of one tile the variety setting allows are let through when the plan cannot be built without repeating the tiles that climb. */
+const CAP_MULT = [1, 2, 4, Infinity];
 const LADDER: [number, number][] = [[1, 1], [0.85, 0.9], [0.7, 0.75], [0.55, 0.65], [0.4, 0.5], [0.28, 0.4], [0.18, 0.3], [0.08, 0.15], [0, 0]];
 /** A floor that climbs at least this far, ft, is a stair or a ramp: its top must meet something. */
 const CLIMB_FT = 6;
@@ -177,8 +182,121 @@ interface Attempt {
   impossible: boolean;
 }
 
+export interface Val {
+  s: LState;
+  mask: number;
+}
+
+/** Which of the four sides of each cell have no cell beside them (x+, x-, y+, y-): where the way in can be. */
+function sidesFree(slots: Slot[]): [boolean, boolean, boolean, boolean][] {
+  return slots.map((s) => {
+    const free: [boolean, boolean, boolean, boolean] = [true, true, true, true];
+    slots.forEach((o) => {
+      if (o === s) return;
+      const dx = o.cell.x - s.cell.x;
+      const dy = o.cell.y - s.cell.y;
+      if (Math.abs(o.cell.z - s.cell.z) > 1) return;
+      if (dx === 1 && dy === 0) free[0] = false;
+      if (dx === -1 && dy === 0) free[1] = false;
+      if (dy === 1 && dx === 0) free[2] = false;
+      if (dy === -1 && dx === 0) free[3] = false;
+    });
+    return free;
+  });
+}
+
+/**
+ * Look-ahead over a whole plan: which tiles can stand in each cell and still be followed, cell by cell, to the end of the plan. A value is a tile standing one way and the
+ * set of its floors a person has reached when they walk in from the cell it grows from. A cell keeps a value only when every cell that grows from it has a value that it
+ * can lead to (the route goes on along a floor that was reached). This is what stops the search spending its effort on a tile that cannot be followed: a piece that has to
+ * climb with a neighbour that does not, a turn no tile can make. Returns null when some cell is left with no tile at all: the plan cannot be built from these tiles.
+ * Pieces in `preset` keep their tile; pieces already there (`fixed`) are reached on the floors in `known`.
+ */
+export function planReach(lat: Lattice, slots: Slot[], preset: (LState | null)[], known: Map<number, number[]>, tol: number, minScore: number): Map<string, Val>[] | null {
+  const n = slots.length;
+  const nb: number[][] = slots.map(() => []);
+  for (let i = 0; i < n; i++) for (let j = 0; j < i; j++) if (touches(slots[i].cell, slots[j].cell)) {
+    nb[i].push(j);
+    nb[j].push(i);
+  }
+  const offset = (a: Slot, b: Slot): [number, number, number] => [b.at[0] - a.at[0], b.at[1] - a.at[1], b.at[2] - a.at[2]];
+  const sideFree = sidesFree(slots);
+  // A value is a tile standing one way and the set of its floors a person has reached when they walk in from the cell it grows from. A cell keeps a value only
+  // when every cell that grows from it has a value that it can lead to (the route goes on along a floor that was reached). This is what stops the search spending
+  // its effort on a tile that cannot be followed: a piece that has to climb with a neighbour that does not, a turn no tile can make.
+  const bit = (z: number) => (z < 30 ? 1 << z : 0);
+  const maskOf = (zs: number[]) => zs.reduce((m, z) => m | bit(z), 0);
+  const kids: number[][] = slots.map(() => []);
+  slots.forEach((sl, k) => {
+    if (sl.cell.parent >= 0 && !sl.fixed) kids[sl.cell.parent].push(k);
+  });
+    let vals: Map<string, Val>[] = slots.map(() => new Map());
+    let alive: Set<string>[] | null = null;
+    for (let round = 0; round < 8; round++) {
+      const supported = new Map<Val, Map<number, Val[]>>();
+      vals = slots.map(() => new Map());
+      for (let i = 0; i < n; i++) {
+        const sl = slots[i];
+        const put = (s: LState, mask: number, from?: Val) => {
+          const key = s.id + "#" + mask;
+          let v = vals[i].get(key);
+          if (!v) vals[i].set(key, (v = { s, mask }));
+          if (from) {
+            const byCell = supported.get(from) ?? supported.set(from, new Map()).get(from)!;
+            (byCell.get(i) ?? byCell.set(i, []).get(i)!).push(v);
+          }
+        };
+        if (sl.fixed) {
+          put(sl.fixed, maskOf(known.get(i) ?? factsOf(sl.fixed).floors.map((x) => x.zone)));
+          continue;
+        }
+        if (sl.cell.parent < 0) {
+          for (const s of lat.states) {
+            if (preset[i] ? s.id !== preset[i]!.id : !isEntrance(s)) continue;
+            const m = maskOf(entryZones(s, sideFree[i]));
+            if (m) put(s, m);
+          }
+          continue;
+        }
+        const pv = vals[sl.cell.parent];
+        for (const vp of pv.values()) {
+          if (alive && !alive[sl.cell.parent].has(vp.s.id + "#" + vp.mask)) continue;
+          for (const p of partnersOf(vp.s, offset(slots[sl.cell.parent], sl), lat.states, lat.sig, tol)) {
+            if (p.info.score < minScore) continue;
+            if (preset[i] && p.s.id !== preset[i]!.id) continue;
+            let m = 0;
+            for (const c of p.info.crossings) if (vp.mask & bit(c.za)) m |= bit(c.zb);
+            if (!m) continue;
+            // a cell that touches nothing but the cells it grows from and into: nothing else can reach its floors or meet the top of its stair
+            if (nb[i].every((j) => j === sl.cell.parent || kids[i].includes(j))) {
+              const fl = factsOf(p.s).floors;
+              if (fl.some((x) => x.areaFt2 >= PLATE_FT2 && !(m & bit(x.zone)))) continue;
+              if (!kids[i].length && fl.some((x) => x.hiFt - x.loFt >= CLIMB_FT && m & bit(x.zone) && !p.info.crossings.some((c) => c.zb === x.zone && c.yb >= x.hiFt - TOP_FT))) continue;
+            }
+            put(p.s, m, vp);
+          }
+        }
+      }
+      // a value that leads to nothing in one of its cells' children goes
+      const keep: Set<string>[] = slots.map(() => new Set());
+      for (let i = n - 1; i >= 0; i--)
+        for (const v of vals[i].values()) {
+          const sup = supported.get(v);
+          if (kids[i].every((k) => (sup?.get(k) ?? []).some((w) => keep[k].has(w.s.id + "#" + w.mask)))) keep[i].add(v.s.id + "#" + v.mask);
+        }
+      if (slots.some((_, i) => !keep[i].size)) return null;
+      const settled = alive !== null && keep.every((k, i) => k.size === alive![i].size);
+      alive = keep;
+      if (settled) {
+        for (let i = 0; i < n; i++) for (const key of [...vals[i].keys()]) if (!keep[i].has(key)) vals[i].delete(key);
+        return vals;
+      }
+    }
+    return null;
+}
+
 /** The search for one plan. Yields now and then so the caller can show progress or stop. */
-function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: number, entry: number, known: Map<number, number[]>, limit: number, preset: (LState | null)[], rng: () => number, tol: number, minScore: number, blocked: Blocked, attemptNo: number): Generator<GenProgress, Attempt, void> {
+function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: number, entry: number, known: Map<number, number[]>, limit: number, preset: (LState | null)[], rng: () => number, tol: number, minScore: number, blocked: Blocked, attemptNo: number, capMult: number): Generator<GenProgress, Attempt, void> {
   const n = slots.length;
   const { priorities: pr, rules } = ctx;
   const states: (LState | null)[] = preset.slice();
@@ -189,8 +307,7 @@ function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: nu
   const capTier = pr.varied >= 90 ? 1 : pr.varied >= 70 ? 2 : pr.varied >= 45 ? 3 : pr.varied >= 20 ? 4 : Infinity;
   const needCopies = Math.ceil(n / Math.max(1, bankTiles));
   const rulesCap = rules.counts.maxCopies > 0 ? rules.counts.maxCopies : Infinity;
-  const copyCap = Math.min(rulesCap, Math.max(capTier, needCopies));
-  const brightW = (pr.bright / 100) * 2;
+  const copyCap = Math.min(rulesCap, Math.max(capTier, needCopies) * capMult);
   const programW = (pr.program / 100) * 1.5;
   // which cells touch which (plan neighbours), by index
   const nb: number[][] = slots.map(() => []);
@@ -200,7 +317,6 @@ function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: nu
   }
   const offset = (a: Slot, b: Slot): [number, number, number] => [b.at[0] - a.at[0], b.at[1] - a.at[1], b.at[2] - a.at[2]];
   const stackedPair = (a: Slot, b: Slot) => a.cell.x === b.cell.x && a.cell.y === b.cell.y;
-  const topFree = slots.map((s) => !slots.some((o) => o !== s && o.cell.x === s.cell.x && o.cell.y === s.cell.y && o.cell.z > s.cell.z));
   const sideFree = slots.map((s) => {
     const free: [boolean, boolean, boolean, boolean] = [true, true, true, true];
     slots.forEach((o) => {
@@ -215,12 +331,6 @@ function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: nu
     });
     return free;
   });
-  const brightOf = (i: number, s: LState): number => {
-    const f = factsOf(s).openFt2;
-    const free = sideFree[i];
-    return Math.min(1, ((free[0] ? f["x+"] : 0) + (free[1] ? f["x-"] : 0) + (free[2] ? f["y+"] : 0) + (free[3] ? f["y-"] : 0)) / 400) + (topFree[i] ? Math.min(0.6, f["z+"] / 250) : 0);
-  };
-
   // the floors, as a graph over the cells placed so far, and the rules that need it
   const entranceIdx = entry >= 0 ? entry : slots.findIndex((s) => s.cell.parent < 0 && !s.fixed);
   const pairOf = (i: number, j: number): PairInfo => pairInfo(states[i]!, states[j]!, offset(slots[i], slots[j]), tol);
@@ -335,6 +445,10 @@ function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: nu
   slots.forEach((sl, k) => {
     if (sl.cell.parent >= 0 && !sl.fixed) children[sl.cell.parent].push(k);
   });
+  const reach = planReach(lat, slots, preset, known, tol, minScore);
+  if (!reach) return { slots, states: preset.slice(), depth: firstFree, ok: false, impossible: true };
+  const allowed: Set<string>[] = reach.map((m) => new Set([...m.values()].map((v) => v.s.id)));
+
   let nodes = 0;
   let deepest = (() => {
     let k = 0;
@@ -353,6 +467,7 @@ function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: nu
     const parentState = parent >= 0 ? states[parent] : null;
     const options: { s: LState; info: PairInfo | null }[] = parentState ? partnersOf(parentState, offset(slots[parent], slot), lat.states, lat.sig, tol) : lat.states.filter(isEntrance).map((x) => ({ s: x, info: null }));
     for (const { s, info } of options) {
+      if (!allowed[i].has(s.id)) continue;
       if (counts.total >= (rules.counts.total.max || Infinity)) {
         blocked.add("the total piece limit");
         break;
@@ -368,7 +483,6 @@ function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: nu
         v += (1.5 * info.score) / 100 + programW * ruleValue(level);
       } else if (categoryOf(s.tile) === "lobby") v += 2;
       v += variedW * (copies === 0 ? 1 : -Math.min(copies, 3) * 0.4);
-      v += brightW * brightOf(i, s);
       const pcat = rules.counts.perCategory[categoryOf(s.tile)];
       if (pcat && pcat.min > 0 && (counts.cats.get(categoryOf(s.tile)) ?? 0) < pcat.min) v += 1.5;
       const ptile = rules.counts.perTile[s.tile.id];
@@ -457,10 +571,10 @@ function* searchPlan(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: nu
  * A big plan is built in stages: the first stretch is searched and kept, the next is searched beside it, and so on, stepping back a stage when one cannot be built (the
  * floors of a kept piece are still checked once everything beside it is there). Searching the whole plan at once grows too hard for many pieces.
  */
-function* stagedSearch(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: number, entry: number, known: Map<number, number[]>, rng: () => number, tol: number, minScore: number, blocked: Blocked, attemptNo: number): Generator<GenProgress, Attempt, void> {
+function* stagedSearch(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: number, entry: number, known: Map<number, number[]>, rng: () => number, tol: number, minScore: number, blocked: Blocked, attemptNo: number, capMult: number): Generator<GenProgress, Attempt, void> {
   const n = slots.length;
   let preset: (LState | null)[] = slots.map((q) => q.fixed ?? null);
-  if (n - firstFree <= STAGE_AT) return yield* searchPlan(ctx, lat, slots, firstFree, entry, known, n, preset, rng, tol, minScore, blocked, attemptNo);
+  if (n - firstFree <= STAGE_AT) return yield* searchPlan(ctx, lat, slots, firstFree, entry, known, n, preset, rng, tol, minScore, blocked, attemptNo, capMult);
   let committed = firstFree;
   let best: Attempt | null = null;
   let spent = 0;
@@ -469,13 +583,15 @@ function* stagedSearch(ctx: GenContext, lat: Lattice, slots: Slot[], firstFree: 
     let done: Attempt | null = null;
     for (let t = 0; t < 4 && !done; t++) {
       spent++;
-      const a = yield* searchPlan(ctx, lat, slots, firstFree, entry, known, limit, preset, rng, tol, minScore, blocked, attemptNo);
+      const a = yield* searchPlan(ctx, lat, slots, firstFree, entry, known, limit, preset, rng, tol, minScore, blocked, attemptNo, capMult);
       if (a.ok) done = a;
       else if (!best || a.depth > best.depth) best = a;
     }
     if (done) {
-      preset = done.states.slice();
-      committed = limit;
+      // the last few cells of a stage are searched again with the next stage: a tile that fitted the end of this one may leave nothing that can continue
+      const keep = limit >= n ? n : Math.max(committed + 1, limit - STAGE_OVERLAP);
+      preset = done.states.map((s, i) => (i < keep || slots[i].fixed ? s : null));
+      committed = keep;
     } else {
       if (committed <= firstFree) break;
       const back = Math.max(firstFree, committed - STAGE);
@@ -678,6 +794,7 @@ export function* generateSteps(ctx: GenContext, base: ArrangementDoc, opts: GenO
   // bar for the joint. A plan that only ran out of effort is tried again with another seed. The rules about floors are never eased.
   let level = 0;
   let triesAtLevel = 0;
+  let capStep = 0;
   for (attempts = 0; attempts < MAX_ATTEMPTS && level < LADDER.length; attempts++) {
     const rng = mulberry32(settings.seed * 7919 + attempts * 104729 + 1);
     const [eased, barScale] = LADDER[level];
@@ -687,7 +804,8 @@ export function* generateSteps(ctx: GenContext, base: ArrangementDoc, opts: GenO
     let firstFree = 0;
     let entryIdx = -1;
     if (fresh) {
-      const input = planInput(settings, { ...ctx.priorities, tall: ctx.priorities.tall * eased }, settings.direction, rng, target);
+      const fits = (cells: Cell[]) => !!planReach(lat, slotsFor(cells, origin, lat), [], new Map(), tol, minScore);
+      const input = planInput(settings, { ...ctx.priorities, tall: ctx.priorities.tall * eased }, settings.direction, rng, target, fits);
       slots = slotsFor(planShape(input), origin, lat);
     } else {
       // grow from what is there: new cells go beside the kept ones
@@ -703,7 +821,7 @@ export function* generateSteps(ctx: GenContext, base: ArrangementDoc, opts: GenO
       triesAtLevel = 0;
       continue;
     }
-    const attempt = yield* stagedSearch(ctx, lat, slots, firstFree, entryIdx, knownZones, rng, tol, minScore, blocked, attempts);
+    const attempt = yield* stagedSearch(ctx, lat, slots, firstFree, entryIdx, knownZones, rng, tol, minScore, blocked, attempts, CAP_MULT[capStep]);
     if (!bestPartial || attempt.depth > bestPartial.depth) bestPartial = attempt;
     if (attempt.ok) {
       bestPartial = attempt;
@@ -714,9 +832,17 @@ export function* generateSteps(ctx: GenContext, base: ArrangementDoc, opts: GenO
       bestPartial = { ...attempt, ok: false, depth: attempt.depth - 1 };
     }
     triesAtLevel++;
-    if ((fresh && attempt.impossible) || triesAtLevel >= (fresh ? TRIES_PER_LEVEL : GROW_TRIES)) {
-      level++;
+    // a plan that has some chance in it (a mass, a free form, wings) is tried with other seeds before it is given up on; one that is always the same is not
+    const chancy = settings.shape === "compact" || settings.shape === "free" || settings.shape === "village" || settings.shape === "bridge" || !!settings.branching;
+    const tries = fresh ? (chancy ? CHANCE_TRIES : TRIES_PER_LEVEL) : GROW_TRIES;
+    if ((fresh && attempt.impossible && !chancy) || triesAtLevel >= tries) {
       triesAtLevel = 0;
+      // the height asked for comes first: a tower is a chain of the few tiles that climb, so before it is made lower, the same tile may be used more often
+      if (capStep < CAP_MULT.length - 1) capStep++;
+      else {
+        level++;
+        capStep = 0;
+      }
     }
   }
 
@@ -770,7 +896,7 @@ function finish(ctx: GenContext, base: ArrangementDoc, att: Attempt, attempts: n
   const avg = js.length ? js.reduce((a, j) => a + (j.score ?? 0), 0) / js.length : 0;
   const climbing = layout.boxes.filter((b) => factsOf(stateFor(b.tile, b.piece.rotZ, b.piece.mirrorX)).climbFt >= CLIMB_FT).length;
   const report: GenReport = {
-    asked: { pieces: ctx.settings.amount, shape: ctx.settings.shape, tall: ctx.priorities.tall, compact: ctx.priorities.compact, bright: ctx.priorities.bright, varied: ctx.priorities.varied, branching: !!ctx.settings.branching },
+    asked: { pieces: ctx.settings.amount, shape: ctx.settings.shape, tall: ctx.priorities.tall, compact: ctx.priorities.compact, varied: ctx.priorities.varied, branching: !!ctx.settings.branching },
     got: { pieces: pieces.length, levels: metrics.levels, heightFt: toFt(hi[2] - lo[2]), widthFt: toFt(hi[0] - lo[0]), depthFt: toFt(hi[1] - lo[1]), stackedPairs: metrics.stackedPairs, distinctTiles: tilesUsed.size, climbingTiles: climbing, routeSteps: layout.walk.size },
     attempts,
   };

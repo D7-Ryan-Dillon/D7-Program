@@ -27,7 +27,7 @@ Outside the app: the Part 1 text-to-image diagrams, the Versur run logs, and the
 ## The tests the brief asks for, in the app
 
 - **Arrange tab, Interlock test**: choose a tile, pattern (repeat, mirror, shift) and count (2, 4, 8); the result is valid when the copies are attached, collision-free, and every one reachable on foot. `npm run check:tiles` runs all fifteen at all counts and writes the table and pictures to `engine/tiles/v7/assemblies/`.
-- **Arrange tab, Generate**: ten shapes (tower, terraced, courtyard, bridge, village ...) with branching wings and five sliders; every result has floors that meet floors, no dead-end stair and no stranded floor plate (`npm run check:generate`). The optional **Build connectors automatically** toggle covers floors a step too far apart (a ramp or stair of ordinary foam is built into the lower room and checked by the same walking rules).
+- **Arrange tab, Generate**: eight shapes (tower, terraced, courtyard, bridge, village ...) with branching wings and four sliders; every result has floors that meet floors, no dead-end stair and no stranded floor plate (`npm run check:generate`). The optional **Build connectors automatically** toggle covers floors a step too far apart (a ramp or stair of ordinary foam is built into the lower room and checked by the same walking rules).
 - **Analysis tab**: the twelve descriptors, each with a bar (strength on the app's scale words, a fit line to the typology's target), the at-a-glance strip, the compare view, and the usable-space check.
 - **Boards tab**: all of the sheets above.
 

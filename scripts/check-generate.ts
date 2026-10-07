@@ -88,6 +88,21 @@ const same = build("Compact, Varied 0", make("compact", 1, N, { varied: 0, tall:
 ok(rep.distinct >= same.distinct, `Varied 100 uses ${rep.distinct} different tiles, Varied 0 uses ${same.distinct}`);
 ok(rep.distinct >= N - 1, `Varied 100 should use nearly every piece a different tile: ${rep.distinct} of ${N}`);
 
+console.log("\nthe tall kinds of building really go up (12 pieces, Tall 100)");
+{
+  const g = (x: Read) => x.r.report!.got;
+  const tower = build("Tower", make("spineV", 1, 12, { tall: 100 }));
+  ok(tower.heightFt >= 110, `a Tower of 12 pieces should be 110 ft or more tall, is ${tower.heightFt} ft`);
+  ok(Math.max(g(tower).widthFt, g(tower).depthFt) <= 60, `a Tower should stand on a small footprint, is ${g(tower).widthFt} x ${g(tower).depthFt} ft`);
+  ok(tower.levels >= 10, `a Tower should climb with almost every piece: ${tower.levels} levels`);
+  const compact = build("Compact", make("compact", 1, 12, { tall: 100 }));
+  ok(compact.heightFt >= Math.max(g(compact).widthFt, g(compact).depthFt), `a Compact building at Tall 100 should be taller than it is wide: ${compact.heightFt} ft against ${g(compact).widthFt} x ${g(compact).depthFt} ft`);
+  const village = build("Village", make("village", 1, 12, { tall: 100 }));
+  ok(village.heightFt >= 50, `a Village at Tall 100 should have towers, is ${village.heightFt} ft tall`);
+  const bridge = build("Bridge", make("bridge", 1, 12, { tall: 100 }));
+  ok(bridge.heightFt >= 50, `a Bridge at Tall 100 should have a raised span, is ${bridge.heightFt} ft tall`);
+}
+
 console.log("\n3. BRANCHING wings grow out of the shape");
 const plain = build("Tower, no wings", make("spineV", 2, N + 2, { tall: 95 }, false));
 const wings = build("Tower, with wings", make("spineV", 2, N + 2, { tall: 95 }, true));

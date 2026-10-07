@@ -182,8 +182,7 @@ for (const [hostKey, label] of [["L1", "the ring ramp of L1"], ["G5", "the galle
 if (want(7)) {
   say("\n7. RECEIVING FLOORS: tiles with more than one floor of their own (G2, G3, G4, O2, O4 ...) next to a host whose ramp arrives at their upper floor: the share of the guest's floor area a person can reach");
   const zonesOf = (t: ParsedTile) => getWalk(getOcc(getOriented(t, 0, false))).zones.filter((z) => z.significant);
-  // G2's upper floor stands at 11 ft, one foot off the 12 ft datum the other tiles' upper floors share, so no neighbour's floor meets it: it is listed in docs/TILE_SET_V7.md as a limit, not checked here
-  const RECEIVERS = ["G3", "O4"];
+  const RECEIVERS = ["G2", "G3", "O4"];
   const multi = list.filter((t) => zonesOf(t).length >= 2);
   for (const guest of multi) {
     // alone, a person who comes in at the ground reaches the main floor only: its share of all the floor of the tile

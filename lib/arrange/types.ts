@@ -113,7 +113,7 @@ export const defaultRules = (): ProgramRules => ({
     [pairKey("lobby", "lobby")]: { side: "avoid", stacked: "allowed" },
   },
   tilePairs: [],
-  counts: { total: { min: 0, max: 0 }, perCategory: {}, perTile: {}, maxCopies: 3 },
+  counts: { total: { min: 0, max: 0 }, perCategory: {}, perTile: {}, maxCopies: 0 },
   limits: { maxHeightFt: 0, maxFootprintFt: 0, maxOverhangFt: 0 },
   levelTolerance: "riser",
   rampRiseFt: 4,
@@ -141,32 +141,30 @@ export interface Priorities {
   /** 0 a loose, branching spread; 100 a tight mass with many shared walls */
   compact: number;
   /** how many spaces open to the outside and to the sky */
-  bright: number;
   /** 0 repeat a few tiles; 100 every tile different */
   varied: number;
   /** how strongly the adjacency rules of the Program pull (preferred beside preferred) */
   program: number;
 }
 
-export const defaultPriorities = (): Priorities => ({ tall: 50, compact: 60, bright: 50, varied: 60, program: 50 });
+export const defaultPriorities = (): Priorities => ({ tall: 50, compact: 60, varied: 60, program: 50 });
 
 /** Sliders saved by older versions had other names; read what is there and fill the rest with defaults. */
 export const normalizePriorities = (p: Partial<Priorities> & { vertical?: number; compactness?: number; variety?: number; daylight?: number } | undefined | null): Priorities => {
   const d = defaultPriorities();
   if (!p) return d;
   const pick = (v: unknown, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : fallback);
-  return { tall: pick(p.tall ?? p.vertical, d.tall), compact: pick(p.compact ?? p.compactness, d.compact), bright: pick(p.bright ?? p.daylight, d.bright), varied: pick(p.varied ?? p.variety, d.varied), program: pick(p.program, d.program) };
+  return { tall: pick(p.tall ?? p.vertical, d.tall), compact: pick(p.compact ?? p.compactness, d.compact), varied: pick(p.varied ?? p.variety, d.varied), program: pick(p.program, d.program) };
 };
 
 export const PRIORITY_LABELS: { key: keyof Priorities; label: string; hint: string }[] = [
   { key: "tall", label: "Tall", hint: "how many levels it climbs, in 10 ft steps" },
   { key: "compact", label: "Compact", hint: "a tight mass with many shared walls, or a loose spread" },
-  { key: "bright", label: "Bright", hint: "more spaces open to the outside and the sky" },
   { key: "varied", label: "Varied", hint: "many different tiles, or a few repeated" },
   { key: "program", label: "Program fit", hint: "follow the adjacency rules (preferred beside preferred)" },
 ];
 
-export type ShapeKind = "compact" | "spineV" | "spineH" | "courtyard" | "stepped" | "cascade" | "slab" | "village" | "bridge" | "free";
+export type ShapeKind = "compact" | "spineV" | "spineH" | "courtyard" | "stepped" | "village" | "bridge" | "free";
 
 export const SHAPES: { key: ShapeKind; label: string; hint: string }[] = [
   { key: "compact", label: "Compact", hint: "a tight mass of pieces sharing walls, stepping up and down in 10 ft" },
@@ -174,8 +172,6 @@ export const SHAPES: { key: ShapeKind; label: string; hint: string }[] = [
   { key: "spineH", label: "Long bar", hint: "a long bar of pieces along one direction" },
   { key: "courtyard", label: "Courtyard", hint: "a ring of pieces round an open middle" },
   { key: "stepped", label: "Terraced", hint: "terraces rising along a direction, a few pieces to each level" },
-  { key: "cascade", label: "Cascade", hint: "a slope climbing a level with every piece" },
-  { key: "slab", label: "Wide", hint: "a wide low block, two or three levels" },
   { key: "village", label: "Village", hint: "several small towers standing on a shared base" },
   { key: "bridge", label: "Bridge", hint: "two towers and a raised span between them" },
   { key: "free", label: "Free-form", hint: "no overall shape, just good joints" },
@@ -185,7 +181,7 @@ export interface GenSettings {
   amount: number;
   seed: number;
   shape: ShapeKind;
-  /** 0 +X, 1 +Y, 2 -X, 3 -Y: the direction stepped, cascade and the horizontal spine run in. */
+  /** 0 +X, 1 +Y, 2 -X, 3 -Y: the direction terraced and the long bar run in. */
   direction: number;
   /** The lowest joint score accepted on the joint that carries a route. */
   minScore: number;
@@ -194,6 +190,9 @@ export interface GenSettings {
   /** true: after the shape's core is built, the remaining pieces branch out as wings. Default off: the shape stays uniform. */
   branching?: boolean;
 }
+
+/** A kind of building saved by an earlier version that no longer exists reads as the nearest one that does (Cascade as Terraced, Wide as a Long bar). */
+export const normalizeShape = (s: string | undefined): ShapeKind => (s === "cascade" ? "stepped" : s === "slab" ? "spineH" : SHAPES.some((k) => k.key === s) ? (s as ShapeKind) : "compact");
 
 export const defaultGen = (): GenSettings => ({ amount: 8, seed: 1, shape: "compact", direction: 0, minScore: 40, branching: false });
 
