@@ -14,7 +14,7 @@ import type { ParsedTile } from "@/lib/types";
 import { createTileRenderer, createTileRig, renderTileToDataUrl, type TileRenderOptions, type TileRig } from "@/lib/renderTile";
 import { traceModuleOutline, traceSquareOnly, DIVIDER_X, TOP_EDGE_FRACTION, type TagGeometry } from "./frameShape";
 import { squareGridLayout, squareGridCells, fixedGridLayout, type GridCell } from "./grid";
-import { fitText, wrapToWidth } from "./textFit";
+import { fitParagraphs, fitText, wrapParagraphs, wrapToWidth } from "./textFit";
 import { planCatalogue } from "./catalogue";
 import { resolveTag, tileLabelText } from "./tileLabel";
 import { CATALOGUE_COLUMNS, DPI, type BoardConfig, type BoardDrawing, type BoardSlot, type BoardTextBox } from "./types";
@@ -234,9 +234,9 @@ function drawCaptionBox(ctx: CanvasRenderingContext2D, rect: { x: number; y: num
   if (config.captionFontSizePt) {
     fontSize = ptToPx(config.captionFontSizePt, dpi);
     ctx.font = `${fontSize}px "${config.fontFamily}"`;
-    lines = wrapToWidth(ctx, text, maxWidth);
+    lines = wrapParagraphs(ctx, text, maxWidth);
   } else {
-    const fit = fitText(ctx, text, maxWidth, maxHeight, { maxFontSize: Math.min(rect.width, rect.height) * 0.08, minFontSize: 8, maxLines: 40, fontFamily: config.fontFamily });
+    const fit = fitParagraphs(ctx, text, maxWidth, maxHeight, { maxFontSize: Math.min(rect.width, rect.height) * 0.08, minFontSize: 8, fontFamily: config.fontFamily });
     fontSize = fit.fontSize;
     lines = fit.lines;
   }
