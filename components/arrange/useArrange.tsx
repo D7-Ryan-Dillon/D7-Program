@@ -935,15 +935,19 @@ export function ArrangeProvider({ children }: { children: ReactNode }) {
   const openArrangement = useCallback(
     (id: string) => {
       const entry = ui.saved.find((s) => s.id === id);
-      if (!entry) return;
+      if (!entry || id === ui.currentId) return;
       saveBeforeNew();
+      // the one you left is not shown, nor its reading: the viewport says it is reading the building until the new one has been read
+      setSettling(true);
+      setWhole({ status: "idle", tile: null, summary: null, evidence: [], smooth: null, comp: null, cells: 0 });
+      setMeshes(null);
       setUi((prev) => ({ ...prev, current: entry.doc, currentId: entry.id, currentName: entry.name, gen: entry.gen ?? prev.gen, priorities: normalizePriorities(entry.priorities ?? prev.priorities), rules: entry.rules ?? prev.rules, site: entry.site ?? prev.site, smooth: entry.smooth ?? prev.smooth }));
       hist.reset(entry.doc);
       setSelState(new Set());
       setBaselineDoc(null);
       refit();
     },
-    [ui.saved, saveBeforeNew, setUi, hist, refit],
+    [ui.saved, ui.currentId, saveBeforeNew, setUi, hist, refit],
   );
   const deleteArrangement = useCallback(
     (id: string) => {
