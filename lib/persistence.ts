@@ -12,6 +12,7 @@ const DOWNLOAD_TIMEOUT_MS = 120_000;
 const ATTEMPTS = 3;
 
 type Assets = {
+  /** the model; a path ending in .gz holds gzipped bytes (older saves hold the raw .glb) */
   glb: string;
   parts?: string;
   /** the tile's data other than the meshes and the voxels (spaces, structure, sections...), gzipped JSON */
@@ -205,17 +206,29 @@ async function storeTile(code: string, tile: ParsedTile): Promise<StoredTile> {
   if (sameAssets && prev) {
     assets = { ...prev.stored.assets };
   } else {
-    const glbPath = `${dir}/model.glb`;
+    const zip = canGzip();
+    const glbPath = `${dir}/model.glb${zip ? ".gz" : ""}`;
     const jobs: Promise<void>[] = [];
-    jobs.push(fetchBytes(tile.glbUrl, "reading the model").then((b) => upload(glbPath, b, "model/gltf-binary", "uploading the model")));
+    /** a model file, gzipped when the browser can (the meshes shrink to about 40%) */
+    const model = async (url: string, path: string, what: string) => {
+      const raw = new Uint8Array(await fetchBytes(url, `reading ${what}`));
+      let body: Uint8Array = raw;
+      if (zip) {
+        try {
+          body = await gzip(raw);
+        } catch (err) {
+          throw new StepError(`compressing ${what}`, err);
+        }
+      }
+      await upload(path, body, zip ? "application/gzip" : "model/gltf-binary", `uploading ${what} (${(body.length / 1048576).toFixed(1)} MB)`);
+    };
+    jobs.push(model(tile.glbUrl, glbPath, "the model"));
     let partsPath: string | undefined;
     if (tile.partsUrl) {
-      partsPath = `${dir}/parts.glb`;
-      const url = tile.partsUrl;
-      jobs.push(fetchBytes(url, "reading the model parts").then((b) => upload(partsPath!, b, "model/gltf-binary", "uploading the model parts")));
+      partsPath = `${dir}/parts.glb${zip ? ".gz" : ""}`;
+      jobs.push(model(tile.partsUrl, partsPath, "the model parts"));
     }
     const voxelPaths: Partial<Record<keyof TileVoxels, string>> = {};
-    const zip = canGzip();
     for (const key of VOXEL_KEYS) {
       const bytes = tile.voxels[key];
       if (!bytes) continue;
@@ -381,8 +394,8 @@ async function hydrateTile(code: string, stored: StoredTile): Promise<ParsedTile
       }),
     ),
   ]);
-  const glbUrl = URL.createObjectURL(new Blob([glbBytes as BlobPart], { type: "model/gltf-binary" }));
-  const partsUrl = partsBytes ? URL.createObjectURL(new Blob([partsBytes as BlobPart], { type: "model/gltf-binary" })) : undefined;
+  const glbUrl = URL.createObjectURL(new Blob([(assets.glb.endsWith(".gz") ? await gunzip(glbBytes) : glbBytes) as BlobPart], { type: "model/gltf-binary" }));
+  const partsUrl = partsBytes ? URL.createObjectURL(new Blob([(assets.parts?.endsWith(".gz") ? await gunzip(partsBytes) : partsBytes) as BlobPart], { type: "model/gltf-binary" })) : undefined;
   const voxels: TileVoxels = {};
   for (const e of voxelEntries) if (e) voxels[e[0]] = e[1];
 

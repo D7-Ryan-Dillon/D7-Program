@@ -54,7 +54,8 @@ async function migrate(code, backupDir) {
     const a = rec.assets;
     const dir = a.glb.slice(0, a.glb.lastIndexOf("/"));
     const newVox = Object.values(a.voxels).every((p) => p.endsWith(".gz"));
-    if (a.meta && newVox) {
+    const newModel = a.glb.endsWith(".gz") && (!a.parts || a.parts.endsWith(".gz"));
+    if (a.meta && newVox && newModel) {
       next.push(rec);
       continue;
     }
@@ -77,14 +78,25 @@ async function migrate(code, backupDir) {
       voxels[key] = gz;
       oldFiles.push(path);
     }
+    // the meshes: gzipped too (they shrink to about 40%)
+    const model = async (path) => {
+      if (!path || path.endsWith(".gz")) return path;
+      const dl = await B.download(path);
+      if (dl.error || !dl.data) throw new Error(`download ${path}: ${dl.error?.message}`);
+      await put(`${path}.gz`, gzipSync(new Uint8Array(await dl.data.arrayBuffer())), "application/gzip");
+      oldFiles.push(path);
+      return `${path}.gz`;
+    };
+    const glb = await model(a.glb);
+    const parts = await model(a.parts);
     let meta = a.meta;
     if (!meta) {
-      // eslint-disable-next-line no-unused-vars
-      const { assets, ...fields } = rec;
+      const fields = { ...rec };
+      delete fields.assets;
       meta = `${dir}/meta.json.gz`;
       await put(meta, gzipSync(Buffer.from(JSON.stringify(fields))), "application/gzip");
     }
-    next.push({ id: rec.id, name: rec.name, assets: { glb: a.glb, parts: a.parts, meta, voxels } });
+    next.push({ id: rec.id, name: rec.name, assets: { glb, parts, meta, voxels } });
     converted++;
     process.stdout.write(`  ${code}: ${rec.name} converted\n`);
   }

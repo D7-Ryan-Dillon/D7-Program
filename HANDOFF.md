@@ -398,7 +398,7 @@ Provisioned 2026-09-30. Supabase project ref `rpzmpuyhudvdhxuehqit`.
   read/write it), matching the "shared by code, not accounts" design.
 - **Storage**: one bucket, `tile-assets` (private, RLS-gated the same way)
   -- holds each tile's `.glb` model and voxel `.u8` arrays, since those
-  can't go in JSONB. Paths are `{projectCode}/{tileId}/model.glb` and
+  can't go in JSONB. Paths are `{projectCode}/{tileId}/model.glb.gz` (older saves: raw `model.glb`, both are read) and
   `{projectCode}/{tileId}/voxels/{name}.bin.gz` (gzipped; older saves hold raw `.bin`, both are read) and `{projectCode}/{tileId}/meta.json.gz` (everything else about the tile).
 - **Client wiring**: `lib/supabase/client.ts` (browser, publishable key) and
   `lib/supabase/server.ts` (server-only, secret key -- **intentionally not
