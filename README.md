@@ -151,6 +151,15 @@ is remembered per project, and Board settings has Expand all / Collapse all.
 Everything auto-saves (once Supabase is configured below) under your
 project code, with a save-status indicator in the header.
 
+## Running it as a desktop app
+
+`launcher/D7-Program.bat` starts the local server and opens the app in its own window (Edge app mode). `launcher/create-desktop-shortcut.ps1` puts a "D7 Program" shortcut on the desktop (put an `icon.ico` in `launcher/` and run it again to change the icon). It asks which version, and starts 1 by itself after 6 seconds:
+
+1. **Latest work** -- this folder, live (port 3002), including changes that are not committed or pushed.
+2. **Stable** -- its own copy of GitHub master in `%USERPROFILE%D7-Program-App` (port 3003). Every start it runs `git pull`, and reinstalls and rebuilds only when something new came in.
+
+Both read `.env.local` from this folder.
+
 ## Running it
 
 ```bash
