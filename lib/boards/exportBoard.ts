@@ -252,6 +252,25 @@ function drawPageCaption(ctx: CanvasRenderingContext2D, geo: PageGeometry, confi
   if (box.enabled && geo.captionRect) drawCaptionBox(ctx, geo.captionRect, config, dpi, box);
 }
 
+/** Where the boards' footer goes on a page of any size: the font, the rule, the text row and where the content above it must end. (The footer's own switch is not read: whoever asks for it draws it.) */
+export function footerLayout(config: BoardConfig, widthPx: number, heightPx: number, margin: number, dpi: number) {
+  const fontSizePx = config.footerFontSizePt ? ptToPx(config.footerFontSizePt, dpi) : heightPx * 0.016;
+  const gapAboveLine = fontSizePx * 0.9;
+  const gapBelowLine = fontSizePx * 0.9;
+  const bottomPad = fontSizePx * 0.5;
+  const total = gapAboveLine + gapBelowLine + fontSizePx + bottomPad;
+  const gridBottom = heightPx - margin - total;
+  const lineY = gridBottom + gapAboveLine;
+  return { fontSizePx, lineY, textCenterY: lineY + gapBelowLine + fontSizePx / 2, gridBottom, total, widthPx, margin };
+}
+
+/** Draws the boards' footer (the rule, the logo and the left and right text of the Boards tab's footer settings) on a page of any size. Returns the y the content above must end at. */
+export async function drawBoardFooter(ctx: CanvasRenderingContext2D, config: BoardConfig, widthPx: number, heightPx: number, margin: number, dpi: number): Promise<number> {
+  const l = footerLayout(config, widthPx, heightPx, margin, dpi);
+  await drawFooter(ctx, config, { widthPx, heightPx, margin, footer: { fontSizePx: l.fontSizePx, lineY: l.lineY, textCenterY: l.textCenterY } } as PageGeometry);
+  return l.gridBottom;
+}
+
 /** The credit line along the bottom: a rule spanning the full content
  * width, the school logo + left text flush left, the right text flush
  * right -- one color for all of it. The line's length is just however

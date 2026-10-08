@@ -4,10 +4,12 @@
 
 import { buildDrawing, planSpecs, type Drawing, type DrawingSpec } from "@/lib/drawing/build";
 import { drawToCanvas, drawingSize, drawingStyle, type Ground, type DrawingStyle } from "@/lib/drawing/render";
-import { drawBlock } from "@/lib/textBlock";
+import { drawBlock, drawShortened } from "@/lib/textBlock";
 import { shortName } from "@/lib/scoring/compare";
 import { STATUS_LABEL, type MatrixKey } from "@/lib/scoring/matrix";
 import { barOf, type BarSpec } from "@/lib/scoring/bars";
+import { drawBoardFooter, footerLayout } from "@/lib/boards/exportBoard";
+import type { BoardConfig } from "@/lib/boards/types";
 import { typologyKey } from "@/lib/scoring/compareSet";
 import type { MatrixResult, TileEvaluation } from "@/lib/scoring/matrixEval";
 import type { ParsedTile } from "@/lib/types";
@@ -201,6 +203,8 @@ export interface TableOptions {
   fontScale: number;
   transparent: boolean;
   format: "png" | "jpeg";
+  /** the footer of the Boards tab along the bottom (its text, logo and colour) */
+  boardsFooter: boolean;
   /** a font for all the text (empty: the default mix of a sans face for names and readings and a monospaced one for numbers) */
   font: string;
 }
@@ -220,6 +224,7 @@ export const defaultTableOptions = (): TableOptions => ({
   transparent: false,
   format: "png",
   font: "",
+  boardsFooter: false,
 });
 
 const segBar = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, bar: BarSpec, style: DrawingStyle) => {
@@ -261,7 +266,7 @@ const toBlobAs = (canvas: HTMLCanvasElement, format: "png" | "jpeg") =>
  * The results table as an image you edit: which tiles and descriptors, what each cell holds (a bar, the measured result, its status, the reading, how it was measured), tiles down
  * the side or across the top, any size and resolution, with a title, grid lines and a transparent or coloured background. The text is fitted to its cell and scaled by `fontScale`.
  */
-export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground: Ground | DrawingStyle, o: TableOptions): Promise<Blob> {
+export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground: Ground | DrawingStyle, o: TableOptions, boards?: BoardConfig): Promise<Blob> {
   const style = styleOf(ground);
   const sans = o.font ? `"${o.font}", sans-serif` : SANS;
   // a chosen font (the Boards font by default) may have no superscripts: ft² and ft³ are written out
@@ -284,17 +289,22 @@ export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground:
   const fs = Math.max(0.5, Math.min(2, o.fontScale));
   const m = 0.4 * px;
   let top = m;
+  // the Boards tab's footer along the bottom: the table ends above it
+  const bottomY = o.boardsFooter && boards ? footerLayout(boards, W, H, m, px).gridBottom : H - m;
   if (o.showTitle && o.title.trim()) {
     const h = drawBlock(ctx, o.title.toUpperCase(), m, top, W - 2 * m, 0.7 * px, { max: 0.42 * px * fs, min: 0.12 * px, maxLines: 1, weight: "600", family: sans, color: style.accent });
     top += h + 0.2 * px;
   }
   const rowsN = o.tilesAcross ? keys.length : rows.length;
   const colsN = o.tilesAcross ? rows.length : keys.length;
-  if (!rowsN || !colsN) return toBlobAs(canvas, o.format);
+  if (!rowsN || !colsN) {
+    if (o.boardsFooter && boards) await drawBoardFooter(ctx, boards, W, H, m, px);
+    return toBlobAs(canvas, o.format);
+  }
   const labelW = Math.min(2.4 * px, (W - 2 * m) * 0.16);
-  const headH = Math.min(0.9 * px, (H - top - m) * 0.14);
+  const headH = Math.min(0.9 * px, (bottomY - top) * 0.14);
   const cellW = (W - 2 * m - labelW) / colsN;
-  const cellH = (H - top - m - headH) / rowsN;
+  const cellH = (bottomY - top - headH) / rowsN;
   const pad = Math.min(cellW, cellH) * 0.05 + 2;
 
   // the headings: descriptor names (or tile names), and the other axis down the side
@@ -352,10 +362,10 @@ export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground:
         yy += bh + Math.max(3, bh * 0.5);
       }
       const parts: { weight: number; draw: (yt: number, ht: number) => void }[] = [];
-      if (c.result) parts.push({ weight: 3, draw: (yt, ht) => drawBlock(ctx, clean(res.measure.headline), x, yt, w, ht, { max: 0.17 * px * fs, min: 0.07 * px, maxLines: 4, weight: "600", family: mono, color: style.text }) });
+      if (c.result) parts.push({ weight: 3, draw: (yt, ht) => drawShortened(ctx, clean(res.measure.headline), x, yt, w, ht, { comfort: 0.075 * px * fs, max: 0.105 * px * fs, min: 0.05 * px, maxLines: 4, weight: "600", family: mono, color: style.text }) });
       if (c.status) parts.push({ weight: 1, draw: (yt, ht) => drawBlock(ctx, STATUS_LABEL[res.measure.status].toUpperCase(), x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 1, family: mono, color: res.measure.status === "measured" ? style.accent : style.muted }) });
-      if (c.reading) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, clean(row.reading(res)), x, yt, w, ht, { max: 0.14 * px * fs, min: 0.06 * px, maxLines: 12, family: sans, color: style.muted }) });
-      if (c.method) parts.push({ weight: 4, draw: (yt, ht) => drawBlock(ctx, clean(res.measure.method || ""), x, yt, w, ht, { max: 0.12 * px * fs, min: 0.06 * px, maxLines: 12, family: sans, color: style.muted }) });
+      if (c.reading) parts.push({ weight: 4, draw: (yt, ht) => drawShortened(ctx, clean(row.reading(res)), x, yt, w, ht, { comfort: 0.07 * px * fs, max: 0.095 * px * fs, min: 0.05 * px, maxLines: 12, family: sans, color: style.muted }) });
+      if (c.method) parts.push({ weight: 4, draw: (yt, ht) => drawShortened(ctx, clean(res.measure.method || ""), x, yt, w, ht, { comfort: 0.07 * px * fs, max: 0.095 * px * fs, min: 0.05 * px, maxLines: 12, family: sans, color: style.muted }) });
       const left = Math.max(4, y + h - yy);
       const total = parts.reduce((a, p) => a + p.weight, 0) || 1;
       let yt = yy;
@@ -366,5 +376,6 @@ export async function resultsBoard(rows: ResultRow[], keys: MatrixKey[], ground:
       }
     });
   });
+  if (o.boardsFooter && boards) await drawBoardFooter(ctx, boards, W, H, m, px);
   return toBlobAs(canvas, o.format);
 }

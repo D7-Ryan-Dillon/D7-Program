@@ -11,7 +11,10 @@ import { defaultPalette } from "@/lib/boardPalette";
 import { MATRIX } from "@/lib/scoring/matrix";
 import { downloadBlob } from "@/lib/boards/exportBoard";
 import { AXO_VIEWS } from "@/lib/faceViews";
-import { INFO_ITEMS, defaultTilePage, drawTilePage, exportTilePage, type TilePageInput, type TilePageSettings } from "@/lib/boards/tilePage";
+import { INFO_ITEMS, createTilePageAnimation, defaultTilePage, drawTilePage, exportTilePage, type TilePageInput, type TilePageSettings } from "@/lib/boards/tilePage";
+import { encodeGif } from "@/lib/boards/gifExport";
+import { encodeMp4, mp4Supported } from "@/lib/boards/mp4Export";
+import { formatMb } from "./AnimatedExportPanel";
 import type { BoardConfig } from "@/lib/boards/types";
 import { useEvaluation } from "@/lib/useEvaluation";
 import { FontField } from "./FontField";
@@ -27,6 +30,9 @@ export function TilePageDialog({ open, onOpenChange, config, dpiFromBoard }: { o
   const [st, setSt] = useProjectUi<TilePageSettings>("tilePage", defaultTilePage);
   const [busy, setBusy] = useState(false);
   const [drawing, setDrawing] = useState(false);
+  const [spin, setSpin] = useState<{ kind: "gif" | "mp4"; label: string; done: number; total: number } | null>(null);
+  const [mp4Ok] = useState(mp4Supported);
+  const abortRef = useRef<AbortController | null>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const seq = useRef(0);
 
@@ -45,6 +51,7 @@ export function TilePageDialog({ open, onOpenChange, config, dpiFromBoard }: { o
           fontFamily: config.fontFamily,
           look: { foamColor: config.foamColor, voidColor: config.voidColor, foamOpacity: config.foamOpacity, voidOpacity: config.voidOpacity },
           dpi,
+          boardConfig: config,
         }
       : null;
 
@@ -85,6 +92,34 @@ export function TilePageDialog({ open, onOpenChange, config, dpiFromBoard }: { o
       toast.error(err instanceof Error ? err.message : "Couldn't draw the page.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const spinExport = async (kind: "gif" | "mp4") => {
+    const inp = input(st.dpi || dpiFromBoard);
+    if (!inp || !tile) return;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const frames = Math.max(2, Math.round(st.anim.seconds * st.anim.fps));
+    setSpin({ kind, label: "loading the tile", done: 0, total: 1 });
+    try {
+      const source = await createTilePageAnimation(inp, st.anim.widthPx, frames, undefined, ctrl.signal);
+      try {
+        const settings = { ...config.animation, fps: st.anim.fps, spinSeconds: st.anim.seconds, widthPx: st.anim.widthPx };
+        let blob: Blob;
+        if (kind === "gif") blob = (await encodeGif(source, settings, (phase, done, total) => setSpin({ kind, label: phase === "palette" ? "choosing colours" : "encoding frames", done, total }), ctrl.signal)).blob;
+        else blob = await encodeMp4(source, st.anim.fps, (done, total) => setSpin({ kind, label: "encoding video", done, total }), ctrl.signal);
+        downloadBlob(`${(st.title || tile.name).replace(/[^\w-]+/g, "_")}_spin.${kind}`, blob);
+        toast.success(`Made the ${kind.toUpperCase()} (${formatMb(blob.size)}, ${source.width} × ${source.height}, ${frames} frames)`);
+      } finally {
+        source.dispose();
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") toast.message("Export cancelled");
+      else toast.error(err instanceof Error ? err.message : "Couldn't make the animation.");
+    } finally {
+      abortRef.current = null;
+      setSpin(null);
     }
   };
 
@@ -195,6 +230,12 @@ export function TilePageDialog({ open, onOpenChange, config, dpiFromBoard }: { o
               </div>
 
               <div className="space-y-1.5">
+                <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Lines of text</div>
+                <input value={st.caption} onChange={(e) => patch({ caption: e.target.value })} placeholder="A line under the tile (optional)" className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-[11px] text-foreground outline-none focus-visible:border-ring" aria-label="Line under the tile" />
+                {check("The footer from the Boards tab", st.boardsFooter, (v) => patch({ boardsFooter: v }), "the rule, logo and text set under Board settings → Footer")}
+              </div>
+
+              <div className="space-y-1.5">
                 <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Under the text: what to show</div>
                 {INFO_ITEMS.map((it) => check(it.label, !!st.info[it.key], (v) => setInfo(it.key, v), it.hint))}
                 <div className="flex items-center justify-between pt-1">
@@ -215,6 +256,7 @@ export function TilePageDialog({ open, onOpenChange, config, dpiFromBoard }: { o
                 <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1">
                   {check("a bar", st.show.bar, (v) => patch({ show: { ...st.show, bar: v } }), "the bar and its word")}
                   {check("the measured result", st.show.result, (v) => patch({ show: { ...st.show, result: v } }), "the value with its unit and status")}
+                  {check("fit to its type", st.show.fit, (v) => patch({ show: { ...st.show, fit: v } }), "how close the measurement is to what the tile's type prefers")}
                   {check("the reading", st.show.reading, (v) => patch({ show: { ...st.show, reading: v } }), "the generated reading (yours where you wrote one)")}
                 </div>
                 <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] text-muted-foreground">
@@ -226,6 +268,50 @@ export function TilePageDialog({ open, onOpenChange, config, dpiFromBoard }: { o
                   </label>
                 </div>
                 <p className="text-[10px] text-muted-foreground">The info shrinks to fit the space under the text box. Colours, font and background follow the board settings.</p>
+              </div>
+
+              <div className="space-y-1.5 border-t border-border pt-3">
+                <div className="font-mono text-[10px] uppercase tracking-label text-muted-foreground">Spinning export (GIF / MP4)</div>
+                <p className="text-[10px] text-muted-foreground">The tile turns one full 360° about its vertical axis from the view chosen above, and the page stays still. It loops. Needs a 3D view.</p>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <label className="flex items-center gap-1.5">
+                    Spin
+                    <input type="number" min={2} max={30} step={0.5} value={st.anim.seconds} onChange={(e) => patch({ anim: { ...st.anim, seconds: Math.max(2, Math.min(30, Number(e.target.value) || st.anim.seconds)) } })} className={numField} aria-label="Seconds per turn" />
+                    s
+                  </label>
+                  <Segmented value={String(st.anim.fps)} options={[{ value: "10", label: "10 fps" }, { value: "20", label: "20 fps" }, { value: "30", label: "30 fps" }]} onChange={(v) => patch({ anim: { ...st.anim, fps: Number(v) } })} />
+                  <label className="flex items-center gap-1.5">
+                    Width
+                    <input type="number" min={300} max={4000} step={100} value={st.anim.widthPx} onChange={(e) => patch({ anim: { ...st.anim, widthPx: Math.max(300, Math.min(4000, Number(e.target.value) || st.anim.widthPx)) } })} className={numField} aria-label="Animation width in pixels" />
+                    px
+                  </label>
+                </div>
+                <p className="font-mono text-[10px] text-muted-foreground">{st.anim.widthPx} × {Math.round((st.anim.widthPx * st.heightIn) / st.widthIn)} px · {Math.max(2, Math.round(st.anim.seconds * st.anim.fps))} frames</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" disabled={!!spin || !ev.ready || st.view === "plan" || st.view === "section"} onClick={() => void spinExport("gif")}>
+                    {spin?.kind === "gif" ? "Exporting…" : "Export GIF"}
+                  </Button>
+                  {mp4Ok && (
+                    <Button size="sm" variant="outline" disabled={!!spin || !ev.ready || st.view === "plan" || st.view === "section"} onClick={() => void spinExport("mp4")}>
+                      {spin?.kind === "mp4" ? "Exporting…" : "Export MP4"}
+                    </Button>
+                  )}
+                  {spin && (
+                    <Button size="sm" variant="ghost" onClick={() => abortRef.current?.abort()}>
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+                {spin && (
+                  <div className="space-y-1">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+                      <div className="h-full bg-gradient-to-r from-magenta to-orange transition-[width]" style={{ width: `${(spin.done / Math.max(spin.total, 1)) * 100}%` }} />
+                    </div>
+                    <p className="font-mono text-[10px] text-muted-foreground">{spin.label} {spin.done}/{spin.total} — keep this tab open</p>
+                  </div>
+                )}
+                {st.view === "plan" || st.view === "section" ? <p className="text-[10px] text-orange">Choose a 3D view above to export a spin.</p> : null}
+                {!mp4Ok && <p className="text-[10px] text-muted-foreground">MP4 export needs a recent Chrome, Edge or Safari.</p>}
               </div>
 
               <Button className="w-full" disabled={busy || !ev.ready} onClick={() => void exportPng()}>
