@@ -399,13 +399,13 @@ Provisioned 2026-09-30. Supabase project ref `rpzmpuyhudvdhxuehqit`.
 - **Storage**: one bucket, `tile-assets` (private, RLS-gated the same way)
   -- holds each tile's `.glb` model and voxel `.u8` arrays, since those
   can't go in JSONB. Paths are `{projectCode}/{tileId}/model.glb` and
-  `{projectCode}/{tileId}/voxels/{name}.bin`.
+  `{projectCode}/{tileId}/voxels/{name}.bin.gz` (gzipped; older saves hold raw `.bin`, both are read) and `{projectCode}/{tileId}/meta.json.gz` (everything else about the tile).
 - **Client wiring**: `lib/supabase/client.ts` (browser, publishable key) and
   `lib/supabase/server.ts` (server-only, secret key -- **intentionally not
   used by anything yet**; all persistence currently happens client-side
   through RLS. Don't delete it as "unused" -- it's there for whenever a real
   API route needs privileged access).
-- **Save/load**: `lib/persistence.ts` (`saveProject` / `loadProject`), wired
+- **Save/load** (reworked 2026-10-08): the project row only lists each tile as `{ id, name, assets }` (a few hundred bytes; the full tile data used to sit in the row and ran into the database's statement timeout once arrangement tiles were in the project). `saveProject` stores two tiles at a time, retries each file, never lets one failed tile stop the rest (the row keeps that tile's last good version; the report names tile, file and reason), and the store retries by itself every 20 s. `scripts/projects.mjs` lists / empties projects, `scripts/migrate-storage.mjs <backup-dir> <codes>` converts old saves. Details below. `lib/persistence.ts` (`saveProject` / `loadProject`), wired
   into `lib/project-store.tsx` -- entering a project code loads it, editing
   the tile bank (or the Sections builder's saved cubes) auto-saves
   (debounced 1.2s). The row's `state` is `{ tiles, cubes }`; `cubes` is the

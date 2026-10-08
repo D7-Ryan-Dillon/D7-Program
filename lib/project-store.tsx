@@ -2,7 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ParsedTile } from "@/lib/types";
-import { loadProject, saveProject, saveUi } from "@/lib/persistence";
+import { toast } from "sonner";
+import { loadProject, saveProject, saveUi, type SaveReport, type TileFailure } from "@/lib/persistence";
 import type { SavedCube } from "@/lib/sections/savedCubes";
 import { mergeDefaults } from "@/lib/mergeDefaults";
 
@@ -69,6 +70,20 @@ type ProjectState = {
 
 const ProjectContext = createContext<ProjectState | null>(null);
 const AUTOSAVE_DELAY_MS = 1200;
+/** after a failed save the project tries again on its own after this long */
+const RETRY_AFTER_MS = 20_000;
+
+/** The failures in plain lines: which tile, what was being done, why it failed. */
+function failureText(list: TileFailure[]): string {
+  return list.map((f) => `${f.tileName}: ${f.step} failed -- ${f.message}`).join("\n");
+}
+function reportText(r: SaveReport): string {
+  const parts: string[] = [];
+  if (r.rowError) parts.push(`The project list could not be written -- ${r.rowError}`);
+  if (r.failures.length) parts.push(`${r.failures.length} tile${r.failures.length === 1 ? "" : "s"} could not be saved (the rest were; this retries by itself):
+${failureText(r.failures)}`);
+  return parts.join("\n");
+}
 
 export function ProjectProvider({ children }: { children: ReactNode }) {
   const [projectCode, setProjectCode] = useState<string | null>(null);
@@ -84,11 +99,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   // Guards against re-saving the tiles we just loaded for a code, and against
   // a slow load for an old code clobbering a newer one the user has since entered.
   const readyForCode = useRef<string | null>(null);
+  /** tiles deleted since the last good save: their files are cleared once the project no longer lists them */
+  const removedIds = useRef<string[]>([]);
 
   const enterProject = useCallback((rawCode: string) => {
     const code = rawCode.trim().toLowerCase();
     if (!code) return;
     readyForCode.current = null;
+    removedIds.current = [];
     setProjectCode(code);
     setTiles([]);
     setCubes([]);
@@ -104,6 +122,16 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
           setTiles(loaded.tiles);
           setCubes(loaded.cubes);
           setUiState(loaded.ui);
+          if (loaded.failures.length) {
+            // the project opens with the tiles that came; the others stay saved as they were
+            const text = failureText(loaded.failures);
+            toast.error(`${loaded.failures.length} tile${loaded.failures.length === 1 ? "" : "s"} could not be loaded`, { description: text, duration: 20000 });
+            setSaveStatus("error");
+            setSaveError(`Could not load:
+${text}
+(they are still saved in the project)`);
+            return;
+          }
         }
         setSaveStatus("idle");
         setSaveError(null);
@@ -130,12 +158,14 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Tiles (big, rarely changed) and settings (small, changed on every click) are saved separately.
+  const [retryTick, setRetryTick] = useState(0);
   const uiRef = useRef(ui);
   useEffect(() => {
     uiRef.current = ui;
   }, [ui]);
   const saved = useRef({ tiles: 0, ui: 0 });
   const finishSave = (what: "tiles" | "ui", ok: boolean, err?: unknown) => {
+    if (ok && what === "tiles") setSaveError(null);
     if (ok) {
       saved.current[what] = 0;
       if (!saved.current.tiles && !saved.current.ui) setSaveStatus("saved");
@@ -150,13 +180,30 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     if (!projectCode || readyForCode.current !== projectCode) return;
     setSaveStatus("saving");
     saved.current.tiles = 1;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
-      saveProject(projectCode, tiles, cubes, uiRef.current)
-        .then(() => finishSave("tiles", true))
-        .catch((err) => finishSave("tiles", false, err));
+      const removed = removedIds.current;
+      saveProject(projectCode, tiles, cubes, uiRef.current, removed)
+        .then((report) => {
+          if (!report.rowError) removedIds.current = removedIds.current.filter((id) => !removed.includes(id));
+          if (report.rowError || report.failures.length) {
+            const text = reportText(report);
+            console.error("[project-store] save problems:\n" + text);
+            toast.error("Some of the project could not be saved", { description: text, duration: 20000, id: "save-problems" });
+            finishSave("tiles", false, new Error(text));
+            retry = setTimeout(() => setRetryTick((n) => n + 1), RETRY_AFTER_MS);
+          } else finishSave("tiles", true);
+        })
+        .catch((err) => {
+          finishSave("tiles", false, err);
+          retry = setTimeout(() => setRetryTick((n) => n + 1), RETRY_AFTER_MS);
+        });
     }, AUTOSAVE_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [tiles, cubes, projectCode]);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(retry);
+    };
+  }, [tiles, cubes, projectCode, retryTick]);
   useEffect(() => {
     if (!projectCode || readyForCode.current !== projectCode) return;
     setSaveStatus("saving");
@@ -178,6 +225,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const removeTile = useCallback((id: string) => {
+    removedIds.current = [...removedIds.current, id];
     setTiles((prev) => prev.filter((t) => t.id !== id));
     setActiveTileId((current) => (current === id ? null : current));
     setPinnedTileIds((prev) => prev.filter((pinnedId) => pinnedId !== id));
